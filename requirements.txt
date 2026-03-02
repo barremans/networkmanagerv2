@@ -1,0 +1,12 @@
+# requirements.txt
+#
+# Beschrijving: Python dependencies
+# Applicatie: networkmanager
+# Versie: 1.0.0
+# Auteur: Barremans
+
+# Core dependencies
+# Voeg hier je packages toe
+
+# Core dependencies
+PySide6

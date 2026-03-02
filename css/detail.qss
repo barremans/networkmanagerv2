@@ -1,0 +1,32 @@
+/*
+css\detail.qss
+
+Beschrijving: Detail window stylesheet
+Applicatie: networkmanager
+Versie: 1.0.0
+Auteur: Barremans
+*/
+
+/* detail.qss - Detail window styling */
+
+DetailWindow, DetailWindow QWidget {
+    background-color: #ffffff;
+    font-family: "Segoe UI", Verdana, Arial, sans-serif;
+    font-size: 11px;
+}
+
+QTabWidget {
+    background-color: #ffffff;
+    border: 1px solid #cccccc;
+}
+
+QTabBar::tab {
+    background: #f0f0f0;
+    border: 1px solid #cccccc;
+    padding: 6px 12px;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff;
+    font-weight: bold;
+}

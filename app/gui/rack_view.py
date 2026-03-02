@@ -1,0 +1,371 @@
+# =============================================================================
+# Networkmap_Creator
+# File:    app/gui/rack_view.py
+# Role:    Pure visuele rack weergave widget
+# Version: 1.3.0
+# Author:  Barremans
+# =============================================================================
+
+from PySide6.QtWidgets import (
+    QWidget, QFrame, QLabel, QScrollArea,
+    QVBoxLayout, QHBoxLayout, QSizePolicy, QMenu
+)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCursor, QAction, QMouseEvent
+
+from app.helpers.i18n import t
+
+_UNIT_H        = 30
+_UNIT_NUM_W    = 32
+_PORT_SIZE     = 14
+_PORT_GAP      = 2
+_MAX_PORTS_ROW = 12
+
+# Vaste actie-sleutels — nooit tekst vergelijken, altijd sleutel
+_ACT_EDIT   = "edit"
+_ACT_DELETE = "delete"
+
+
+def _refresh_style(widget: QWidget):
+    """Forceert QSS herlaad — betrouwbaar op Windows."""
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
+class RackView(QWidget):
+    port_clicked              = Signal(str, str, str)   # port_id, device_id, side
+    port_selected_for_connect = Signal(str)             # port_id
+    device_context_menu       = Signal(str, str)        # device_id, actie ("edit"|"delete")
+    port_context_menu         = Signal(str, object)     # port_id, global QPoint
+
+    def __init__(self, rack, room, site, data, parent=None):
+        super().__init__(parent)
+        self._rack          = rack
+        self._room          = room
+        self._site          = site
+        self._data          = data
+        self._connect_mode  = False
+        self._selected_port = None
+        self._port_widgets  = {}
+        self._build()
+
+    def _build(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        title_bar = QFrame()
+        title_bar.setObjectName("rack_frame")
+        tl = QHBoxLayout(title_bar)
+        tl.setContentsMargins(8, 4, 8, 4)
+        title_lbl = QLabel(
+            f"{self._rack['name']}  —  {self._room['name']}  —  {self._site['name']}"
+        )
+        title_lbl.setObjectName("rack_title")
+        units_lbl = QLabel(f"{self._rack['total_units']}U")
+        units_lbl.setObjectName("secondary")
+        units_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tl.addWidget(title_lbl)
+        tl.addStretch()
+        tl.addWidget(units_lbl)
+        outer.addWidget(title_bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        body = QWidget()
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(0)
+
+        total_u = self._rack.get("total_units", 12)
+        slot_map = {s["u_start"]: s for s in self._rack.get("slots", [])}
+        dev_map  = {d["id"]: d for d in self._data.get("devices", [])}
+
+        port_map = {}
+        for p in self._data.get("ports", []):
+            port_map.setdefault(p["device_id"], []).append(p)
+
+        connected_ports = set()
+        for conn in self._data.get("connections", []):
+            if conn["from_type"] == "port":
+                connected_ports.add(conn["from_id"])
+            if conn["to_type"] == "port":
+                connected_ports.add(conn["to_id"])
+
+        u = 1
+        while u <= total_u:
+            if u in slot_map:
+                slot   = slot_map[u]
+                device = dev_map.get(slot["device_id"])
+                height = slot.get("height", 1)
+                if device:
+                    bl.addWidget(self._build_device_row(
+                        u, device, height,
+                        port_map.get(device["id"], []),
+                        connected_ports
+                    ))
+                    u += height
+                    continue
+            bl.addWidget(self._build_empty_row(u))
+            u += 1
+
+        bl.addStretch()
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+
+    # ------------------------------------------------------------------
+    # Rijen bouwen
+    # ------------------------------------------------------------------
+
+    def _build_empty_row(self, u_num):
+        row = QFrame()
+        row.setObjectName("rack_unit_empty")
+        row.setFixedHeight(_UNIT_H)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        num_lbl = QLabel(str(u_num))
+        num_lbl.setObjectName("unit_number")
+        num_lbl.setFixedWidth(_UNIT_NUM_W)
+        num_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(num_lbl)
+        spacer = QLabel("")
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(spacer)
+        return row
+
+    def _build_device_row(self, u_num, device, height, ports, connected_ports):
+        dev_type    = device.get("type", "unknown")
+        heeft_front = device.get("front_ports", 0) > 0
+        heeft_back  = device.get("back_ports",  0) > 0
+
+        row = _DeviceRow(device["id"], self)
+        row.setObjectName(f"device-{dev_type}")
+        row.setFixedHeight(_UNIT_H * height)
+        row.device_right_clicked.connect(self._show_device_context_menu)
+
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+
+        num_lbl = QLabel(str(u_num))
+        num_lbl.setObjectName("unit_number")
+        num_lbl.setFixedWidth(_UNIT_NUM_W)
+        num_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(num_lbl)
+
+        front_ports = [p for p in ports if p["side"] == "front"]
+        back_ports  = [p for p in ports if p["side"] == "back"]
+
+        if heeft_front:
+            layout.addWidget(self._build_port_block(
+                front_ports, "front", device["front_ports"], connected_ports))
+
+        lw = QWidget()
+        ll = QVBoxLayout(lw)
+        ll.setContentsMargins(4, 0, 4, 0)
+        ll.setSpacing(0)
+        ll.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        name_lbl = QLabel(device.get("name", ""))
+        name_lbl.setObjectName("device-label")
+        name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        type_lbl = QLabel(t(f"device_{dev_type}"))
+        type_lbl.setObjectName("device-sublabel")
+        type_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ll.addWidget(name_lbl)
+        ll.addWidget(type_lbl)
+        layout.addWidget(lw, stretch=1)
+
+        if heeft_back:
+            layout.addWidget(self._build_port_block(
+                back_ports, "back", device["back_ports"], connected_ports))
+
+        return row
+
+    # ------------------------------------------------------------------
+    # Context menu device — via sleutel, nooit via tekst
+    # ------------------------------------------------------------------
+
+    def _show_device_context_menu(self, device_id: str, global_pos):
+        """Toon context menu voor device — emitteert vaste sleutel, geen UI-tekst."""
+        menu = QMenu()
+        act_edit   = menu.addAction(t("ctx_edit_device"))
+        act_delete = menu.addAction(t("ctx_delete_device"))
+        chosen = menu.exec(global_pos)
+        if chosen == act_edit:
+            self.device_context_menu.emit(device_id, _ACT_EDIT)
+        elif chosen == act_delete:
+            self.device_context_menu.emit(device_id, _ACT_DELETE)
+
+    # ------------------------------------------------------------------
+    # Poort blok
+    # ------------------------------------------------------------------
+
+    def _build_port_block(self, ports, side, total, connected_ports):
+        container = QWidget()
+        container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        grid = QVBoxLayout(container)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(_PORT_GAP)
+        grid.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        port_by_num  = {p["number"]: p for p in ports}
+        port_numbers = list(range(1, total + 1))
+        rows = [port_numbers[i:i + _MAX_PORTS_ROW]
+                for i in range(0, len(port_numbers), _MAX_PORTS_ROW)]
+
+        for row_nums in rows:
+            row_w = QWidget()
+            row_l = QHBoxLayout(row_w)
+            row_l.setContentsMargins(0, 0, 0, 0)
+            row_l.setSpacing(_PORT_GAP)
+
+            for num in row_nums:
+                port    = port_by_num.get(num)
+                port_id = port["id"] if port else None
+                obj_name = (
+                    "port-connected" if port_id and port_id in connected_ports
+                    else f"port-{side}"
+                )
+                btn = QFrame()
+                btn.setObjectName(obj_name)
+                btn.setFixedSize(_PORT_SIZE, _PORT_SIZE)
+                btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+                if port_id:
+                    self._port_widgets[port_id] = btn
+                    port_name = port.get("name", f"Port {num}")
+                    btn.setToolTip(
+                        f"{port_name}  ({t('label_' + side)})  "
+                        f"{'🔗' if port_id in connected_ports else '○'}"
+                    )
+                    self._attach_port_click(btn, port_id,
+                                            port.get("device_id", ""), side)
+                row_l.addWidget(btn)
+
+            row_l.addStretch()
+            grid.addWidget(row_w)
+
+        return container
+
+    # ------------------------------------------------------------------
+    # Poort klik handlers
+    # ------------------------------------------------------------------
+
+    def _attach_port_click(self, widget, port_id, device_id, side):
+        def on_click(event: QMouseEvent, pid=port_id, did=device_id, s=side):
+            if event.button() == Qt.MouseButton.RightButton:
+                # Rechtermuisklik op poort → context menu signal
+                self.port_context_menu.emit(pid, widget.mapToGlobal(event.pos()))
+                event.accept()
+                return
+            if self._connect_mode:
+                self._handle_connect_click(pid, widget)
+            else:
+                self._handle_normal_click(pid, did, s, widget)
+        widget.mousePressEvent = on_click
+
+    def _handle_normal_click(self, port_id, device_id, side, widget):
+        if self._selected_port and self._selected_port in self._port_widgets:
+            self._restore_port_style(
+                self._selected_port,
+                self._port_widgets[self._selected_port]
+            )
+        self._selected_port = port_id
+        widget.setObjectName("port-selected")
+        _refresh_style(widget)
+        self.port_clicked.emit(port_id, device_id, side)
+
+    def _handle_connect_click(self, port_id, widget):
+        if self._selected_port is None:
+            self._selected_port = port_id
+            widget.setObjectName("port-selected")
+            _refresh_style(widget)
+            self.port_selected_for_connect.emit(port_id)
+        else:
+            self._selected_port = None
+            self.port_selected_for_connect.emit(port_id)
+
+    def _restore_port_style(self, port_id, widget):
+        for p in self._data.get("ports", []):
+            if p["id"] == port_id:
+                connected = any(
+                    c for c in self._data.get("connections", [])
+                    if (c["from_type"] == "port" and c["from_id"] == port_id) or
+                       (c["to_type"]   == "port" and c["to_id"]   == port_id)
+                )
+                obj = "port-connected" if connected else f"port-{p['side']}"
+                widget.setObjectName(obj)
+                _refresh_style(widget)
+                return
+
+    # ------------------------------------------------------------------
+    # Publieke methodes
+    # ------------------------------------------------------------------
+
+    def set_connect_mode(self, active):
+        self._connect_mode  = active
+        self._selected_port = None
+        for pid, w in self._port_widgets.items():
+            self._restore_port_style(pid, w)
+        if active:
+            for pid, w in self._port_widgets.items():
+                if w.objectName() != "port-selected":
+                    w.setObjectName("port-connect-mode")
+                    _refresh_style(w)
+
+    def refresh(self, data):
+        self._data = data
+        layout = self.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._port_widgets.clear()
+        self._selected_port = None
+        self._build()
+
+    def highlight_trace(self, port_ids: list):
+        for pid, widget in self._port_widgets.items():
+            if pid in port_ids:
+                widget.setObjectName("port-trace")
+                _refresh_style(widget)
+            elif pid != self._selected_port:
+                self._restore_port_style(pid, widget)
+
+    def clear_trace_highlight(self):
+        for pid, widget in self._port_widgets.items():
+            if widget.objectName() == "port-trace":
+                self._restore_port_style(pid, widget)
+
+
+# ---------------------------------------------------------------------------
+# _DeviceRow — QFrame subclass die rechtermuisklik correct afhandelt
+# ook als child-widgets (poorten, labels) de klik ontvangen
+# ---------------------------------------------------------------------------
+
+class _DeviceRow(QFrame):
+    """
+    Device rij widget met eigen mousePressEvent override.
+    Rechtermuisklik op elk onderdeel van de rij (inclusief child-widgets
+    zoals port-blokken en labels) wordt hier correct opgevangen en
+    doorgegeven als signal.
+    """
+    device_right_clicked = Signal(str, object)  # device_id, global QPoint
+
+    def __init__(self, device_id: str, parent=None):
+        super().__init__(parent)
+        self._device_id = device_id
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.RightButton:
+            self.device_right_clicked.emit(
+                self._device_id,
+                self.mapToGlobal(event.pos())
+            )
+            event.accept()
+            return
+        super().mousePressEvent(event)

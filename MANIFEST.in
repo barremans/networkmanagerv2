@@ -1,0 +1,17 @@
+# MANIFEST.in
+# Beschrijving: Package manifest
+# Applicatie: networkmanager
+# Versie: 1.0.0
+# Auteur: Barremans
+
+include README.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+recursive-include config *.json
+recursive-include assets *.png *.ico *.jpg
+recursive-include css *.css *.qss
+recursive-include docs *.md
+recursive-include i18n/locales *.json
+global-exclude __pycache__
+global-exclude *.py[cod]

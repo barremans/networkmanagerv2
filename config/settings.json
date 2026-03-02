@@ -1,0 +1,7 @@
+{
+    "app": {
+        "name": "Application",
+        "debug_mode": false,
+        "default_locale": "en_US"
+    }
+}

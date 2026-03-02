@@ -1,0 +1,617 @@
+/* =============================================================================
+   Networkmap_Creator
+   File:    css/main.qss
+   Role:    Volledige QSS styling — alle kleuren, device types, kabelkleuren
+   Version: 1.0.3
+   Author:  Barremans
+   ============================================================================= */
+
+
+/* ============================================================
+   HOOFDVENSTER & FRAMES
+   ============================================================ */
+
+QMainWindow {
+    background-color: #1E1E2E;
+}
+
+QWidget {
+    background-color: #1E1E2E;
+    color: #E0E0F0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 9pt;
+}
+
+QFrame#left_frame {
+    background-color: #252535;
+    border-right: 1px solid #3A3A4E;
+}
+
+QFrame#mid_frame {
+    background-color: #1E1E2E;
+}
+
+QFrame#detail_frame {
+    background-color: #252535;
+    border-top: 1px solid #3A3A4E;
+    min-height: 90px;
+    max-height: 160px;
+}
+
+QFrame#toolbar_frame {
+    background-color: #1A1A2A;
+    border-bottom: 1px solid #3A3A4E;
+}
+
+
+/* ============================================================
+   SCROLL
+   ============================================================ */
+
+QScrollArea {
+    background-color: #1E1E2E;
+    border: none;
+}
+
+QScrollArea > QWidget > QWidget {
+    background-color: #1E1E2E;
+}
+
+QScrollBar:vertical {
+    background-color: #252535;
+    width: 10px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #4A4A6A;
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #6A6A8A;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    background-color: #252535;
+    height: 10px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #4A4A6A;
+    border-radius: 4px;
+    min-width: 20px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #6A6A8A;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+
+
+/* ============================================================
+   LABELS
+   ============================================================ */
+
+QLabel {
+    color: #E0E0F0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 9pt;
+    background-color: transparent;
+}
+
+QLabel#secondary {
+    color: #9090A0;
+    font-size: 8pt;
+}
+
+QLabel#title {
+    color: #C0C0E0;
+    font-size: 10pt;
+    font-weight: bold;
+}
+
+QLabel#rack_title {
+    color: #C0C0E0;
+    font-size: 10pt;
+    font-weight: bold;
+    padding: 4px 8px;
+}
+
+QLabel#unit_number {
+    color: #606070;
+    font-size: 8pt;
+    background-color: #222232;
+    border-right: 1px solid #3A3A4E;
+    padding: 0px 4px;
+}
+
+QLabel#status_bar {
+    color: #8080A0;
+    font-size: 8pt;
+    padding: 2px 8px;
+}
+
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+
+QPushButton {
+    background-color: #3A5A8A;
+    color: #E0E0F0;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 9pt;
+}
+
+QPushButton:hover {
+    background-color: #4A7ABB;
+}
+
+QPushButton:pressed {
+    background-color: #2A4A7A;
+}
+
+QPushButton:disabled {
+    background-color: #2A2A3E;
+    color: #606070;
+}
+
+QPushButton#btn_danger {
+    background-color: #7B2A2A;
+}
+
+QPushButton#btn_danger:hover {
+    background-color: #A03030;
+}
+
+QPushButton#btn_success {
+    background-color: #2A6B3A;
+}
+
+QPushButton#btn_success:hover {
+    background-color: #3A8A4A;
+}
+
+QPushButton#btn_connect_active {
+    background-color: #7B1E1E;
+    color: #FFD0D0;
+    font-weight: bold;
+}
+
+QPushButton#btn_connect_active:hover {
+    background-color: #A03030;
+}
+
+
+/* ============================================================
+   TREE
+   ============================================================ */
+
+QTreeWidget {
+    background-color: #252535;
+    color: #E0E0F0;
+    border: none;
+    outline: none;
+    font-size: 9pt;
+}
+
+QTreeWidget::item {
+    padding: 3px 4px;
+    border-radius: 3px;
+}
+
+QTreeWidget::item:selected {
+    background-color: #3A5A8A;
+    color: #FFFFFF;
+}
+
+QTreeWidget::item:hover {
+    background-color: #2A3A5A;
+}
+
+QTreeWidget::branch {
+    background-color: #252535;
+}
+
+QHeaderView::section {
+    background-color: #1A1A2A;
+    color: #9090A0;
+    border: none;
+    border-bottom: 1px solid #3A3A4E;
+    padding: 4px;
+    font-size: 8pt;
+}
+
+
+/* ============================================================
+   INPUTS
+   ============================================================ */
+
+QLineEdit {
+    background-color: #2A2A3E;
+    color: #E0E0F0;
+    border: 1px solid #4A4A5E;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 9pt;
+}
+
+QLineEdit:focus {
+    border: 1px solid #4A9EE0;
+    background-color: #2E2E46;
+}
+
+QTextEdit {
+    background-color: #2A2A3E;
+    color: #E0E0F0;
+    border: 1px solid #4A4A5E;
+    border-radius: 4px;
+    padding: 4px;
+    font-size: 9pt;
+}
+
+QComboBox {
+    background-color: #2A2A3E;
+    color: #E0E0F0;
+    border: 1px solid #4A4A5E;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 9pt;
+}
+
+
+/* ============================================================
+   LIST
+   ============================================================ */
+
+QListWidget {
+    background-color: #252535;
+    color: #E0E0F0;
+    border: 1px solid #3A3A4E;
+    border-radius: 4px;
+    outline: none;
+    font-size: 9pt;
+}
+
+QListWidget::item {
+    padding: 5px 8px;
+    border-radius: 3px;
+}
+
+QListWidget::item:selected {
+    background-color: #3A5A8A;
+    color: #FFFFFF;
+}
+
+QListWidget::item:hover {
+    background-color: #2A3A5A;
+}
+
+
+/* ============================================================
+   TOOLTIP
+   ============================================================ */
+
+QToolTip {
+    background-color: #2A2A3E;
+    color: #E0E0F0;
+    border: 1px solid #4A4A5E;
+    border-radius: 3px;
+    padding: 4px 6px;
+    font-size: 8pt;
+}
+
+
+/* ============================================================
+   RACK FRAME & UNITS
+   ============================================================ */
+
+QFrame#rack_frame {
+    background-color: #2A2A3E;
+    border: 1px solid #4A4A5E;
+    border-radius: 4px;
+}
+
+QFrame#rack_unit_empty {
+    background-color: #2E2E42;
+    border-bottom: 1px solid #3A3A50;
+}
+
+QLabel#rack_unit_label_empty {
+    color: #404055;
+    font-size: 8pt;
+    background-color: transparent;
+}
+
+
+/* ============================================================
+   DEVICES — kleur per type via objectName
+   ============================================================ */
+
+QFrame[objectName="device-switch"] {
+    background-color: #1E4D7B;
+    border: 1px solid #2A6AAA;
+    border-radius: 2px;
+}
+
+QFrame[objectName="device-switch"]:hover {
+    background-color: #245D90;
+    border-color: #4A9EE0;
+}
+
+QFrame[objectName="device-patchpanel"] {
+    background-color: #4A4A5A;
+    border: 1px solid #6A6A7A;
+    border-radius: 2px;
+}
+
+QFrame[objectName="device-patchpanel"]:hover {
+    background-color: #5A5A6A;
+    border-color: #9A9AAA;
+}
+
+QFrame[objectName="device-server"] {
+    background-color: #1E6B3A;
+    border: 1px solid #2A8A4A;
+    border-radius: 2px;
+}
+
+QFrame[objectName="device-server"]:hover {
+    background-color: #267A42;
+    border-color: #4ACE70;
+}
+
+QFrame[objectName="device-firewall"] {
+    background-color: #7B1E1E;
+    border: 1px solid #AA2A2A;
+    border-radius: 2px;
+}
+
+QFrame[objectName="device-firewall"]:hover {
+    background-color: #8A2424;
+    border-color: #E04A4A;
+}
+
+QFrame[objectName="device-modem"] {
+    background-color: #7B4A1E;
+    border: 1px solid #AA6A2A;
+    border-radius: 2px;
+}
+
+QFrame[objectName="device-modem"]:hover {
+    background-color: #8A5424;
+    border-color: #E09A4A;
+}
+
+QFrame[objectName="device-ups"] {
+    background-color: #3A3A3A;
+    border: 1px solid #5A5A5A;
+    border-radius: 2px;
+}
+
+QFrame[objectName="device-ups"]:hover {
+    background-color: #444444;
+    border-color: #808080;
+}
+
+QLabel[objectName="device-label"] {
+    color: #E0E0F0;
+    font-size: 8pt;
+    font-weight: bold;
+    background-color: transparent;
+    padding: 0px 4px;
+}
+
+QLabel[objectName="device-sublabel"] {
+    color: #A0A0B0;
+    font-size: 7pt;
+    background-color: transparent;
+    padding: 0px 4px;
+}
+
+
+/* ============================================================
+   POORTEN — FRONT en BACK
+   ============================================================ */
+
+QFrame[objectName="port-front"] {
+    background-color: #2E6E9E;
+    border-radius: 2px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QFrame[objectName="port-front"]:hover {
+    background-color: #4A9EE0;
+}
+
+QFrame[objectName="port-back"] {
+    background-color: #6E4E2E;
+    border-radius: 2px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QFrame[objectName="port-back"]:hover {
+    background-color: #9E7E4E;
+}
+
+QFrame[objectName="port-selected"] {
+    background-color: #4AE0A0;
+    border-radius: 2px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QFrame[objectName="port-connected"] {
+    background-color: #E0A04A;
+    border-radius: 2px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QFrame[objectName="port-connected"]:hover {
+    background-color: #F0C060;
+}
+
+QFrame[objectName="port-connect-mode"] {
+    background-color: #E04A4A;
+    border-radius: 2px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QFrame[objectName="port-connect-mode"]:hover {
+    background-color: #FF6060;
+}
+
+QFrame[objectName="port-trace"] {
+    background-color: #A0E0FF;
+    border-radius: 2px;
+    border: 1px solid #60C0FF;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QFrame[objectName="port-trace"]:hover {
+    background-color: #C0EEFF;
+}
+
+
+/* ============================================================
+   WALL OUTLET & ENDPOINT
+   ============================================================ */
+
+QFrame[objectName="wall-outlet"] {
+    background-color: #5A3A7B;
+    border: 1px solid #7A5AAA;
+    border-radius: 3px;
+}
+
+QFrame[objectName="wall-outlet"]:hover {
+    background-color: #6A4A8A;
+    border-color: #9A7ACC;
+}
+
+QFrame[objectName="wall-outlet-selected"] {
+    background-color: #7A5A9B;
+    border: 1px solid #B090EE;
+    border-radius: 3px;
+}
+
+QFrame[objectName="endpoint"] {
+    background-color: #3A6B6B;
+    border: 1px solid #5A9A9A;
+    border-radius: 3px;
+}
+
+QFrame[objectName="endpoint"]:hover {
+    background-color: #4A7A7A;
+    border-color: #7ACCCC;
+}
+
+QLabel[objectName="outlet-label"] {
+    color: #D0C0F0;
+    font-size: 8pt;
+    font-weight: bold;
+    background-color: transparent;
+}
+
+QLabel[objectName="endpoint-label"] {
+    color: #A0D0D0;
+    font-size: 8pt;
+    background-color: transparent;
+}
+
+
+/* ============================================================
+   KABELKLEUREN — wire_detail_view via objectName
+   ============================================================ */
+
+/* Kabeltype kleuren — Wong 2011 kleurblindvriendelijk palet
+   Onderscheidbaar voor deuteranopia, protanopia en tritanopia.
+   Symbool in trace-pijl biedt extra redundantie naast kleur. */
+QLabel[objectName="cable-utp-cat5e"] { color: #56B4E9; }   /* lichtblauw  ══ */
+QLabel[objectName="cable-utp-cat6"]  { color: #009E73; }   /* groen       ══ */
+QLabel[objectName="cable-utp-cat6a"] { color: #0072B2; }   /* donkerblauw ══ */
+QLabel[objectName="cable-fiber-sm"]  { color: #F0E442; }   /* geel        ── */
+QLabel[objectName="cable-fiber-mm"]  { color: #E69F00; }   /* oranje      ── */
+QLabel[objectName="cable-dak"]       { color: #D55E00; }   /* roodoranje  ~~ */
+QLabel[objectName="cable-other"]     { color: #CC79A7; }   /* roze/lila   .. */
+
+
+/* ============================================================
+   WIRE DETAIL FRAME
+   ============================================================ */
+
+QFrame#detail_frame QLabel#trace_title {
+    color: #E0E0FF;
+    font-size: 10pt;
+    font-weight: bold;
+}
+
+QFrame#detail_frame QLabel#trace_step {
+    color: #B0B0D0;
+    font-size: 9pt;
+    padding: 0px 2px;
+}
+
+QFrame#detail_frame QLabel#trace_arrow {
+    color: #6060A0;
+    font-size: 10pt;
+    padding: 0px 2px;
+}
+
+QFrame#detail_frame QLabel#trace_info {
+    color: #8080A0;
+    font-size: 8pt;
+}
+
+/* ============================================================
+   RACK NAVIGATIE KNOP (E5 — cross-rack trace)
+   ============================================================ */
+
+QPushButton[objectName="btn_rack_nav"] {
+    background-color: #2A3A5A;
+    color: #90B0E0;
+    border: 1px solid #3A5A8A;
+    border-radius: 3px;
+    padding: 1px 8px;
+    font-size: 8pt;
+}
+
+QPushButton[objectName="btn_rack_nav"]:hover {
+    background-color: #3A5A8A;
+    color: #C0D8FF;
+    border-color: #56B4E9;
+}
+
+QPushButton[objectName="btn_rack_nav"]:pressed {
+    background-color: #1A2A4A;
+}
