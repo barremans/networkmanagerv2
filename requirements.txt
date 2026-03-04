@@ -6,7 +6,5 @@
 # Auteur: Barremans
 
 # Core dependencies
-# Voeg hier je packages toe
-
-# Core dependencies
 PySide6
+python-docx

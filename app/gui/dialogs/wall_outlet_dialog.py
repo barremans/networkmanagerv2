@@ -2,8 +2,9 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
+# Changes: 1.3.0 — duplicaat-check: naam uniek per ruimte verplichten
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -22,15 +23,24 @@ class WallOutletDialog(QDialog):
       - Geselecteerd eindapparaat bewerken
       - Geselecteerd eindapparaat verwijderen
     Wijzigingen aan eindapparaten zijn beschikbaar via get_endpoints_result().
+
+    Parameters
+    ----------
+    existing_outlets : list[dict]
+        Alle bestaande wandpunten van dezelfde ruimte — gebruikt voor
+        duplicaat-check op naam. Bij bewerken wordt het huidige wandpunt
+        automatisch uitgesloten via outlet['id'].
     """
 
     def __init__(self, parent=None, outlet: dict = None,
-                 room_id: str = "", endpoints: list = None):
+                 room_id: str = "", endpoints: list = None,
+                 existing_outlets: list = None):          # [1.3.0]
         super().__init__(parent)
-        self._outlet         = outlet or {}
-        self._room_id        = room_id
-        self._endpoints_data = [dict(ep) for ep in (endpoints or [])]
-        self._result         = None
+        self._outlet          = outlet or {}
+        self._room_id         = room_id
+        self._endpoints_data  = [dict(ep) for ep in (endpoints or [])]
+        self._existing_outlets = existing_outlets or []   # [1.3.0]
+        self._result          = None
         self.setWindowTitle(
             t("title_edit_outlet") if self._outlet else t("title_new_outlet")
         )
@@ -125,7 +135,7 @@ class WallOutletDialog(QDialog):
         """Herbouw de eindapparaat-DDL. Behoudt huidige selectie tenzij select_id opgegeven."""
         from app.helpers import settings_storage
         from app.helpers.i18n import get_language
-        lang       = get_language()
+        lang        = get_language()
         ep_type_map = {
             et.get("key", ""): et.get(f"label_{lang}", et.get("label_nl", ""))
             for et in settings_storage.load_endpoint_types()
@@ -213,7 +223,7 @@ class WallOutletDialog(QDialog):
         self._update_ep_buttons()
 
     # ------------------------------------------------------------------
-    # Opslaan
+    # Opslaan — [1.3.0] met duplicaat-check
     # ------------------------------------------------------------------
 
     def _on_save(self):
@@ -221,6 +231,27 @@ class WallOutletDialog(QDialog):
         if not name:
             QMessageBox.warning(self, t("label_wall_outlet"), t("err_field_required"))
             return
+
+        # [1.3.0] Duplicaat-check — naam moet uniek zijn per ruimte
+        current_id = self._outlet.get("id", "")   # leeg bij nieuw aanmaken
+        duplicate = next(
+            (
+                wo for wo in self._existing_outlets
+                if wo.get("name", "").strip().lower() == name.lower()
+                and wo.get("id", "") != current_id   # eigen record uitsluiten bij bewerken
+            ),
+            None
+        )
+        if duplicate:
+            QMessageBox.warning(
+                self,
+                t("label_wall_outlet"),
+                t("err_outlet_duplicate_name").replace("{name}", name),
+            )
+            self._name.setFocus()
+            self._name.selectAll()
+            return
+
         self._result = {
             "id":                   self._outlet.get("id", ""),
             "room_id":              self._room_id or self._outlet.get("room_id", ""),

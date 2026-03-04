@@ -3,12 +3,11 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.4.0
+# Version: 1.5.0
 # Author:  Barremans
 # Changes: F2 — Tabblad "Device types" met CRUD + standaard FRONT/BACK
 #          F3 — Sectie "Databron" in Algemeen tabblad
-#               Checkbox + netwerkpad + test knop
-#               Statuslabel toont actieve bron bij openen
+#          H1d — Standaard exportmap in Weergave tabblad
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -30,7 +29,7 @@ class SettingsWindow(QDialog):
     Instellingen venster met tabbladen:
       - Algemeen      : taal + databron (F3)
       - Backup        : netwerkpad, history, max backups
-      - Weergave      : rack unit hoogte
+      - Weergave      : rack unit hoogte + standaard exportmap (H1d)
       - Eindapparaten : types beheren
       - Device types  : types beheren incl. standaard FRONT/BACK (F2)
     """
@@ -76,7 +75,7 @@ class SettingsWindow(QDialog):
         layout.addLayout(btn_row)
 
     # ------------------------------------------------------------------
-    # Tabblad: Algemeen (taal + databron F3)
+    # Tabblad: Algemeen
     # ------------------------------------------------------------------
 
     def _build_general_tab(self) -> QWidget:
@@ -119,7 +118,6 @@ class SettingsWindow(QDialog):
         path_row.addWidget(self._btn_ds_test)
         form_data.addLayout(path_row)
 
-        # Statuslabel — toont actieve bron
         self._lbl_ds_status = QLabel("")
         self._lbl_ds_status.setObjectName("secondary")
         form_data.addWidget(self._lbl_ds_status)
@@ -191,7 +189,7 @@ class SettingsWindow(QDialog):
         return tab
 
     # ------------------------------------------------------------------
-    # Tabblad: Weergave
+    # Tabblad: Weergave  [H1d — exportmap toegevoegd]
     # ------------------------------------------------------------------
 
     def _build_display_tab(self) -> QWidget:
@@ -199,6 +197,8 @@ class SettingsWindow(QDialog):
         form = QFormLayout(tab)
         form.setSpacing(10)
         form.setContentsMargins(12, 12, 12, 12)
+
+        # Rack unit hoogte
         self._spn_unit_h = QSpinBox()
         self._spn_unit_h.setRange(20, 60)
         self._spn_unit_h.setValue(30)
@@ -207,6 +207,38 @@ class SettingsWindow(QDialog):
         hint = QLabel(t("settings_unit_hint"))
         hint.setObjectName("secondary")
         form.addRow("", hint)
+
+        # Scheidingslijn
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        form.addRow(sep)
+
+        # Standaard exportmap  [H1d]
+        export_row = QHBoxLayout()
+        self._txt_export_folder = QLineEdit()
+        self._txt_export_folder.setPlaceholderText(
+            t("settings_export_folder_placeholder")
+        )
+        self._btn_export_browse = QPushButton("📂")
+        self._btn_export_browse.setFixedWidth(32)
+        self._btn_export_browse.setToolTip(t("btn_browse"))
+        self._btn_export_browse.clicked.connect(self._on_export_folder_browse)
+        self._btn_export_clear = QPushButton("✕")
+        self._btn_export_clear.setFixedWidth(28)
+        self._btn_export_clear.setToolTip(t("settings_export_folder_clear"))
+        self._btn_export_clear.clicked.connect(
+            lambda: self._txt_export_folder.clear()
+        )
+        export_row.addWidget(self._txt_export_folder)
+        export_row.addWidget(self._btn_export_browse)
+        export_row.addWidget(self._btn_export_clear)
+        form.addRow(t("settings_export_folder") + ":", export_row)
+
+        hint_export = QLabel(t("settings_export_folder_hint"))
+        hint_export.setObjectName("secondary")
+        hint_export.setWordWrap(True)
+        form.addRow("", hint_export)
+
         return tab
 
     # ------------------------------------------------------------------
@@ -345,9 +377,10 @@ class SettingsWindow(QDialog):
         self._spn_max.setValue(backup.get("max_backups", 10))
         self._on_backup_toggled(backup.get("enabled", False))
 
-        # Weergave
+        # Weergave + exportmap  [H1d]
         ui = self._settings.get("ui", {})
         self._spn_unit_h.setValue(ui.get("rack_unit_height", 30))
+        self._txt_export_folder.setText(ui.get("export_folder", ""))
 
         # Eindapparaten
         self._refresh_ep_list()
@@ -358,7 +391,6 @@ class SettingsWindow(QDialog):
         self._on_dt_row_changed(-1)
 
     def _update_ds_status_label(self):
-        """F3 — Toont actieve databron in het statuslabel."""
         label, is_net = settings_storage.get_network_data_source_label()
         if is_net:
             self._lbl_ds_status.setText(f"✓  {t('settings_ds_active')}: {label}")
@@ -406,6 +438,18 @@ class SettingsWindow(QDialog):
         self._btn_dt_del.setEnabled(has)
         self._btn_dt_up.setEnabled(has and row > 0)
         self._btn_dt_down.setEnabled(has and row < self._dt_list.count() - 1)
+
+    # ------------------------------------------------------------------
+    # Exportmap browse handler — H1d
+    # ------------------------------------------------------------------
+
+    def _on_export_folder_browse(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, t("settings_export_folder"),
+            self._txt_export_folder.text() or ""
+        )
+        if folder:
+            self._txt_export_folder.setText(folder)
 
     # ------------------------------------------------------------------
     # Databron handlers — F3
@@ -650,9 +694,8 @@ class SettingsWindow(QDialog):
                                 t("err_backup_path_required"))
             return
 
-        # F3 — valideer databron pad als ingeschakeld
-        use_net  = self._chk_use_network.isChecked()
-        ds_path  = self._txt_ds_path.text().strip()
+        use_net = self._chk_use_network.isChecked()
+        ds_path = self._txt_ds_path.text().strip()
         if use_net and not ds_path:
             QMessageBox.warning(self, t("menu_settings"),
                                 t("err_ds_path_required"))
@@ -669,8 +712,8 @@ class SettingsWindow(QDialog):
             "theme":            "dark",
             "rack_unit_height": self._spn_unit_h.value(),
             "rack_unit_width":  400,
+            "export_folder":    self._txt_export_folder.text().strip(),  # [H1d]
         })
-        # F3 — databron opslaan
         settings_storage.save_setting("network_data", {
             "use_network_path": use_net,
             "network_path":     ds_path,
@@ -686,7 +729,7 @@ class SettingsWindow(QDialog):
 
 
 # ---------------------------------------------------------------------------
-# Hulp-dialog: eindapparaat-type aanmaken / bewerken
+# Hulp-dialog: eindapparaat-type
 # ---------------------------------------------------------------------------
 
 class _EndpointTypeDialog(QDialog):
@@ -763,7 +806,7 @@ class _EndpointTypeDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
-# Hulp-dialog: device-type aanmaken / bewerken — F2
+# Hulp-dialog: device-type — F2
 # ---------------------------------------------------------------------------
 
 class _DeviceTypeDialog(QDialog):

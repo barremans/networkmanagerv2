@@ -2,22 +2,30 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.3.0
+# Version: 1.3.1
 # Author:  Barremans
 # Changes: F2 — Device types configureerbaar via settings.json
 #               _DEFAULT_DEVICE_TYPES, load/save/get_device_type_*
 #          F3 — Lokaal vs netwerkdata
 #               get_network_data_path() kiest netwerkpad als bereikbaar
 #               is_network_path_available(), get_network_data_source_label()
+#          B  — PyInstaller compatibel pad via sys.frozen
 # =============================================================================
 
 import json
 import os
+import sys
 import shutil
 from datetime import datetime
 
-# Paden relatief aan de projectroot (één niveau boven app/)
-_BASE_DIR        = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Paden relatief aan de projectroot
+# In dev:        één niveau boven app/helpers/ = projectroot
+# In PyInstaller EXE: map van de EXE (naast _internal/, css/, data/)
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 _DATA_DIR        = os.path.join(_BASE_DIR, "data")
 _SETTINGS_FILE   = os.path.join(_DATA_DIR, "settings.json")
 _NETWORK_FILE    = os.path.join(_DATA_DIR, "network_data.json")
@@ -253,10 +261,6 @@ def get_device_type_defaults(key: str) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 def is_network_path_available(path: str) -> bool:
-    """
-    Controleert of een netwerkpad bereikbaar en beschrijfbaar is.
-    Geeft False terug bij lege string of bij elke OSError.
-    """
     if not path or not path.strip():
         return False
     try:
@@ -266,17 +270,6 @@ def is_network_path_available(path: str) -> bool:
 
 
 def get_network_data_path() -> str:
-    """
-    F3 — Geeft het actieve pad terug naar network_data.json.
-
-    Volgorde:
-      1. Als 'network_data.use_network_path' True is én het pad bereikbaar is
-         → <network_path>/network_data.json
-      2. Anders (uitgeschakeld of niet bereikbaar)
-         → lokaal data/network_data.json
-
-    Dit is de enige plek waar de keuze lokaal/netwerk gemaakt wordt.
-    """
     settings = load_settings()
     nd_cfg   = settings.get("network_data", {})
 
@@ -284,22 +277,11 @@ def get_network_data_path() -> str:
         net_path = nd_cfg.get("network_path", "").strip()
         if net_path and is_network_path_available(net_path):
             return os.path.join(net_path, "network_data.json")
-        # Pad niet bereikbaar — stil terugvallen op lokaal
 
     return _NETWORK_FILE
 
 
 def get_network_data_source_label() -> tuple[str, bool]:
-    """
-    F3 — Geeft (label, is_network) terug voor de statusbalk/UI.
-      label      : leesbare beschrijving van de actieve databron
-      is_network : True als het netwerkpad actief is
-
-    Voorbeelden:
-      ("Lokaal",                                    False)
-      ("\\\\server\\share",                          True)
-      ("Lokaal (fallback: netwerk niet bereikbaar)", False)
-    """
     settings = load_settings()
     nd_cfg   = settings.get("network_data", {})
 

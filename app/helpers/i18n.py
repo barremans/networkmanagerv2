@@ -2,13 +2,15 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
 # Changes: F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
 #          F3 — settings_group_language, settings_group_datasource,
 #               settings_ds_*, err_ds_path_required
 #          G1+G2 — menu_export_image, menu_export_pdf, export_col_*, msg_*_exported
+#          G3 — menu_export_report, msg_report_exported, msg_report_export_failed
+#          H1 — menubar_*, help_*
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -31,7 +33,31 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "menu_export":              "Exporteren",
         "menu_export_image":        "Exporteer afbeelding",          # G2
         "menu_export_pdf":          "Exporteer PDF",                 # G1
+        "menu_export_report":       "Rapport (Word)",                # G3
         "menu_settings":            "Instellingen",
+
+        # Menubar — H1
+        "menubar_file":             "Bestand",
+        "menubar_help":             "Help",
+        "menubar_quit":             "Afsluiten",
+
+        # Help venster — H1
+        "help_title":               "Help",
+        "help_tab_shortcuts":       "Sneltoetsen",
+        "help_tab_guide":           "Gebruiksaanwijzing",
+        "help_tab_version":         "Over",
+        "help_shortcuts_intro":     "Overzicht van alle sneltoetsen in Networkmap Creator.",
+        "help_col_shortcut":        "Sneltoets",
+        "help_col_action":          "Actie",
+        "help_shortcut_esc":        "Verbindingsmodus annuleren",
+        "help_version_label":       "Versie",
+        "help_author_label":        "Auteur",
+        "help_built_with":          "Gebouwd met",
+        "help_license_label":       "Licentie",
+        "help_license_value":       "Intern gebruik — CGK",
+
+        # Versie-info beschrijving — H1
+        "help_app_desc":            "Netwerk infrastructuur beheer — sites, ruimtes, racks, devices, wandpunten en verbindingen.",
 
         # Object labels
         "label_site":               "Site",
@@ -152,6 +178,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_image_export_failed":  "Afbeelding opslaan mislukt",            # G2
         "msg_pdf_exported":         "PDF opgeslagen",                        # G1
         "msg_pdf_export_failed":    "PDF opslaan mislukt",                   # G1
+        "msg_report_exported":      "Rapport opgeslagen",                    # G3
+        "msg_report_export_failed": "Rapport opslaan mislukt",               # G3
 
         # Titels vensters / dialogs
         "title_settings":           "Instellingen",
@@ -211,6 +239,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
         # Foutmeldingen
         "err_field_required":       "Dit veld is verplicht.",
+        "err_outlet_duplicate_name": "Een wandpunt met de naam '{name}' bestaat al in deze ruimte.",
         "err_invalid_number":       "Voer een geldig getal in.",
         "err_path_not_found":       "Pad niet gevonden.",
         "err_file_not_found":       "Bestand niet gevonden.",
@@ -273,6 +302,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_backup_test":     "Test",
         "settings_unit_height":     "Rack unit hoogte:",
         "settings_unit_hint":       "Wijzigingen zijn zichtbaar na herstart.",
+        # Settings — standaard exportmap — H1d
+        "settings_export_folder":             "Standaard exportmap",
+        "settings_export_folder_placeholder": "Kies een map...",
+        "settings_export_folder_hint":        "Exportbestanden worden hier standaard opgeslagen. Leeg = elke keer vragen.",
+        "settings_export_folder_clear":       "Map wissen",
         "settings_lang_hint":       "De applicatie herlaadt de UI-labels na opslaan.",
         "settings_path_ok_title":   "Pad test",
         "settings_path_fail_title": "Pad test",
@@ -304,6 +338,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Wire detail
         "wire_delete_btn":          "🗑  Verbinding verwijderen",
         "wire_delete_confirm":      "Verbinding verwijderen?",
+        "wire_edit_btn":            "✏  Bewerken",
+        "title_edit_connection":    "Verbinding bewerken",
+        "conn_label_placeholder":   "Optioneel label of naam...",
+        "conn_notes_placeholder":   "Optionele notitie...",
+        "msg_connection_updated":   "Verbinding bijgewerkt.",
+        "rack_occupancy_tooltip":   "Bezettingsgraad",
         "wire_arrow":               " ──► ",
 
         # Search
@@ -381,7 +421,31 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "menu_export":              "Export",
         "menu_export_image":        "Export image",                  # G2
         "menu_export_pdf":          "Export PDF",                    # G1
+        "menu_export_report":       "Report (Word)",                 # G3
         "menu_settings":            "Settings",
+
+        # Menubar — H1
+        "menubar_file":             "File",
+        "menubar_help":             "Help",
+        "menubar_quit":             "Quit",
+
+        # Help window — H1
+        "help_title":               "Help",
+        "help_tab_shortcuts":       "Shortcuts",
+        "help_tab_guide":           "User Guide",
+        "help_tab_version":         "About",
+        "help_shortcuts_intro":     "Overview of all keyboard shortcuts in Networkmap Creator.",
+        "help_col_shortcut":        "Shortcut",
+        "help_col_action":          "Action",
+        "help_shortcut_esc":        "Cancel connection mode",
+        "help_version_label":       "Version",
+        "help_author_label":        "Author",
+        "help_built_with":          "Built with",
+        "help_license_label":       "License",
+        "help_license_value":       "Internal use — CGK",
+
+        # Version info description — H1
+        "help_app_desc":            "Network infrastructure management — sites, rooms, racks, devices, wall outlets and connections.",
 
         # Object labels
         "label_site":               "Site",
@@ -502,6 +566,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_image_export_failed":  "Failed to save image",               # G2
         "msg_pdf_exported":         "PDF saved",                          # G1
         "msg_pdf_export_failed":    "Failed to save PDF",                 # G1
+        "msg_report_exported":      "Report saved",                       # G3
+        "msg_report_export_failed": "Failed to save report",              # G3
 
         # Titels vensters / dialogs
         "title_settings":           "Settings",
@@ -561,6 +627,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
         # Foutmeldingen
         "err_field_required":       "This field is required.",
+        "err_outlet_duplicate_name": "A wall outlet named '{name}' already exists in this room.",
         "err_invalid_number":       "Please enter a valid number.",
         "err_path_not_found":       "Path not found.",
         "err_file_not_found":       "File not found.",
@@ -623,6 +690,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_backup_test":     "Test",
         "settings_unit_height":     "Rack unit height:",
         "settings_unit_hint":       "Changes are visible after restart.",
+        # Settings — default export folder — H1d
+        "settings_export_folder":             "Default Export Folder",
+        "settings_export_folder_placeholder": "Choose a folder...",
+        "settings_export_folder_hint":        "Export files are saved here by default. Empty = ask every time.",
+        "settings_export_folder_clear":       "Clear folder",
         "settings_lang_hint":       "The application reloads UI labels after saving.",
         "settings_path_ok_title":   "Path test",
         "settings_path_fail_title": "Path test",
@@ -654,6 +726,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Wire detail
         "wire_delete_btn":          "🗑  Delete Connection",
         "wire_delete_confirm":      "Delete connection?",
+        "wire_edit_btn":            "✏  Edit",
+        "title_edit_connection":    "Edit Connection",
+        "conn_label_placeholder":   "Optional label or name...",
+        "conn_notes_placeholder":   "Optional note...",
+        "msg_connection_updated":   "Connection updated.",
+        "rack_occupancy_tooltip":   "Occupancy",
         "wire_arrow":               " ──► ",
 
         # Search

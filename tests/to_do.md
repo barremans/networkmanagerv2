@@ -1,19 +1,17 @@
 # Networkmap_Creator — Openstaande werkpunten
 
-> Bijgewerkt na implementatie Fase A t/m E (volledig stabiel).
-> Opgeloste punten zijn verwijderd. Nieuw opgeloste punten staan onder "Opgelost".
+## Fase B — Setup + installer
+- Creatie applicatie executable voor windows
+- Creatie van setup.exe file voor windows van de applicatie.exe + mappen
 
----
 
-## Fase F — Correcties & configuratie
+## Fase C — build + upload to github
+-- bat file autoatische build 
+  - applicatie.exe -> build setup.exe -> upload naar github
 
-### F3 — Lokale vs netwerkdata
 
-- [ ] **Keuze of network_data.json lokaal of op netwerkmap staat**
-  - Instelling in settings venster (backend klaar, UI ontbreekt nog)
-  - Fallback naar lokaal als netwerkpad niet bereikbaar
 
-### F4 — Update check
+### D — Update check
 
 - [ ] **Update check naar GitHub** — bij opstarten controleren op nieuwere versie
   - URL configureerbaar in settings
@@ -21,37 +19,12 @@
   - Popup bij nieuwe versie: "Versie X.Y beschikbaar — Naar GitHub?"
 
 ---
-
-## Fase G — Export & printing
-
-### G1 — PDF export
-
-- [ ] **PDF export van het netwerk**
-  - Volledig per geselecteerde site
-  - Per ruimte
-  - Per rack
-
-### G2 — Afbeelding export
-
-- [ ] **JPG/PNG export** — schermafbeelding van rack_view of wall_outlet_view
-
----
-
-## Fase H — Afronden & beveiliging
-
-### H1 — Help menu
-
-- [ ] **Help menu toevoegen**
-  - Sneltoetsen overzicht
-  - Versie-info
-  - Gebruiksaanwijzing
-
-### H2 — Rapporteren naar GitHub
+### E — Rapporteren naar GitHub
 
 - [ ] **Bug melden** — knop in help menu, opent GitHub issues met vooringevulde template
 - [ ] **Feature aanvragen** — idem
 
-### H3 — MFA / Active Directory
+### F — MFA / Active Directory
 
 - [ ] **MFA introduceren**
   - Standaard niet actief — activeren via installer (Inno Setup) of settings
@@ -62,10 +35,26 @@
 
 ---
 
-## Ontbrekend — nog niet ingepland
 
-- [ ] **Verbinding bewerken** — kabeltype en notitie aanpassen na aanmaken (nu alleen verwijderen mogelijk)
-- [ ] **Duplicaat-check wandpunten** — naam uniek per ruimte verplichten
-- [ ] **Rack bezettingsgraad** — visuele indicator hoeveel U vrij/bezet per rack
 
----
+## Layout
+- Menu balk (eerste)
+  - extra menu 
+      -- In/Ex-port(New)
+          - Menu Importeren
+            -- Importeren van menu "Bestand" naar menu "In/Export" menu
+            -- Exoprteren van menu "Bestand" naar menu "In/Export" menu
+  - 
+ -- Menubalk (tweede)
+    - importeren weg, zit al onder eerste menu -> "In/Ex-port" menu
+    - exporteren weg, zit al onder eerste menu -> "In/Ex-port" menu
+
+
+
+
+
+-- BUGS
+  - verwijderen device, geen refresh van scherm je moet eens naar een ander object gaan en terug
+  -- Wandpunten
+    - dubbel icoon
+  - wanneer we de optie opslaan hebben, dan "enter" als sneltoets

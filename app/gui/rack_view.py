@@ -2,8 +2,9 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
+# Changes: 1.4.0 — bezettingsindicator in titelregel (percentage + kleurenbalk)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -25,12 +26,80 @@ _MAX_PORTS_ROW = 12
 _ACT_EDIT   = "edit"
 _ACT_DELETE = "delete"
 
+# Bezettingsgraad drempelwaarden
+_OCC_WARN     = 0.75   # >= 75% → oranje
+_OCC_CRITICAL = 0.90   # >= 90% → rood
+
 
 def _refresh_style(widget: QWidget):
     """Forceert QSS herlaad — betrouwbaar op Windows."""
     widget.style().unpolish(widget)
     widget.style().polish(widget)
     widget.update()
+
+
+def _rack_occupancy(rack: dict, slots: list | None = None) -> tuple[int, int]:
+    """
+    Berekent (bezette_u, totale_u) voor een rack.
+    Telt de daadwerkelijke hoogte van elk slot op.
+    """
+    total = rack.get("total_units", 0)
+    used  = sum(s.get("height", 1) for s in rack.get("slots", []))
+    return used, total
+
+
+def _occupancy_color(used: int, total: int) -> str:
+    """Geeft een CSS kleurstring terug op basis van bezettingsgraad."""
+    if total == 0:
+        return "#4a9eda"   # blauw — leeg/onbekend
+    ratio = used / total
+    if ratio >= _OCC_CRITICAL:
+        return "#e05252"   # rood
+    if ratio >= _OCC_WARN:
+        return "#e09a2a"   # oranje
+    return "#4caf7d"       # groen
+
+
+class OccupancyBar(QWidget):
+    """
+    Kleine horizontale bezettingsbalk — groen/oranje/rood.
+    Toont ook percentage als tekst.
+    """
+
+    def __init__(self, used: int, total: int, parent=None):
+        super().__init__(parent)
+        self._used  = used
+        self._total = total
+        self._build()
+
+    def _build(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        used, total = self._used, self._total
+        pct   = (used / total * 100) if total else 0
+        color = _occupancy_color(used, total)
+
+        # Balk container
+        bar_container = QFrame()
+        bar_container.setFixedSize(80, 10)
+        bar_container.setStyleSheet(
+            "QFrame { background-color: #2a3a4a; border-radius: 4px; }"
+        )
+        bar_inner = QFrame(bar_container)
+        fill_w = max(4, int(80 * pct / 100)) if total else 0
+        bar_inner.setGeometry(0, 0, fill_w, 10)
+        bar_inner.setStyleSheet(
+            f"QFrame {{ background-color: {color}; border-radius: 4px; }}"
+        )
+        layout.addWidget(bar_container)
+
+        # Percentage tekst
+        pct_lbl = QLabel(f"{pct:.0f}%  ({used}/{total}U)")
+        pct_lbl.setObjectName("secondary")
+        pct_lbl.setStyleSheet(f"color: {color}; font-size: 11px;")
+        layout.addWidget(pct_lbl)
 
 
 class RackView(QWidget):
@@ -55,19 +124,32 @@ class RackView(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
+        # Titelregel met bezettingsindicator  [1.4.0]
         title_bar = QFrame()
         title_bar.setObjectName("rack_frame")
         tl = QHBoxLayout(title_bar)
         tl.setContentsMargins(8, 4, 8, 4)
+
         title_lbl = QLabel(
             f"{self._rack['name']}  —  {self._room['name']}  —  {self._site['name']}"
         )
         title_lbl.setObjectName("rack_title")
+
+        used, total = _rack_occupancy(self._rack)
+        occ_bar = OccupancyBar(used, total)
+        occ_bar.setToolTip(
+            f"{t('rack_occupancy_tooltip')}: {used}/{total}U  "
+            f"({used/total*100:.0f}%)" if total else t('rack_occupancy_tooltip')
+        )
+
         units_lbl = QLabel(f"{self._rack['total_units']}U")
         units_lbl.setObjectName("secondary")
         units_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
         tl.addWidget(title_lbl)
         tl.addStretch()
+        tl.addWidget(occ_bar)           # [1.4.0]
+        tl.addSpacing(12)
         tl.addWidget(units_lbl)
         outer.addWidget(title_bar)
 
@@ -80,7 +162,7 @@ class RackView(QWidget):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(0)
 
-        total_u = self._rack.get("total_units", 12)
+        total_u  = self._rack.get("total_units", 12)
         slot_map = {s["u_start"]: s for s in self._rack.get("slots", [])}
         dev_map  = {d["id"]: d for d in self._data.get("devices", [])}
 
@@ -186,11 +268,10 @@ class RackView(QWidget):
         return row
 
     # ------------------------------------------------------------------
-    # Context menu device — via sleutel, nooit via tekst
+    # Context menu device
     # ------------------------------------------------------------------
 
     def _show_device_context_menu(self, device_id: str, global_pos):
-        """Toon context menu voor device — emitteert vaste sleutel, geen UI-tekst."""
         menu = QMenu()
         act_edit   = menu.addAction(t("ctx_edit_device"))
         act_delete = menu.addAction(t("ctx_delete_device"))
@@ -258,7 +339,6 @@ class RackView(QWidget):
     def _attach_port_click(self, widget, port_id, device_id, side):
         def on_click(event: QMouseEvent, pid=port_id, did=device_id, s=side):
             if event.button() == Qt.MouseButton.RightButton:
-                # Rechtermuisklik op poort → context menu signal
                 self.port_context_menu.emit(pid, widget.mapToGlobal(event.pos()))
                 event.accept()
                 return
@@ -343,18 +423,15 @@ class RackView(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# _DeviceRow — QFrame subclass die rechtermuisklik correct afhandelt
-# ook als child-widgets (poorten, labels) de klik ontvangen
+# _DeviceRow
 # ---------------------------------------------------------------------------
 
 class _DeviceRow(QFrame):
     """
     Device rij widget met eigen mousePressEvent override.
-    Rechtermuisklik op elk onderdeel van de rij (inclusief child-widgets
-    zoals port-blokken en labels) wordt hier correct opgevangen en
-    doorgegeven als signal.
+    Rechtermuisklik op elk onderdeel van de rij wordt hier correct opgevangen.
     """
-    device_right_clicked = Signal(str, object)  # device_id, global QPoint
+    device_right_clicked = Signal(str, object)
 
     def __init__(self, device_id: str, parent=None):
         super().__init__(parent)

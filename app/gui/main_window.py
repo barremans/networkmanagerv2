@@ -2,11 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.19.0
+# Version: 1.23.0
 # Author:  Barremans
 # Changes: F1 — ESC annuleert verbindingsmodus
 #               Klik op lege poort wist vorige trace + highlight
-#            Changes: G1+G2 — PNG/JPG + PDF export via QPainter renderer
+#          G1+G2 — PNG/JPG + PDF export via QPainter renderer
+#          G3 — Word rapport export via python-docx
+#          H1 — Help menu (sneltoetsen, gebruiksaanwijzing, versie-info)
+#          H1b — Verbinding bewerken (label, kabeltype, notitie)
+#          H1c — Rack bezettingsgraad in boom + auto-open na export
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -16,17 +20,19 @@ from PySide6.QtWidgets import (
     QPushButton
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush
 
 from app.helpers import settings_storage
 from app.helpers.i18n import t
-from app.gui.rack_view import RackView
+from app.gui.rack_view import RackView, _rack_occupancy, _occupancy_color
 from app.gui.wall_outlet_view import WallOutletView
 from app.gui.outlet_locator_view import OutletLocatorView
 from app.gui.wire_detail_view import WireDetailView
 from app.gui.search_window import SearchWindow
 from app.gui.settings_window import SettingsWindow
+from app.gui.help_window import HelpWindow
 from app.gui.dialogs.connection_dialog import ConnectionDialog
+from app.gui.dialogs.connection_edit_dialog import ConnectionEditDialog
 from app.gui.dialogs.connect_to_outlet_dialog import ConnectToOutletDialog
 from app.gui.dialogs.site_dialog import SiteDialog
 from app.gui.dialogs.room_dialog import RoomDialog
@@ -41,6 +47,7 @@ from app.services import import_export_service
 from app.services import backup_service
 from app.services.logger import log_info, log_warning, log_error
 from app.services import export_renderer
+from app.services import report_generator
 
 _COL              = 0
 _TYPE_SITE        = "site"
@@ -62,6 +69,7 @@ class MainWindow(QMainWindow):
         self._connect_port_a  = None   # eerste geselecteerde poort ID
         self._outlet_locator_view = None  # persistent view, hergebruikt (E3)
         self._setup_window()
+        self._build_menubar()
         self._build_toolbar()
         self._build_central()
         self._build_statusbar()
@@ -78,8 +86,44 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
 
     # ------------------------------------------------------------------
-    # Toolbar
+    # Menubar — H1
     # ------------------------------------------------------------------
+
+    def _build_menubar(self):
+        mb = self.menuBar()
+
+        # ── File menu ────────────────────────────────────────────────
+        self._menu_file = mb.addMenu(t("menubar_file"))
+
+        act_import = self._menu_file.addAction(t("menu_import"))
+        act_import.setShortcut("Ctrl+O")
+        act_import.triggered.connect(self._on_import)
+
+        act_export = self._menu_file.addAction(t("menu_export"))
+        act_export.triggered.connect(self._on_export)
+
+        self._menu_file.addSeparator()
+
+        act_settings = self._menu_file.addAction(t("menu_settings"))
+        act_settings.triggered.connect(self._on_settings)
+
+        self._menu_file.addSeparator()
+
+        act_quit = self._menu_file.addAction(t("menubar_quit"))
+        act_quit.setShortcut("Alt+F4")
+        act_quit.triggered.connect(self.close)
+
+        # ── Help menu ────────────────────────────────────────────────
+        self._menu_help = mb.addMenu(t("menubar_help"))
+
+        act_help = self._menu_help.addAction(t("help_title"))
+        act_help.setShortcut("F1")
+        act_help.triggered.connect(self._on_help)
+
+        self._menu_help.addSeparator()
+
+        act_about = self._menu_help.addAction(t("help_tab_version"))
+        act_about.triggered.connect(self._on_about)
 
     def _build_toolbar(self):
         tb = QToolBar()
@@ -142,7 +186,7 @@ class MainWindow(QMainWindow):
         self._act_export.setEnabled(True)
         self._act_export.triggered.connect(self._on_export)
         tb.addAction(self._act_export)
-        
+
         self._act_export_image = QAction(t("menu_export_image"), self)
         self._act_export_image.setShortcut("Ctrl+Shift+E")
         self._act_export_image.setEnabled(True)
@@ -153,7 +197,14 @@ class MainWindow(QMainWindow):
         self._act_export_pdf.setShortcut("Ctrl+Shift+P")
         self._act_export_pdf.setEnabled(True)
         self._act_export_pdf.triggered.connect(self._on_export_pdf)
-        tb.addAction(self._act_export_pdf)        
+        self._act_export_pdf.setVisible(False)  # G1 — tijdelijk verborgen
+        tb.addAction(self._act_export_pdf)
+
+        self._act_export_report = QAction(t("menu_export_report"), self)
+        self._act_export_report.setShortcut("Ctrl+Shift+R")
+        self._act_export_report.setEnabled(True)
+        self._act_export_report.triggered.connect(self._on_export_report)
+        tb.addAction(self._act_export_report)
 
         tb.addSeparator()
 
@@ -243,6 +294,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self._wire_detail.delete_connection.connect(self._on_delete_connection)
+        self._wire_detail.edit_connection.connect(self._on_edit_connection)
         self._wire_detail.navigate_to_rack.connect(self._on_navigate_to_rack)
         detail_outer.addWidget(self._wire_detail)
 
@@ -273,11 +325,15 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def keyPressEvent(self, event):
-        """ESC annuleert verbindingsmodus als die actief is."""
+        """ESC annuleert verbindingsmodus. F1 opent Help."""
         if event.key() == Qt.Key.Key_Escape and self._connect_mode:
             self._on_connect_mode_toggled(False)
             self._act_connect.setChecked(False)
             self.set_status(t("msg_connect_cancelled"))
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_F1:
+            self._on_help()
             event.accept()
             return
         super().keyPressEvent(event)
@@ -288,7 +344,6 @@ class MainWindow(QMainWindow):
 
     def _populate_tree(self):
         """Herbouw de volledige boom. Bewaart uitgelapte state van bestaande items."""
-        # Bewaar welke sites/rooms uitgeklapt zijn voor herstel na herbouw
         expanded = set()
         for i in range(self._tree.topLevelItemCount()):
             site_item = self._tree.topLevelItem(i)
@@ -322,6 +377,9 @@ class MainWindow(QMainWindow):
                 room_item.setToolTip(_COL, self._room_tooltip(room, site))
 
                 for rack in room.get("racks", []):
+                    used, total = _rack_occupancy(rack)
+                    pct   = (used / total * 100) if total else 0
+                    color = _occupancy_color(used, total)
                     rack_item = QTreeWidgetItem([f"🗄  {rack['name']}"])
                     rack_item.setData(_COL, Qt.ItemDataRole.UserRole, {
                         "type":    _TYPE_RACK,
@@ -330,7 +388,9 @@ class MainWindow(QMainWindow):
                         "site_id": site["id"],
                     })
                     rack_item.setToolTip(_COL,
-                        f"{rack['total_units']}U  ·  {self._room_status_label(room, site)}")
+                        f"{rack['total_units']}U  ·  {used}/{total}U bezet ({pct:.0f}%)  ·  "
+                        f"{self._room_status_label(room, site)}")
+                    rack_item.setForeground(_COL, QBrush(QColor(color)))
                     room_item.addChild(rack_item)
 
                 outlets      = room.get("wall_outlets", [])
@@ -343,7 +403,6 @@ class MainWindow(QMainWindow):
                     "room_id": room["id"],
                     "site_id": site["id"],
                 })
-                # Individuele wandpunten als kind-items
                 for wo in outlets:
                     wo_item = QTreeWidgetItem([f"   {wo.get('name', wo['id'])}"])
                     wo_item.setData(_COL, Qt.ItemDataRole.UserRole, {
@@ -357,7 +416,6 @@ class MainWindow(QMainWindow):
                 room_item.addChild(outlets_item)
                 site_item.addChild(room_item)
 
-            # Site-niveau wandpunten-overzicht (E3) — onder alle ruimtes
             all_site_outlets = [
                 wo for room in site.get("rooms", [])
                 for wo in room.get("wall_outlets", [])
@@ -378,7 +436,6 @@ class MainWindow(QMainWindow):
 
             self._tree.addTopLevelItem(site_item)
 
-            # Herstel uitgelapte staat — of standaard eerste site/room uitklappen
             if site["id"] in expanded:
                 site_item.setExpanded(True)
                 for j in range(site_item.childCount()):
@@ -387,7 +444,6 @@ class MainWindow(QMainWindow):
                     if child_data and child_data.get("id", "") in expanded:
                         child.setExpanded(True)
             elif idx == 0:
-                # Eerste site standaard uitklappen als er geen opgeslagen staat is
                 site_item.setExpanded(True)
 
     # ------------------------------------------------------------------
@@ -438,12 +494,10 @@ class MainWindow(QMainWindow):
                 self._show_wall_outlet_view(room, site)
 
         elif item_type == _TYPE_OUTLET:
-            # Klik op individueel wandpunt → toon wall_outlet_view van de ruimte
             room = self._find_room(data["room_id"])
             site = self._find_site(data["site_id"])
             if room and site:
                 self._show_wall_outlet_view(room, site)
-                # Trace tonen
                 steps = tracing.trace_from_wall_outlet(self._data, data["id"])
                 wo = next((w for w in room.get("wall_outlets", [])
                            if w["id"] == data["id"]), None)
@@ -462,10 +516,8 @@ class MainWindow(QMainWindow):
                     f"{t('label_room')}: {room['name']}  ·  "
                     f"{t('label_site')}: {site['name']}"
                 )
-                # Als OutletLocatorView actief is → stuur ruimte door
                 if isinstance(self._current_view, OutletLocatorView):
                     self._current_view.set_room(data["id"])
-                # Ruimte zonder racks maar mét wandpunten → toon OutletLocatorView
                 elif not room.get("racks") and room.get("wall_outlets"):
                     self._show_outlet_locator(room_id=data["id"])
                     self.set_status(
@@ -486,7 +538,6 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QMenu
         item = self._tree.itemAt(pos)
         if not item:
-            # Rechtermuisklik op lege ruimte → alleen Nieuwe site
             menu = QMenu(self)
             menu.addAction(f"📍  {t('label_site')}", self._new_site)
             menu.exec(self._tree.viewport().mapToGlobal(pos))
@@ -516,17 +567,14 @@ class MainWindow(QMainWindow):
             menu.addAction(t("ctx_delete"),     lambda: self._on_delete())
 
         elif item_type == _TYPE_RACK:
-            rack = self._find_rack(data["id"])
-            room = self._find_room(data["room_id"])
-            site = self._find_site(data["site_id"])
             menu.addAction(t("ctx_edit"),
                            lambda: self._edit_rack_direct(data))
             menu.addSeparator()
             menu.addAction(t("ctx_new_device"),
                            lambda: self._new_device_in_rack(data["id"]))
             menu.addSeparator()
-            act_del = menu.addAction(t("ctx_delete"),
-                                     lambda: self._delete_rack_direct(data))
+            menu.addAction(t("ctx_delete"),
+                           lambda: self._delete_rack_direct(data))
 
         elif item_type == _TYPE_OUTLETS:
             menu.addAction(t("ctx_new_outlet"),
@@ -553,9 +601,9 @@ class MainWindow(QMainWindow):
             return
         endpoints = self._data.get("endpoints", [])
         dlg = WallOutletDialog(parent=self, room_id=data["room_id"],
-                               endpoints=endpoints, outlet=wo)
+                               endpoints=endpoints, outlet=wo,
+                               existing_outlets=room.get("wall_outlets", []))
         if dlg.exec() and dlg.get_result():
-            # Eindapparaten synchroniseren
             self._data["endpoints"] = dlg.get_endpoints_result()
             wo.update(dlg.get_result())
             self._save_and_backup()
@@ -585,9 +633,7 @@ class MainWindow(QMainWindow):
             self.set_status(f"✓  {t('label_wall_outlet')} verwijderd.")
 
     def _on_device_context_menu(self, device_id: str, action: str):
-        """Dispatcher voor device context menu acties vanuit rack_view.
-        action is een vaste sleutel: 'edit' of 'delete' — nooit UI-tekst."""
-        # Zoek rack context voor dit device
+        """Dispatcher voor device context menu acties vanuit rack_view."""
         rack_data = None
         for site in self._data.get("sites", []):
             for room in site.get("rooms", []):
@@ -697,7 +743,6 @@ class MainWindow(QMainWindow):
 
     def _show_rack_view(self, rack: dict, room: dict, site: dict):
         """Verwijder huidige midden-inhoud en toon RackView."""
-        # Verwijder alle widgets uit het midden frame
         while self._mid_layout.count():
             item = self._mid_layout.takeAt(0)
             if item.widget():
@@ -750,7 +795,6 @@ class MainWindow(QMainWindow):
                 self.set_status(t("err_same_port"))
                 return
 
-            # Conflict detectie — C6
             if tracing.port_has_conflict(self._data, port_a_id):
                 self.set_status(f"⚠  {t('err_port_in_use')}: poort A")
                 return
@@ -758,7 +802,6 @@ class MainWindow(QMainWindow):
                 self.set_status(f"⚠  {t('err_port_in_use')}: poort B")
                 return
 
-            # Verbinding aanmaken
             existing = {c["id"] for c in self._data.get("connections", [])}
             new_id   = f"conn{len(existing) + 1}"
             while new_id in existing:
@@ -786,9 +829,7 @@ class MainWindow(QMainWindow):
             )
 
     def _on_port_clicked(self, port_id: str, device_id: str, side: str):
-        """Poort aangeklikt — bereken trace, toon wire_detail en highlight alle trace-poorten.
-        F1: lege poort (geen verbinding) wist vorige trace en highlight.
-        """
+        """Poort aangeklikt — bereken trace, toon wire_detail en highlight alle trace-poorten."""
         port = next((p for p in self._data.get("ports", []) if p["id"] == port_id), None)
         dev  = next((d for d in self._data.get("devices", []) if d["id"] == device_id), None)
         if not port or not dev:
@@ -800,7 +841,6 @@ class MainWindow(QMainWindow):
             f"{t('label_' + side)}"
         )
 
-        # Zoek verbinding-ID voor deze poort
         conn_id = ""
         for c in self._data.get("connections", []):
             if c.get("from_id") == port_id or c.get("to_id") == port_id:
@@ -819,7 +859,6 @@ class MainWindow(QMainWindow):
 
         self._wire_detail.set_trace(steps, origin, conn_id=conn_id, data=self._data)
 
-        # Highlight alle poorten in de trace
         if isinstance(self._current_view, RackView):
             trace_port_ids = [
                 s["obj_id"] for s in steps if s["obj_type"] == "port"
@@ -849,11 +888,69 @@ class MainWindow(QMainWindow):
             self._current_view.refresh(self._data)
         self.set_status(f"✓  {t('msg_connection_deleted')}")
 
+    def _on_edit_connection(self, conn_id: str):
+        """Verbinding bewerken — getriggerd vanuit wire_detail_view."""
+        conn = next(
+            (c for c in self._data.get("connections", []) if c.get("id") == conn_id),
+            None
+        )
+        if not conn:
+            return
+
+        # Leesbare from/to labels voor in de dialog header
+        conn_with_labels = dict(conn)
+        conn_with_labels["_from_label"] = self._resolve_port_label(
+            conn.get("from_id", ""), conn.get("from_type", "port")
+        )
+        conn_with_labels["_to_label"] = self._resolve_port_label(
+            conn.get("to_id", ""), conn.get("to_type", "port")
+        )
+
+        dlg = ConnectionEditDialog(conn_with_labels, parent=self)
+        if dlg.exec() != ConnectionEditDialog.DialogCode.Accepted:
+            return
+
+        result = dlg.get_result()
+        if result is None:
+            return
+
+        # Sla wijzigingen op in de verbinding
+        conn["label"]      = result["label"]
+        conn["cable_type"] = result["cable_type"]
+        conn["notes"]      = result["notes"]
+
+        self._save_and_backup()
+
+        # Info-regel in wire_detail bijwerken zonder volledige rebuild
+        self._wire_detail.refresh_info(self._data)
+
+        self.set_status(f"✓  {t('msg_connection_updated')}")
+
+    def _resolve_port_label(self, obj_id: str, obj_type: str) -> str:
+        """Zet een poort- of wandpunt-ID om naar een leesbaar label."""
+        if obj_type in ("port", ""):
+            port = next(
+                (p for p in self._data.get("ports", []) if p.get("id") == obj_id),
+                None
+            )
+            if port:
+                dev = next(
+                    (d for d in self._data.get("devices", [])
+                     if d.get("id") == port.get("device_id")), None
+                )
+                dev_name = dev["name"] if dev else "?"
+                return f"{dev_name}  /  {port.get('name', obj_id)}"
+        if obj_type == "wall_outlet":
+            wo = next(
+                (w for w in self._data.get("wall_outlets", [])
+                 if w.get("id") == obj_id), None
+            )
+            if wo:
+                return f"🌐  {wo.get('name', obj_id)}"
+        return obj_id
+
     def _on_navigate_to_rack(self, rack_id: str, port_ids: list):
-        """
-        E5 — Cross-rack navigatie vanuit wire_detail.
-        Opent het gevraagde rack in het middengebied en highlight de trace-poorten.
-        """
+        """E5 — Cross-rack navigatie vanuit wire_detail."""
         for site in self._data.get("sites", []):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
@@ -863,7 +960,6 @@ class MainWindow(QMainWindow):
                         self.set_status(
                             f"🗄  {rack['name']}  ·  {room['name']}  ·  {site['name']}"
                         )
-                        # Highlight na kort moment (view moet eerst opgebouwd zijn)
                         if isinstance(self._current_view, RackView):
                             self._current_view.highlight_trace(port_ids)
                         return
@@ -878,7 +974,6 @@ class MainWindow(QMainWindow):
         if not port or not dev:
             return
 
-        # Controleer of poort al verbonden is
         is_connected = any(
             c for c in self._data.get("connections", [])
             if c.get("from_id") == port_id or c.get("to_id") == port_id
@@ -887,11 +982,8 @@ class MainWindow(QMainWindow):
         port_label = f"{dev.get('name', '')} — {port.get('name', '')} ({port.get('side','').upper()})"
 
         menu = QMenu(self)
-
-        # Verbinden met wandpunt — altijd beschikbaar (ook als al verbonden, dialog waarschuwt)
         act_outlet = menu.addAction(t("ctx_connect_to_outlet"))
 
-        # Verbinding verwijderen — alleen als verbonden
         act_disconnect = None
         if is_connected:
             menu.addSeparator()
@@ -911,10 +1003,8 @@ class MainWindow(QMainWindow):
                 self._save_and_backup()
                 if isinstance(self._current_view, RackView):
                     self._current_view.refresh(self._data)
-                # Toon trace van de nieuwe verbinding
                 steps = tracing.trace_from_port(self._data, port_id)
                 self._wire_detail.set_trace(steps, port_label, data=self._data)
-                # Zoek wandpunt naam voor statusbalk
                 outlet = next(
                     (wo for s in self._data.get("sites", [])
                      for r in s.get("rooms", [])
@@ -962,7 +1052,6 @@ class MainWindow(QMainWindow):
         return None
 
     def _room_tooltip(self, room: dict, site: dict) -> str:
-        """Tooltip tekst voor een ruimte in de boom."""
         parts = []
         floor = room.get("floor", "")
         place = room.get("place", "")
@@ -980,7 +1069,6 @@ class MainWindow(QMainWindow):
         return "  ·  ".join(parts)
 
     def _room_status_label(self, room: dict, site: dict) -> str:
-        """Korte statusbalk tekst voor een ruimte."""
         parts = [room.get("name", "")]
         floor = room.get("floor", "")
         place = room.get("place", "")
@@ -992,7 +1080,7 @@ class MainWindow(QMainWindow):
         return "  ·  ".join(parts)
 
     # ------------------------------------------------------------------
-    # CRUD — Nieuw / Bewerken / Verwijderen / Dupliceren  (D1 / D2)
+    # CRUD — Nieuw / Bewerken / Verwijderen / Dupliceren
     # ------------------------------------------------------------------
 
     def _selected_tree_data(self) -> dict | None:
@@ -1002,10 +1090,6 @@ class MainWindow(QMainWindow):
         return item.data(0, Qt.ItemDataRole.UserRole)
 
     def _on_new(self):
-        """
-        Toont altijd een keuzemenu — Site is altijd beschikbaar,
-        Ruimte/Rack/Wandpunt worden grijs als de context ontbreekt.
-        """
         from PySide6.QtWidgets import QMenu
         data      = self._selected_tree_data()
         item_type = data.get("type") if data else None
@@ -1042,11 +1126,6 @@ class MainWindow(QMainWindow):
             self._new_wall_outlet(room_id)
 
     def _attach_new_menu(self):
-        """
-        Voeg dropdown menu toe aan de Nieuw-knop in de toolbar.
-        Hiermee kan de gebruiker altijd expliciet een site, ruimte of rack aanmaken
-        ongeacht wat er geselecteerd is.
-        """
         from PySide6.QtWidgets import QMenu, QToolButton
         menu = QMenu(self)
         menu.addAction(f"📍  {t('label_site')}",       self._new_site)
@@ -1059,7 +1138,6 @@ class MainWindow(QMainWindow):
             tb_widget.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
 
     def _new_room_from_menu(self):
-        """Nieuwe ruimte via dropdown — vraagt welke site als geen site geselecteerd."""
         data      = self._selected_tree_data()
         item_type = data.get("type") if data else None
         if item_type == _TYPE_SITE:
@@ -1072,7 +1150,6 @@ class MainWindow(QMainWindow):
             self.set_status(t("err_select_site_for_room"))
 
     def _new_rack_from_menu(self):
-        """Nieuwe rack via dropdown — gebruikt geselecteerde ruimte context."""
         data      = self._selected_tree_data()
         item_type = data.get("type") if data else None
         if item_type == _TYPE_ROOM:
@@ -1083,7 +1160,6 @@ class MainWindow(QMainWindow):
             self.set_status(t("err_select_room_for_rack"))
 
     def _new_outlet_from_menu(self):
-        """Nieuw wandpunt via dropdown — gebruikt geselecteerde ruimte context."""
         data      = self._selected_tree_data()
         item_type = data.get("type") if data else None
         if item_type == _TYPE_ROOM:
@@ -1094,7 +1170,6 @@ class MainWindow(QMainWindow):
             self.set_status(t("err_select_room_for_outlet"))
 
     def _on_new_site_explicit(self):
-        """Altijd een nieuwe site aanmaken, ongeacht selectie."""
         self._new_site()
 
     def _new_site(self):
@@ -1133,9 +1208,11 @@ class MainWindow(QMainWindow):
 
     def _new_wall_outlet(self, room_id: str):
         endpoints = self._data.get("endpoints", [])
-        dlg = WallOutletDialog(parent=self, room_id=room_id, endpoints=endpoints)
+        room      = self._find_room(room_id)
+        existing  = room.get("wall_outlets", []) if room else []
+        dlg = WallOutletDialog(parent=self, room_id=room_id,
+                               endpoints=endpoints, existing_outlets=existing)
         if dlg.exec() and dlg.get_result():
-            # Eindapparaten synchroniseren (nieuw toegevoegde of gewijzigde)
             self._data["endpoints"] = dlg.get_endpoints_result()
             obj = dlg.get_result()
             obj["id"] = self._gen_id("wo")
@@ -1147,7 +1224,6 @@ class MainWindow(QMainWindow):
                 self.set_status(f"✓  {t('label_wall_outlet')} '{obj['name']}' aangemaakt.")
 
     def _on_edit(self):
-        """Huidig geselecteerd object bewerken."""
         data = self._selected_tree_data()
         if not data:
             self.set_status(t("err_no_selection"))
@@ -1179,7 +1255,6 @@ class MainWindow(QMainWindow):
                 self.set_status(f"✓  {t('label_room')} '{room['name']}' bijgewerkt.")
 
         elif item_type == _TYPE_RACK:
-            # Popup: rack zelf bewerken of een device erin
             from PySide6.QtWidgets import QMenu
             menu = QMenu(self)
             menu.addAction(t('edit_rack_self'),
@@ -1192,7 +1267,6 @@ class MainWindow(QMainWindow):
             self.set_status(t("err_select_for_edit"))
 
     def _edit_rack_direct(self, data: dict):
-        """Rack bewerken zonder popup — direct dialog."""
         rack = self._find_rack(data["id"])
         if not rack:
             return
@@ -1210,7 +1284,6 @@ class MainWindow(QMainWindow):
             self.set_status(f"✓  {t('label_rack')} '{rack['name']}' bijgewerkt.")
 
     def _on_delete(self):
-        """Huidig geselecteerd object verwijderen na bevestiging."""
         from PySide6.QtWidgets import QMessageBox
         data = self._selected_tree_data()
         if not data:
@@ -1258,7 +1331,6 @@ class MainWindow(QMainWindow):
                 room["wall_outlets"] = [
                     wo for wo in room.get("wall_outlets", []) if wo["id"] != data["id"]
                 ]
-                # Ook verbindingen verwijderen die naar dit wandpunt leiden
                 self._data["connections"] = [
                     c for c in self._data.get("connections", [])
                     if not (c.get("from_id") == data["id"] or c.get("to_id") == data["id"])
@@ -1271,7 +1343,6 @@ class MainWindow(QMainWindow):
             self.set_status(t("err_select_outlet"))
 
     def _on_edit_device(self):
-        """Device bewerken vanuit rack — toont keuze welk device + opent DeviceDialog."""
         data = self._selected_tree_data()
         if not data or data.get("type") != _TYPE_RACK:
             self.set_status(t("err_select_rack_for_device"))
@@ -1314,7 +1385,6 @@ class MainWindow(QMainWindow):
             self.set_status(f"✓  {t('msg_device_updated')}: {device['name']}.")
 
     def _on_delete_device(self):
-        """Device verwijderen uit rack — met alle poorten en verbindingen."""
         from PySide6.QtWidgets import QInputDialog, QMessageBox
         data = self._selected_tree_data()
         if not data or data.get("type") != _TYPE_RACK:
@@ -1356,22 +1426,18 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Verwijder poorten van dit device
         port_ids = {p["id"] for p in self._data.get("ports", [])
                     if p["device_id"] == dev_id}
         self._data["ports"] = [
             p for p in self._data.get("ports", []) if p["device_id"] != dev_id
         ]
-        # Verwijder verbindingen naar deze poorten
         self._data["connections"] = [
             c for c in self._data.get("connections", [])
             if c.get("from_id") not in port_ids and c.get("to_id") not in port_ids
         ]
-        # Verwijder slot uit rack
         rack["slots"] = [
             s for s in rack.get("slots", []) if s.get("device_id") != dev_id
         ]
-        # Verwijder device
         self._data["devices"] = [
             d for d in self._data.get("devices", []) if d["id"] != dev_id
         ]
@@ -1383,7 +1449,6 @@ class MainWindow(QMainWindow):
         self.set_status(f"✓  {t('msg_device_deleted')}: {device['name']}.")
 
     def _delete_rack_direct(self, data: dict):
-        """Rack verwijderen na bevestiging."""
         from PySide6.QtWidgets import QMessageBox
         rack = self._find_rack(data["id"])
         if not rack:
@@ -1403,7 +1468,6 @@ class MainWindow(QMainWindow):
             self.set_status(f"✓  {t('msg_rack_deleted')}: {rack['name']}.")
 
     def _new_device_in_rack(self, rack_id: str):
-        """Device aanmaken en plaatsen in een rack via PlaceDeviceDialog."""
         rack = self._find_rack(rack_id)
         if not rack:
             return
@@ -1413,31 +1477,23 @@ class MainWindow(QMainWindow):
             device = result["device"]
             slot   = result["slot"]
 
-            # IDs genereren
             device["id"] = self._gen_id("dev")
             slot["id"]   = self._gen_id("slot")
             slot["rack_id"]   = rack_id
             slot["device_id"] = device["id"]
 
-            # Device opslaan
             self._data.setdefault("devices", []).append(device)
-
-            # Poorten aanmaken
             self._generate_ports(device)
-
-            # Slot toevoegen aan rack
             rack.setdefault("slots", []).append(slot)
 
             self._save_and_backup()
 
-            # Rack view vernieuwen als dit rack actief is
             if isinstance(self._current_view, RackView):
                 self._current_view.refresh(self._data)
 
             self.set_status(f"✓  {t('label_device')} '{device['name']}' toegevoegd aan {rack['name']}.")
 
     def _generate_ports(self, device: dict):
-        """Genereert poorten voor een nieuw device op basis van front_ports/back_ports."""
         dev_id      = device["id"]
         front_count = device.get("front_ports", 0)
         back_count  = device.get("back_ports",  0)
@@ -1461,8 +1517,6 @@ class MainWindow(QMainWindow):
             })
 
     def _on_duplicate(self):
-        """Device dupliceren — kopieert alle velden, naam krijgt ' (kopie)'."""
-        # Zoek actief device via geselecteerde poort of rack context
         data = self._selected_tree_data()
         if not data or data.get("type") != _TYPE_RACK:
             self.set_status("Selecteer een rack en gebruik Dupliceren via het rack zelf. (Klik eerst op een rack)")
@@ -1473,7 +1527,6 @@ class MainWindow(QMainWindow):
             self.set_status(t("err_rack_no_devices"))
             return
 
-        # Toon keuze welk device te dupliceren
         from PySide6.QtWidgets import QInputDialog
         dev_map   = {d["id"]: d for d in self._data.get("devices", [])}
         dev_names = []
@@ -1499,7 +1552,6 @@ class MainWindow(QMainWindow):
         src_id = dev_ids[idx]
         src    = dev_map[src_id]
 
-        # Dupliceer device (handboek: IP/MAC/serial leeg)
         new_dev = {
             "id":          self._gen_id("dev"),
             "name":        src["name"] + " (kopie)",
@@ -1516,9 +1568,7 @@ class MainWindow(QMainWindow):
         self._data.setdefault("devices", []).append(new_dev)
         self._generate_ports(new_dev)
 
-        # Kies U-positie via PlaceDeviceDialog (pre-ingevuld als kopie)
         dlg = PlaceDeviceDialog(parent=self, rack=rack, data=self._data)
-        # Pre-vul naam
         dlg._name.setText(new_dev["name"])
         dlg._ddl_type.setCurrentIndex(
             dlg._ddl_type.findData(new_dev["type"])
@@ -1538,7 +1588,6 @@ class MainWindow(QMainWindow):
                 self._current_view.refresh(self._data)
             self.set_status(f"✓  '{new_dev['name']}' gedupliceerd.")
         else:
-            # Geannuleerd — nieuw device + poorten terug verwijderen
             self._data["devices"] = [
                 d for d in self._data["devices"] if d["id"] != new_dev["id"]
             ]
@@ -1547,17 +1596,31 @@ class MainWindow(QMainWindow):
             ]
 
     # ------------------------------------------------------------------
-    # Instellingen — D6
+    # Help — H1
+    # ------------------------------------------------------------------
+
+    def _on_help(self):
+        """Opent het Help venster op de sneltoetsen tab."""
+        dlg = HelpWindow(parent=self)
+        dlg.exec()
+
+    def _on_about(self):
+        """Opent het Help venster direct op de versie-info tab."""
+        dlg = HelpWindow(parent=self)
+        dlg.set_tab(2)
+        dlg.exec()
+
+    # ------------------------------------------------------------------
+    # Instellingen
     # ------------------------------------------------------------------
 
     def _on_settings(self):
-        """Opent het instellingen venster."""
         dlg = SettingsWindow(parent=self)
         dlg.language_changed.connect(self.reload_ui_labels)
         dlg.exec()
 
     # ------------------------------------------------------------------
-    # Import / Export — D4
+    # Import / Export
     # ------------------------------------------------------------------
 
     def _on_export(self):
@@ -1581,7 +1644,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log_error("Export fout", e)
             self.set_status(f"⚠  {t('msg_export_failed')}")
-            
+
     def _on_export_image(self):
         """G2 — Exporteer actieve view als PNG/JPG via export_renderer."""
         if not self._current_view:
@@ -1595,6 +1658,10 @@ class MainWindow(QMainWindow):
             return
 
         from PySide6.QtWidgets import QFileDialog
+        import os
+        start_dir = self._export_folder()
+        if start_dir:
+            suggested = os.path.join(start_dir, os.path.basename(suggested))
         filepath, _ = QFileDialog.getSaveFileName(
             self, t("menu_export_image"), suggested,
             "PNG afbeelding (*.png);;JPEG afbeelding (*.jpg *.jpeg)"
@@ -1604,11 +1671,10 @@ class MainWindow(QMainWindow):
 
         ok, err = export_fn(filepath)
         if ok:
-            from app.services.logger import log_info
             log_info(f"Afbeelding geëxporteerd: {filepath}")
             self.set_status(f"✓  {t('msg_image_exported')}: {filepath}")
+            import os; os.startfile(filepath)   # auto-open
         else:
-            from app.services.logger import log_warning
             log_warning(f"Afbeelding export mislukt: {err}")
             self.set_status(f"⚠  {t('msg_image_export_failed')}: {err}")
 
@@ -1634,13 +1700,39 @@ class MainWindow(QMainWindow):
 
         ok, err = export_fn(filepath)
         if ok:
-            from app.services.logger import log_info
             log_info(f"PDF geëxporteerd: {filepath}")
             self.set_status(f"✓  {t('msg_pdf_exported')}: {filepath}")
         else:
-            from app.services.logger import log_warning
             log_warning(f"PDF export mislukt: {err}")
             self.set_status(f"⚠  {t('msg_pdf_export_failed')}: {err}")
+
+    def _on_export_report(self):
+        """G3 — Exporteer volledige infrastructuur als Word rapport (.docx)."""
+        import datetime
+        from PySide6.QtWidgets import QFileDialog
+
+        datum     = datetime.date.today().strftime("%Y%m%d")
+        suggested = f"networkmap_rapport_{datum}.docx"
+
+        import os
+        start_dir = self._export_folder()
+        if start_dir:
+            suggested = os.path.join(start_dir, suggested)
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, t("menu_export_report"), suggested,
+            "Word document (*.docx)"
+        )
+        if not filepath:
+            return
+
+        ok, err = report_generator.render_report_docx(self._data, filepath)
+        if ok:
+            log_info(f"Rapport geëxporteerd: {filepath}")
+            self.set_status(f"✓  {t('msg_report_exported')}: {filepath}")
+            import os; os.startfile(filepath)   # auto-open
+        else:
+            log_warning(f"Rapport export mislukt: {err}")
+            self.set_status(f"⚠  {t('msg_report_export_failed')}: {err}")
 
     def _resolve_export_context(self, datum: str, ext: str):
         """
@@ -1678,6 +1770,10 @@ class MainWindow(QMainWindow):
         else:
             self.set_status(t("err_no_view_to_export"))
             return None, None
+
+    def _export_folder(self) -> str:
+        """H1d — Geeft de ingestelde standaard exportmap terug, of lege string."""
+        return self._settings.get("ui", {}).get("export_folder", "")
 
     def _on_import(self):
         """Importeer een JSON bestand — keuze: vervangen of samenvoegen."""
@@ -1740,11 +1836,10 @@ class MainWindow(QMainWindow):
             self.set_status(f"⚠  {t('msg_import_fail')}")
 
     # ------------------------------------------------------------------
-    # Zoeken — D3
+    # Zoeken
     # ------------------------------------------------------------------
 
     def _on_search(self):
-        """Opent het zoekvenster als popup."""
         if not hasattr(self, "_search_win") or not self._search_win:
             self._search_win = SearchWindow(self._data, parent=self)
             self._search_win.result_selected.connect(self._on_search_result)
@@ -1755,18 +1850,11 @@ class MainWindow(QMainWindow):
         self._search_win.activateWindow()
 
     def _on_outlet_locator(self):
-        """Toolbar/menu Wandpunten zoeken (Ctrl+W) — toont OutletLocatorView in middengebied."""
         self._show_outlet_locator(room_id=None)
         self.set_status(f"🌐  {t('menu_outlet_locator')}")
 
     def _show_outlet_locator(self, room_id: str = None):
-        """
-        Toont de OutletLocatorView in het middengebied.
-        Als room_id gegeven is, selecteert de view direct die ruimte.
-        Hergebruikt de bestaande view als die al actief is (data refresh).
-        """
         if isinstance(self._current_view, OutletLocatorView):
-            # Al zichtbaar — alleen ruimte instellen als meegegeven
             if room_id:
                 self._current_view.set_room(room_id)
             self._current_view.refresh(self._data)
@@ -1787,7 +1875,6 @@ class MainWindow(QMainWindow):
             view.set_room(room_id)
 
     def _on_locator_outlet_selected(self, outlet_id: str, steps: list):
-        """Wandpunt geselecteerd in OutletLocatorView — toon trace in wire_detail."""
         outlet = next(
             (wo for site in self._data.get("sites", [])
              for room in site.get("rooms", [])
@@ -1803,7 +1890,6 @@ class MainWindow(QMainWindow):
             status = f"🌐  {outlet['name']}"
             if ep:
                 status += f"  ·  💻  {ep['name']}"
-            # Zoek patchpanel eindbestemming voor statusbalk
             last_port = next(
                 (s for s in reversed(steps) if s["obj_type"] == "port"), None)
             if last_port:
@@ -1811,14 +1897,9 @@ class MainWindow(QMainWindow):
             self.set_status(status)
 
     def _on_locator_room_navigate(self, room_id: str):
-        """OutletLocatorView vraagt de boom om een ruimte te selecteren."""
         self._select_tree_item_by_id(room_id, "room")
 
     def _on_search_result(self, result_type: str, result_id: str):
-        """
-        Navigeert naar het gevonden object.
-        Gebruikt _rack_id / _room_id / _site_id die search_service meegeeft.
-        """
         if result_type == "rack":
             for site in self._data.get("sites", []):
                 for room in site.get("rooms", []):
@@ -1903,17 +1984,11 @@ class MainWindow(QMainWindow):
                             return
 
     def _select_tree_item_by_id(self, obj_id: str, obj_type: str = None):
-        """
-        Selecteer een boom-item op basis van zijn id (in UserRole data).
-        obj_type optioneel — filtert op 'type' veld in UserRole data.
-        Zoekt recursief door alle niveaus.
-        """
         def _search(item: QTreeWidgetItem) -> bool:
             d = item.data(_COL, Qt.ItemDataRole.UserRole)
             if d and d.get("id") == obj_id:
                 if obj_type is None or d.get("type") == obj_type:
                     self._tree.setCurrentItem(item)
-                    # Klap ouders open
                     parent = item.parent()
                     while parent:
                         parent.setExpanded(True)
@@ -1929,7 +2004,6 @@ class MainWindow(QMainWindow):
                 return
 
     def _navigate_to_rack(self, rack: dict, room: dict, site: dict):
-        """Navigeer naar een rack: selecteer boom-item + toon rack_view."""
         self._show_rack_view(rack, room, site)
         for i in range(self._tree.topLevelItemCount()):
             site_item = self._tree.topLevelItem(i)
@@ -1949,14 +2023,10 @@ class MainWindow(QMainWindow):
                                 return
 
     # ------------------------------------------------------------------
-    # Opslaan + Backup — D5
+    # Opslaan + Backup
     # ------------------------------------------------------------------
 
     def _save_and_backup(self):
-        """
-        Slaat network_data op en triggert backup als ingeschakeld én pad beschikbaar.
-        Backup is standaard uitgeschakeld — instellen via Instellingen.
-        """
         try:
             settings_storage.save_network_data(self._data)
             log_info("network_data opgeslagen")
@@ -1990,7 +2060,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _gen_id(self, prefix: str) -> str:
-        """Genereert een uniek ID op basis van prefix + timestamp."""
         import time
         base = f"{prefix}_{int(time.time() * 1000) % 1_000_000}"
         all_ids = set()
@@ -2017,6 +2086,10 @@ class MainWindow(QMainWindow):
 
     def reload_ui_labels(self):
         self.setWindowTitle(t("app_title"))
+        # Menubar
+        self._menu_file.setTitle(t("menubar_file"))
+        self._menu_help.setTitle(t("menubar_help"))
+        # Toolbar
         self._act_new.setText(t("menu_new"))
         self._act_edit.setText(t("menu_edit"))
         self._act_delete.setText(t("menu_delete"))
@@ -2025,9 +2098,10 @@ class MainWindow(QMainWindow):
         self._act_connect.setText(t("menu_connect"))
         self._act_import.setText(t("menu_import"))
         self._act_export.setText(t("menu_export"))
+        self._act_export_image.setText(t("menu_export_image"))    # G2
+        self._act_export_pdf.setText(t("menu_export_pdf"))        # G1
+        self._act_export_report.setText(t("menu_export_report"))  # G3
         self._act_settings.setText(t("menu_settings"))
-        self._act_export_image.setText(t("menu_export_image"))   # G2
-        self._act_export_pdf.setText(t("menu_export_pdf"))       # G1        
         self._populate_tree()
 
     def refresh_tree(self):

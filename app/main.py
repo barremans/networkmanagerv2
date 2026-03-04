@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/main.py
 # Role:    Entry point — QApplication, QSS laden, taal instellen, MainWindow
-# Version: 1.1.0
+# Version: 1.1.1
 # Author:  Barremans
 # =============================================================================
 
@@ -11,7 +11,14 @@ import os
 
 # Zorg dat de projectroot (één niveau boven app/) op het Python-pad staat
 # zodat alle imports zoals 'from app.helpers import ...' werken
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if getattr(sys, 'frozen', False):
+    # PyInstaller EXE: de EXE staat in de dist/Networkmap_Creator_x.x.x/ map
+    # css/, data/, i18n/ etc. staan NAAST de EXE (niet in _internal)
+    _PROJECT_ROOT = os.path.dirname(sys.executable)
+else:
+    # Development: één niveau boven app/
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
@@ -91,7 +98,7 @@ def main():
     qss_ok = _load_qss(app)
     if qss_ok:
         print("[INFO] QSS geladen.")
-    
+
     # Hoofdvenster aanmaken en tonen
     window = MainWindow()
     window.show()

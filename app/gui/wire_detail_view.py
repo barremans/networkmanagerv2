@@ -2,8 +2,9 @@
 # Networkmap_Creator
 # File:    app/gui/wire_detail_view.py
 # Role:    Trace visualisatie in het detail frame onderaan
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
+# Changes: 1.4.0 — edit_connection signal + bewerk-knop + refresh_info()
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -39,9 +40,11 @@ class WireDetailView(QWidget):
     Toont de volledige trace als horizontale ketting van stappen.
     Signalen:
       delete_connection(conn_id)          — verbinding verwijderen
+      edit_connection(conn_id)            — verbinding bewerken  [1.4.0]
       navigate_to_rack(rack_id, port_ids) — E5: navigeer naar rack + highlight
     """
     delete_connection = Signal(str)         # verbinding id
+    edit_connection   = Signal(str)         # verbinding id  [1.4.0]
     navigate_to_rack  = Signal(str, list)   # rack_id, [port_ids] om te highlighten
 
     def __init__(self, parent=None):
@@ -59,17 +62,26 @@ class WireDetailView(QWidget):
         outer.setContentsMargins(12, 4, 12, 4)
         outer.setSpacing(2)
 
-        # Titelregel + verwijder knop
+        # Titelregel + knoppen  [1.4.0: bewerk-knop toegevoegd]
         title_row = QHBoxLayout()
         self._title_lbl = QLabel("")
         self._title_lbl.setObjectName("trace_title")
+
+        self._btn_edit = QPushButton(t("wire_edit_btn"))   # [1.4.0]
+        self._btn_edit.setObjectName("btn_secondary")
+        self._btn_edit.setFixedHeight(22)
+        self._btn_edit.hide()
+        self._btn_edit.clicked.connect(self._on_edit_clicked)
+
         self._btn_delete = QPushButton(t("wire_delete_btn"))
         self._btn_delete.setObjectName("btn_danger")
         self._btn_delete.setFixedHeight(22)
         self._btn_delete.hide()
         self._btn_delete.clicked.connect(self._on_delete_clicked)
+
         title_row.addWidget(self._title_lbl)
         title_row.addStretch()
+        title_row.addWidget(self._btn_edit)    # [1.4.0]
         title_row.addWidget(self._btn_delete)
         outer.addLayout(title_row)
 
@@ -90,7 +102,7 @@ class WireDetailView(QWidget):
         scroll.setWidget(self._chain_widget)
         outer.addWidget(scroll)
 
-        # Info regel (kabeltype)
+        # Info regel (kabeltype + label)  [1.4.0: label toegevoegd]
         self._info_lbl = QLabel("")
         self._info_lbl.setObjectName("trace_info")
         outer.addWidget(self._info_lbl)
@@ -121,7 +133,7 @@ class WireDetailView(QWidget):
                   conn_id: str = "", data: dict = None):
         """
         Vult het detail frame met de gegeven trace stappen.
-        conn_id : verbinding-ID — toont verwijder knop als aanwezig.
+        conn_id : verbinding-ID — toont bewerk/verwijder knoppen als aanwezig.
         data    : volledig network_data dict — nodig voor cross-rack navigatie (E5).
         """
         self._clear_chain()
@@ -138,7 +150,9 @@ class WireDetailView(QWidget):
             (s["cable_type"] for s in steps if s.get("cable_type")), ""
         )
         i18n_key, _ = _CABLE_META.get(cable_type, ("cable_other", "cable-other"))
-        self._info_lbl.setText(f"{t('label_cable_type')}: {t(i18n_key)}")
+
+        # [1.4.0] Info regel: kabeltype + eventueel label van verbinding
+        self._update_info_lbl(i18n_key, data, conn_id)
 
         for idx, step in enumerate(steps):
             self._chain_layout.addWidget(self._make_node(step))
@@ -149,10 +163,12 @@ class WireDetailView(QWidget):
 
         self._chain_layout.addStretch()
 
-        # Verwijder knop
+        # Knoppen  [1.4.0: ook bewerk-knop]
         if conn_id:
+            self._btn_edit.show()
             self._btn_delete.show()
         else:
+            self._btn_edit.hide()
             self._btn_delete.hide()
 
         # E5 — Cross-rack navigatie sectie
@@ -161,10 +177,46 @@ class WireDetailView(QWidget):
 
         self.show()
 
+    def refresh_info(self, data: dict):
+        """
+        [1.4.0] Herlaad de info-regel na bewerken (kabeltype/label bijwerken)
+        zonder de volledige trace opnieuw op te bouwen.
+        Wordt aangeroepen vanuit main_window na _on_edit_connection.
+        """
+        if not self._current_conn_id or not data:
+            return
+        conn = next(
+            (c for c in data.get("connections", [])
+             if c.get("id") == self._current_conn_id),
+            None
+        )
+        if not conn:
+            return
+        cable_type = conn.get("cable_type", "")
+        i18n_key, _ = _CABLE_META.get(cable_type, ("cable_other", "cable-other"))
+        self._update_info_lbl(i18n_key, data, self._current_conn_id)
+
+    def _update_info_lbl(self, i18n_key: str, data: dict | None, conn_id: str):
+        """Zet de info-regel met kabeltype + eventueel label."""
+        parts = [f"{t('label_cable_type')}: {t(i18n_key)}"]
+        if data and conn_id:
+            conn = next(
+                (c for c in data.get("connections", []) if c.get("id") == conn_id),
+                None
+            )
+            if conn and conn.get("label"):
+                parts.append(f"  ·  🏷  {conn['label']}")
+        self._info_lbl.setText("".join(parts))
+
     def _on_delete_clicked(self):
         """Emit signaal naar main_window om verbinding te verwijderen."""
         if self._current_conn_id:
             self.delete_connection.emit(self._current_conn_id)
+
+    def _on_edit_clicked(self):                          # [1.4.0]
+        """Emit signaal naar main_window om verbinding te bewerken."""
+        if self._current_conn_id:
+            self.edit_connection.emit(self._current_conn_id)
 
     def clear(self):
         """Verberg en leeg het detail frame."""
@@ -173,6 +225,7 @@ class WireDetailView(QWidget):
         self._title_lbl.setText("")
         self._info_lbl.setText("")
         self._current_conn_id = None
+        self._btn_edit.hide()
         self._btn_delete.hide()
         self.hide()
 
@@ -180,11 +233,8 @@ class WireDetailView(QWidget):
         """
         E5 — Bouw de rack-navigatie sectie.
         Groepeert port-stappen per rack, maakt een knop per uniek rack.
-        Toont de sectie alleen als er meer dan één rack betrokken is,
-        of als het huidige rack verschilt van de startlocatie.
         """
-        # Bouw port_id → rack mapping
-        port_to_rack = {}   # port_id → (rack_id, rack_name, device_name)
+        port_to_rack = {}
         for site in data.get("sites", []):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
@@ -192,7 +242,6 @@ class WireDetailView(QWidget):
                         dev_id = slot.get("device_id", "")
                         for port in data.get("ports", []):
                             if port.get("device_id") == dev_id:
-                                # Zoek device naam
                                 dev = next(
                                     (d for d in data.get("devices", [])
                                      if d["id"] == dev_id), None
@@ -204,9 +253,8 @@ class WireDetailView(QWidget):
                                     room["name"],
                                 )
 
-        # Groepeer port-stappen per rack (behoud volgorde)
-        seen_racks  = {}    # rack_id → (rack_name, room_name, [port_ids])
-        rack_order  = []    # geordende lijst van rack_ids
+        seen_racks  = {}
+        rack_order  = []
         for step in steps:
             if step["obj_type"] == "port":
                 info = port_to_rack.get(step["obj_id"])
@@ -221,14 +269,12 @@ class WireDetailView(QWidget):
             self._rack_nav_widget.hide()
             return
 
-        # Maak knoppen
         for rack_id in rack_order:
             rack_name, room_name, port_ids = seen_racks[rack_id]
             btn = QPushButton(f"🗄  {rack_name}")
             btn.setObjectName("btn_rack_nav")
             btn.setToolTip(f"{room_name}  —  {len(port_ids)} poort(en) in trace")
             btn.setFixedHeight(22)
-            # Capture voor lambda
             btn.clicked.connect(
                 lambda checked=False, rid=rack_id, pids=list(port_ids):
                     self.navigate_to_rack.emit(rid, pids)
@@ -276,7 +322,6 @@ class WireDetailView(QWidget):
         layout.addWidget(icon_lbl)
         layout.addWidget(text_lbl)
 
-        # Tooltip met side info indien aanwezig
         side = step.get("side", "")
         if side:
             frame.setToolTip(f"{t('label_' + side)}")
@@ -288,26 +333,20 @@ class WireDetailView(QWidget):
     # ------------------------------------------------------------------
 
     def _make_arrow(self, cable_type: str) -> QLabel:
-        """
-        Bouwt een gekleurde ──► pijl.
-        Kleur via QSS objectName (kabeltype).
-        """
+        """Bouwt een gekleurde ──► pijl (Wong 2011 kleurblindvriendelijk palet)."""
         _, obj_name = _CABLE_META.get(cable_type, ("cable_other", "cable-other"))
         arrow = QLabel(" ──► ")
         arrow.setObjectName("trace_arrow")
-        arrow.setProperty("cable", obj_name)   # bewaar kabeltype als property
+        arrow.setProperty("cable", obj_name)
         arrow.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        # Inline kleur via stylesheet op het widget zelf — valt terug op QSS
-        # Wong 2011 kleurblindvriendelijk palet
-        # Symbool biedt redundantie naast kleur (vorm + kleur = dubbele codering)
         color_map = {
-            "cable-utp-cat5e":  ("#56B4E9", "══"),   # lichtblauw,  dubbele lijn
-            "cable-utp-cat6":   ("#009E73", "══"),   # groen,       dubbele lijn
-            "cable-utp-cat6a":  ("#0072B2", "══"),   # donkerblauw, dubbele lijn
-            "cable-fiber-sm":   ("#F0E442", "──"),   # geel,        enkele lijn
-            "cable-fiber-mm":   ("#E69F00", "──"),   # oranje,      enkele lijn
-            "cable-dak":        ("#D55E00", "~~"),   # roodoranje,  golvend
-            "cable-other":      ("#CC79A7", "··"),   # roze/lila,   stippel
+            "cable-utp-cat5e":  ("#56B4E9", "══"),
+            "cable-utp-cat6":   ("#009E73", "══"),
+            "cable-utp-cat6a":  ("#0072B2", "══"),
+            "cable-fiber-sm":   ("#F0E442", "──"),
+            "cable-fiber-mm":   ("#E69F00", "──"),
+            "cable-dak":        ("#D55E00", "~~"),
+            "cable-other":      ("#CC79A7", "··"),
         }
         color, symbol = color_map.get(obj_name, ("#CC79A7", "··"))
         arrow.setText(f" {symbol}► ")
