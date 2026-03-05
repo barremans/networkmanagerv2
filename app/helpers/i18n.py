@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
 # Changes: F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
@@ -11,6 +11,7 @@
 #          G1+G2 — menu_export_image, menu_export_pdf, export_col_*, msg_*_exported
 #          G3 — menu_export_report, msg_report_exported, msg_report_export_failed
 #          H1 — menubar_*, help_*
+#          D  — update_check_url, update_available_*, update_goto_github, update_later
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -401,6 +402,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
         # Cross-rack trace (E5)
         "trace_racks":                  "Racks in trace",
+
+        # --- Fase D: update check bij opstarten ---
+        "update_check_url":         "Update check URL",
+        "update_check_url_hint":    "Leeg = standaard GitHub URL gebruiken.",
+        "update_available_title":   "Update beschikbaar",
+        "update_available_msg":     "Versie {version} is beschikbaar.\nWil je naar GitHub gaan om te downloaden?",
+        "update_goto_github":       "Naar GitHub",
+        "update_later":             "Later",
     },
 
     # -------------------------------------------------------------------------
@@ -789,6 +798,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
         # Cross-rack trace (E5)
         "trace_racks":                  "Racks in trace",
+
+        # --- Phase D: update check on startup ---
+        "update_check_url":         "Update check URL",
+        "update_check_url_hint":    "Empty = use default GitHub URL.",
+        "update_available_title":   "Update available",
+        "update_available_msg":     "Version {version} is available.\nDo you want to go to GitHub to download?",
+        "update_goto_github":       "Go to GitHub",
+        "update_later":             "Later",
     },
 }
 

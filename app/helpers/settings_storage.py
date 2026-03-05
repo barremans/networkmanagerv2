@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.3.1
+# Version: 1.4.0
 # Author:  Barremans
 # Changes: F2 — Device types configureerbaar via settings.json
 #               _DEFAULT_DEVICE_TYPES, load/save/get_device_type_*
@@ -10,6 +10,7 @@
 #               get_network_data_path() kiest netwerkpad als bereikbaar
 #               is_network_path_available(), get_network_data_source_label()
 #          B  — PyInstaller compatibel pad via sys.frozen
+#          D  — update_check_url toegevoegd aan _DEFAULT_SETTINGS
 # =============================================================================
 
 import json
@@ -78,6 +79,7 @@ _DEFAULT_DEVICE_TYPES = [
 _DEFAULT_SETTINGS = {
     "app_version": "1.0",
     "language": "nl",
+    "update_check_url": "",          # D — leeg = hardcoded GitHub URL gebruiken
     "backup": {
         "enabled": False,
         "network_path": "",

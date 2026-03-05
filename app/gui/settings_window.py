@@ -3,11 +3,12 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
 # Changes: F2 — Tabblad "Device types" met CRUD + standaard FRONT/BACK
 #          F3 — Sectie "Databron" in Algemeen tabblad
 #          H1d — Standaard exportmap in Weergave tabblad
+#          D  — Update check URL veld in Algemeen tabblad
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -27,7 +28,7 @@ from app.services import backup_service
 class SettingsWindow(QDialog):
     """
     Instellingen venster met tabbladen:
-      - Algemeen      : taal + databron (F3)
+      - Algemeen      : taal + databron (F3) + update check URL (D)
       - Backup        : netwerkpad, history, max backups
       - Weergave      : rack unit hoogte + standaard exportmap (H1d)
       - Eindapparaten : types beheren
@@ -128,6 +129,24 @@ class SettingsWindow(QDialog):
         form_data.addWidget(hint_ds)
 
         layout.addWidget(grp_data)
+
+        # --- Update check URL (D) ---
+        grp_update = QGroupBox(t("update_check_url"))
+        form_update = QFormLayout(grp_update)
+        form_update.setSpacing(8)
+
+        self._txt_update_url = QLineEdit()
+        self._txt_update_url.setPlaceholderText(t("update_check_url_hint"))
+        self._txt_update_url.setMinimumWidth(360)
+        form_update.addRow(t("update_check_url") + ":", self._txt_update_url)
+
+        hint_update = QLabel(t("update_check_url_hint"))
+        hint_update.setObjectName("secondary")
+        hint_update.setWordWrap(True)
+        form_update.addRow("", hint_update)
+
+        layout.addWidget(grp_update)
+
         layout.addStretch()
 
         self._chk_use_network.toggled.connect(self._on_ds_toggled)
@@ -366,6 +385,9 @@ class SettingsWindow(QDialog):
         self._txt_ds_path.setText(nd_cfg.get("network_path", ""))
         self._on_ds_toggled(nd_cfg.get("use_network_path", False))
         self._update_ds_status_label()
+
+        # Update check URL (D)
+        self._txt_update_url.setText(self._settings.get("update_check_url", ""))
 
         # Backup
         backup = self._settings.get("backup", {})
@@ -702,6 +724,8 @@ class SettingsWindow(QDialog):
             return
 
         settings_storage.save_setting("language", new_lang)
+        settings_storage.save_setting("update_check_url",           # D
+                                      self._txt_update_url.text().strip())
         settings_storage.save_setting("backup", {
             "enabled":      backup_enabled,
             "network_path": network_path,
@@ -712,7 +736,7 @@ class SettingsWindow(QDialog):
             "theme":            "dark",
             "rack_unit_height": self._spn_unit_h.value(),
             "rack_unit_width":  400,
-            "export_folder":    self._txt_export_folder.text().strip(),  # [H1d]
+            "export_folder":    self._txt_export_folder.text().strip(),  # H1d
         })
         settings_storage.save_setting("network_data", {
             "use_network_path": use_net,

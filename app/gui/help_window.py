@@ -2,23 +2,28 @@
 # Networkmap_Creator
 # File:    app/gui/help_window.py
 # Role:    H1 — Help venster: sneltoetsen, gebruiksaanwijzing, versie-info
-# Version: 1.1.0
+# Version: 1.2.2
 # Author:  Barremans
 # Changes: 1.1.0 — donkere kleuren, version.py dynamisch, help_texts.py
+#          1.2.0 — D: "Controleer op updates" knop in Over tabblad
+#          1.2.1 — D: update_available_with_url signaal
+#          1.2.2 — D: download-knop actief via DownloadDialog
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QScrollArea, QFrame, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
 
 from app.helpers.i18n import t
 from app.helpers.help_texts import SHORTCUTS, get_guide_sections
+from app.helpers import settings_storage
+from app.services.update_checker import UpdateChecker, GITHUB_RELEASES_URL
+from app.services.update_downloader import DownloadDialog
 
-# Versie dynamisch inlezen — valt terug op "—" als bestand ontbreekt
 try:
     from app import version as _ver
     _APP_VERSION = _ver.__version__
@@ -28,15 +33,12 @@ except Exception:
 _APP_NAME   = "Networkmap Creator"
 _APP_AUTHOR = "Barremans"
 
-# ---------------------------------------------------------------------------
-# Kleurpalet — leesbaar op donker thema
-# ---------------------------------------------------------------------------
-_C_HEADING   = "#7eb8f7"   # lichtblauw — sectietitels
-_C_BODY      = "#d0d8e8"   # lichtgrijs-blauw — bodytekst
-_C_MUTED     = "#8899aa"   # gedimde labels
-_C_ACCENT    = "#4a9eda"   # shortcut keys
-_C_DIVIDER   = "#3a4a5a"   # subtiele horizontale lijn
-_C_TABLE_HDR = "#1e3a5f"   # tabelkop achtergrond
+_C_HEADING   = "#7eb8f7"
+_C_BODY      = "#d0d8e8"
+_C_MUTED     = "#8899aa"
+_C_ACCENT    = "#4a9eda"
+_C_DIVIDER   = "#3a4a5a"
+_C_TABLE_HDR = "#1e3a5f"
 
 
 class HelpWindow(QDialog):
@@ -54,10 +56,6 @@ class HelpWindow(QDialog):
         self._tabs = None
         self._build_ui()
 
-    # ------------------------------------------------------------------
-    # UI opbouw
-    # ------------------------------------------------------------------
-
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -70,7 +68,6 @@ class HelpWindow(QDialog):
         self._tabs.addTab(self._tab_version(),   t("help_tab_version"))
         root.addWidget(self._tabs)
 
-        # Sluit knop
         btn_bar = QHBoxLayout()
         btn_bar.setContentsMargins(12, 8, 12, 10)
         btn_bar.addStretch()
@@ -81,7 +78,6 @@ class HelpWindow(QDialog):
         root.addLayout(btn_bar)
 
     def set_tab(self, index: int):
-        """Zet actief tabblad na aanmaken."""
         if self._tabs:
             self._tabs.setCurrentIndex(index)
 
@@ -101,18 +97,11 @@ class HelpWindow(QDialog):
         layout.addWidget(intro)
 
         tbl = QTableWidget(len(SHORTCUTS), 2)
-        tbl.setHorizontalHeaderLabels([
-            t("help_col_shortcut"),
-            t("help_col_action"),
-        ])
+        tbl.setHorizontalHeaderLabels([t("help_col_shortcut"), t("help_col_action")])
         tbl.horizontalHeader().setStyleSheet(
             f"QHeaderView::section {{"
-            f"  background-color: {_C_TABLE_HDR};"
-            f"  color: #ffffff;"
-            f"  font-weight: bold;"
-            f"  padding: 6px 12px;"
-            f"  border: none;"
-            f"}}"
+            f"  background-color: {_C_TABLE_HDR}; color: #ffffff;"
+            f"  font-weight: bold; padding: 6px 12px; border: none;}}"
         )
         tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -134,10 +123,8 @@ class HelpWindow(QDialog):
             key_item = QTableWidgetItem(f"  {key}")
             key_item.setFont(mono)
             key_item.setForeground(QColor(_C_ACCENT))
-
             desc_item = QTableWidgetItem(f"  {t(i18n_key)}")
             desc_item.setForeground(QColor(_C_BODY))
-
             tbl.setItem(row, 0, key_item)
             tbl.setItem(row, 1, desc_item)
             tbl.setRowHeight(row, 30)
@@ -161,30 +148,23 @@ class HelpWindow(QDialog):
         layout.setSpacing(4)
 
         for section in get_guide_sections():
-            # Sectie titel
             lbl_title = QLabel(section["title"])
             f = lbl_title.font()
             f.setBold(True)
             f.setPointSize(f.pointSize() + 1)
             lbl_title.setFont(f)
-            lbl_title.setStyleSheet(
-                f"color: {_C_HEADING}; margin-top: 14px; margin-bottom: 2px;"
-            )
+            lbl_title.setStyleSheet(f"color: {_C_HEADING}; margin-top: 14px; margin-bottom: 2px;")
             layout.addWidget(lbl_title)
 
-            # Horizontale lijn
             line = QFrame()
             line.setFrameShape(QFrame.Shape.HLine)
             line.setStyleSheet(f"color: {_C_DIVIDER}; margin-bottom: 4px;")
             layout.addWidget(line)
 
-            # Body
             lbl_body = QLabel(section["body"])
             lbl_body.setWordWrap(True)
             lbl_body.setTextFormat(Qt.TextFormat.RichText)
-            lbl_body.setStyleSheet(
-                f"color: {_C_BODY}; font-size: 12px; padding: 4px 0px 8px 0px;"
-            )
+            lbl_body.setStyleSheet(f"color: {_C_BODY}; font-size: 12px; padding: 4px 0px 8px 0px;")
             layout.addWidget(lbl_body)
 
         layout.addStretch()
@@ -202,7 +182,6 @@ class HelpWindow(QDialog):
         layout.setSpacing(0)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # App naam
         name_lbl = QLabel(_APP_NAME)
         f = name_lbl.font()
         f.setBold(True)
@@ -211,15 +190,11 @@ class HelpWindow(QDialog):
         name_lbl.setStyleSheet(f"color: {_C_HEADING}; margin-bottom: 4px;")
         layout.addWidget(name_lbl)
 
-        # Beschrijving
         desc_lbl = QLabel(t("help_app_desc"))
         desc_lbl.setWordWrap(True)
-        desc_lbl.setStyleSheet(
-            f"color: {_C_MUTED}; font-size: 12px; margin-bottom: 18px;"
-        )
+        desc_lbl.setStyleSheet(f"color: {_C_MUTED}; font-size: 12px; margin-bottom: 18px;")
         layout.addWidget(desc_lbl)
 
-        # Lijn
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet(f"color: {_C_DIVIDER}; margin-bottom: 14px;")
@@ -236,21 +211,84 @@ class HelpWindow(QDialog):
             h = QHBoxLayout(row_w)
             h.setContentsMargins(0, 4, 0, 4)
             h.setSpacing(0)
-
             lbl_l = QLabel(label)
             lbl_l.setFixedWidth(150)
             lbl_l.setStyleSheet(f"color: {_C_MUTED}; font-size: 12px;")
-
             lbl_v = QLabel(value)
             lbl_v.setStyleSheet(f"color: {_C_BODY}; font-size: 12px;")
-            lbl_v.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
-
+            lbl_v.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             h.addWidget(lbl_l)
             h.addWidget(lbl_v)
             h.addStretch()
             layout.addWidget(row_w)
 
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.Shape.HLine)
+        line2.setStyleSheet(f"color: {_C_DIVIDER}; margin-top: 18px; margin-bottom: 10px;")
+        layout.addWidget(line2)
+
+        update_row = QHBoxLayout()
+        update_row.setContentsMargins(0, 0, 0, 0)
+        update_row.setSpacing(12)
+
+        self._btn_check_update = QPushButton("🔍  Controleer op updates")
+        self._btn_check_update.setFixedWidth(200)
+        self._btn_check_update.clicked.connect(self._on_check_update)
+
+        self._lbl_update_status = QLabel("")
+        self._lbl_update_status.setStyleSheet(f"color: {_C_MUTED}; font-size: 12px;")
+
+        update_row.addWidget(self._btn_check_update)
+        update_row.addWidget(self._lbl_update_status)
+        update_row.addStretch()
+        layout.addLayout(update_row)
+
         layout.addStretch()
         return widget
+
+    # ------------------------------------------------------------------
+    # Update check — Fase D
+    # ------------------------------------------------------------------
+
+    def _on_check_update(self):
+        """Handmatige update check vanuit Help → Over."""
+        self._btn_check_update.setEnabled(False)
+        self._lbl_update_status.setStyleSheet(f"color: {_C_MUTED}; font-size: 12px;")
+        self._lbl_update_status.setText("Bezig met controleren...")
+
+        update_url = settings_storage.get_setting("update_check_url", "")
+        checker = UpdateChecker(url=update_url, parent=self)
+        checker.update_available_with_url.connect(self._on_update_found)
+
+        from PySide6.QtCore import QTimer
+
+        def _re_enable():
+            if self._lbl_update_status.text() == "Bezig met controleren...":
+                self._lbl_update_status.setStyleSheet(f"color: {_C_MUTED}; font-size: 12px;")
+                self._lbl_update_status.setText("✓  Je gebruikt de nieuwste versie.")
+            self._btn_check_update.setEnabled(True)
+
+        QTimer.singleShot(6500, _re_enable)
+        checker.start()
+
+    def _on_update_found(self, version: str, download_url: object) -> None:
+        """Wordt aangeroepen als een nieuwere versie gevonden is."""
+        self._btn_check_update.setEnabled(True)
+        self._lbl_update_status.setStyleSheet(
+            "color: #f0a040; font-size: 12px; font-weight: bold;"
+        )
+        self._lbl_update_status.setText(f"⬆  Versie {version} beschikbaar!")
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle(t("update_available_title"))
+        msg.setText(t("update_available_msg").format(version=version))
+
+        btn_download = msg.addButton("⬇  Downloaden", QMessageBox.ButtonRole.AcceptRole)
+        btn_download.setEnabled(bool(download_url))
+
+        msg.addButton(t("update_later"), QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        if msg.clickedButton() is btn_download and download_url:
+            dlg = DownloadDialog(url=download_url, version=version, parent=self)
+            dlg.exec()

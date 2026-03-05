@@ -2,33 +2,34 @@
 # Networkmap_Creator
 # File:    app/main.py
 # Role:    Entry point — QApplication, QSS laden, taal instellen, MainWindow
-# Version: 1.1.1
+# Version: 1.2.2
 # Author:  Barremans
+# Changes: D   — update check bij opstarten via UpdateChecker
+#          D.1 — update_available_with_url signaal
+#          D.2 — download-knop actief via DownloadDialog
 # =============================================================================
 
 import sys
 import os
 
-# Zorg dat de projectroot (één niveau boven app/) op het Python-pad staat
-# zodat alle imports zoals 'from app.helpers import ...' werken
 if getattr(sys, 'frozen', False):
-    # PyInstaller EXE: de EXE staat in de dist/Networkmap_Creator_x.x.x/ map
-    # css/, data/, i18n/ etc. staan NAAST de EXE (niet in _internal)
     _PROJECT_ROOT = os.path.dirname(sys.executable)
 else:
-    # Development: één niveau boven app/
     _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
 
 from app.helpers import settings_storage
 from app.helpers import i18n
+from app.helpers.i18n import t
 from app.gui.main_window import MainWindow
-from app.services.logger import log_info, log_warning, log_error, get_logger
+from app.services.logger import log_info, log_warning, log_error
+from app.services.update_checker import UpdateChecker, GITHUB_RELEASES_URL
+from app.services.update_downloader import DownloadDialog
 
 
 # ---------------------------------------------------------------------------
@@ -36,11 +37,6 @@ from app.services.logger import log_info, log_warning, log_error, get_logger
 # ---------------------------------------------------------------------------
 
 def _load_qss(app: QApplication) -> bool:
-    """
-    Laad css/main.qss en pas toe op de QApplication.
-    Geeft True terug bij succes, False als het bestand niet gevonden wordt.
-    Geeft een waarschuwing maar crasht NIET — app start gewoon zonder styling.
-    """
     qss_path = os.path.join(_PROJECT_ROOT, "css", "main.qss")
     if not os.path.exists(qss_path):
         log_warning(f"QSS bestand niet gevonden: {qss_path}")
@@ -63,10 +59,6 @@ def _load_qss(app: QApplication) -> bool:
 # ---------------------------------------------------------------------------
 
 def _init_language():
-    """
-    Laad de taalinstelling uit settings.json en stel i18n in.
-    Valt terug op 'nl' bij ontbrekende of ongeldige instelling.
-    """
     lang = settings_storage.get_setting("language", "nl")
     success = i18n.set_language(lang)
     if not success:
@@ -77,11 +69,49 @@ def _init_language():
 
 
 # ---------------------------------------------------------------------------
+# Update check — Fase D
+# ---------------------------------------------------------------------------
+
+def _start_update_check(window: MainWindow) -> None:
+    """
+    Start de asynchrone update check na het tonen van het hoofdvenster.
+    Netwerkfouten worden stil genegeerd — de app wordt nooit geblokkeerd.
+    """
+    update_url = settings_storage.get_setting("update_check_url", "")
+
+    def _on_update_available_with_url(version: str, download_url: object) -> None:
+        """Slot — uitgevoerd in de hoofdthread via Qt QueuedConnection."""
+        msg = QMessageBox(window)
+        msg.setWindowTitle(t("update_available_title"))
+        msg.setText(t("update_available_msg").format(version=version))
+
+        # Download-knop: actief als er een directe URL beschikbaar is
+        btn_download = msg.addButton(
+            "⬇  Downloaden", QMessageBox.ButtonRole.AcceptRole
+        )
+        btn_download.setEnabled(bool(download_url))
+
+        msg.addButton(t("update_later"), QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        if msg.clickedButton() is btn_download and download_url:
+            dlg = DownloadDialog(url=download_url, version=version, parent=window)
+            dlg.exec()
+            log_info(f"Download gestart voor versie {version}.")
+        else:
+            log_info(f"Update: gebruiker kiest 'Later' voor versie {version}.")
+
+    checker = UpdateChecker(url=update_url, parent=window)
+    checker.update_available_with_url.connect(_on_update_available_with_url)
+    checker.start()
+    log_info(f"Update check gestart (url: {checker._url!r}).")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
-    # High-DPI scaling inschakelen vóór QApplication aanmaken
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
@@ -91,17 +121,17 @@ def main():
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("Barremans")
 
-    # Taal instellen vóór het venster opent
     _init_language()
 
-    # QSS laden
     qss_ok = _load_qss(app)
     if qss_ok:
         print("[INFO] QSS geladen.")
 
-    # Hoofdvenster aanmaken en tonen
     window = MainWindow()
     window.show()
+
+    # Update check starten na tonen van het venster — Fase D
+    _start_update_check(window)
 
     sys.exit(app.exec())
 

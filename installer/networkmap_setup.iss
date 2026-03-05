@@ -50,7 +50,19 @@ Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\__pycache__"
 
 [Files]
-Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Alle programmabestanden — databestanden uitgesloten
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; \
+    Flags: ignoreversion recursesubdirs createallsubdirs; \
+    Excludes: "\data\settings.json,\data\network_data.json"
+
+; Databestanden — ALLEEN bij eerste installatie, nooit overschrijven
+Source: "{#MySourceDir}\data\settings.json"; \
+    DestDir: "{app}\data"; \
+    Flags: onlyifdoesntexist uninsneveruninstall
+
+Source: "{#MySourceDir}\data\network_data.json"; \
+    DestDir: "{app}\data"; \
+    Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#MyAppName}";           Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\assets\icons\icon.ico"
