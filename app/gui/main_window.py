@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.23.0
+# Version: 1.29.0
 # Author:  Barremans
 # Changes: F1 — ESC annuleert verbindingsmodus
 #               Klik op lege poort wist vorige trace + highlight
@@ -11,6 +11,12 @@
 #          H1 — Help menu (sneltoetsen, gebruiksaanwijzing, versie-info)
 #          H1b — Verbinding bewerken (label, kabeltype, notitie)
 #          H1c — Rack bezettingsgraad in boom + auto-open na export
+#          Taak2 — log_change() aanroepen voor devices en verbindingen
+#          1.25.0 — data_integrity.validate_and_repair() na laden
+#                   _gen_id: random suffix + ports opgenomen in ID-check
+#          1.26.0 — Menubar: In/Ex-port menu (nieuw)
+#                   Import/Export verplaatst van Bestand → In/Ex-port
+#                   Toolbar opgeschoond: import/export knoppen verwijderd
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -48,6 +54,13 @@ from app.services import backup_service
 from app.services.logger import log_info, log_warning, log_error
 from app.services import export_renderer
 from app.services import report_generator
+from app.gui.bug_report_dialog import BugReportDialog
+from app.gui.github_cases_dialog import GithubCasesDialog
+from app.services.changelog_service import (   # Taak2
+    log_change,
+    ENTITY_DEVICE, ENTITY_CONNECTION,
+    ACTION_ADD, ACTION_EDIT, ACTION_DELETE
+)
 
 _COL              = 0
 _TYPE_SITE        = "site"
@@ -64,6 +77,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._data     = settings_storage.load_network_data()
         self._settings = settings_storage.load_settings()
+
+        # Automatische data-integriteitscontrole bij elke start — v1.25.0
+        from app.services.data_integrity import validate_and_repair
+        self._data, _repaired, _rapport = validate_and_repair(self._data)
+        if _repaired:
+            settings_storage.save_network_data(self._data)
+            for regel in _rapport:
+                log_info(f"[data_integrity] {regel}")
+
         self._current_view    = None
         self._connect_mode    = False
         self._connect_port_a  = None   # eerste geselecteerde poort ID
@@ -92,17 +114,8 @@ class MainWindow(QMainWindow):
     def _build_menubar(self):
         mb = self.menuBar()
 
-        # ── File menu ────────────────────────────────────────────────
+        # ── Bestand menu ─────────────────────────────────────────────
         self._menu_file = mb.addMenu(t("menubar_file"))
-
-        act_import = self._menu_file.addAction(t("menu_import"))
-        act_import.setShortcut("Ctrl+O")
-        act_import.triggered.connect(self._on_import)
-
-        act_export = self._menu_file.addAction(t("menu_export"))
-        act_export.triggered.connect(self._on_export)
-
-        self._menu_file.addSeparator()
 
         act_settings = self._menu_file.addAction(t("menu_settings"))
         act_settings.triggered.connect(self._on_settings)
@@ -112,6 +125,40 @@ class MainWindow(QMainWindow):
         act_quit = self._menu_file.addAction(t("menubar_quit"))
         act_quit.setShortcut("Alt+F4")
         act_quit.triggered.connect(self.close)
+
+        # ── In/Ex-port menu ──────────────────────────────────────────
+        self._menu_inex = mb.addMenu(t("menubar_inexport"))
+
+        act_import = self._menu_inex.addAction(t("menu_import"))
+        act_import.setShortcut("Ctrl+O")
+        act_import.triggered.connect(self._on_import)
+
+        act_export = self._menu_inex.addAction(t("menu_export"))
+        act_export.triggered.connect(self._on_export)
+
+        self._menu_inex.addSeparator()
+
+        act_export_image = self._menu_inex.addAction(t("menu_export_image"))
+        act_export_image.setShortcut("Ctrl+Shift+E")
+        act_export_image.triggered.connect(self._on_export_image)
+
+        act_export_report = self._menu_inex.addAction(t("menu_export_report"))
+        act_export_report.setShortcut("Ctrl+Shift+R")
+        act_export_report.triggered.connect(self._on_export_report)
+
+        # ── Rapporteren menu ─────────────────────────────────────────
+        self._menu_report = mb.addMenu(t("menubar_report"))
+
+        act_bug = self._menu_report.addAction(t("menu_report_bug"))
+        act_bug.triggered.connect(self._on_report_bug)
+
+        act_feature = self._menu_report.addAction(t("menu_report_feature"))
+        act_feature.triggered.connect(self._on_report_feature)
+
+        self._menu_report.addSeparator()
+
+        act_cases = self._menu_report.addAction(t("menu_report_cases"))
+        act_cases.triggered.connect(self._on_show_cases)
 
         # ── Help menu ────────────────────────────────────────────────
         self._menu_help = mb.addMenu(t("menubar_help"))
@@ -177,41 +224,34 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
 
+        self._act_settings  = QAction(t("menu_settings"),  self)
+        self._act_settings.setEnabled(True)
+        self._act_settings.triggered.connect(self._on_settings)
+        tb.addAction(self._act_settings)
+
+        # QActions voor In/Ex-port — alleen in menu, niet in toolbar
         self._act_import    = QAction(t("menu_import"),    self)
         self._act_import.setEnabled(True)
         self._act_import.triggered.connect(self._on_import)
-        tb.addAction(self._act_import)
 
         self._act_export    = QAction(t("menu_export"),    self)
         self._act_export.setEnabled(True)
         self._act_export.triggered.connect(self._on_export)
-        tb.addAction(self._act_export)
 
         self._act_export_image = QAction(t("menu_export_image"), self)
         self._act_export_image.setShortcut("Ctrl+Shift+E")
         self._act_export_image.setEnabled(True)
         self._act_export_image.triggered.connect(self._on_export_image)
-        tb.addAction(self._act_export_image)
 
         self._act_export_pdf = QAction(t("menu_export_pdf"), self)
         self._act_export_pdf.setShortcut("Ctrl+Shift+P")
         self._act_export_pdf.setEnabled(True)
         self._act_export_pdf.triggered.connect(self._on_export_pdf)
-        self._act_export_pdf.setVisible(False)  # G1 — tijdelijk verborgen
-        tb.addAction(self._act_export_pdf)
 
         self._act_export_report = QAction(t("menu_export_report"), self)
         self._act_export_report.setShortcut("Ctrl+Shift+R")
         self._act_export_report.setEnabled(True)
         self._act_export_report.triggered.connect(self._on_export_report)
-        tb.addAction(self._act_export_report)
-
-        tb.addSeparator()
-
-        self._act_settings  = QAction(t("menu_settings"),  self)
-        self._act_settings.setEnabled(True)
-        self._act_settings.triggered.connect(self._on_settings)
-        tb.addAction(self._act_settings)
 
         self.addToolBar(tb)
 
@@ -658,6 +698,13 @@ class MainWindow(QMainWindow):
             if dlg.exec() and dlg.get_result():
                 device.update(dlg.get_result())
                 self._save_and_backup()
+                # Taak2 — log device bewerken
+                log_change(
+                    action=ACTION_EDIT,
+                    entity=ENTITY_DEVICE,
+                    entity_id=device["id"],
+                    label=f"{device['type']} — {device['name']}"
+                )
                 if isinstance(self._current_view, RackView):
                     self._current_view.refresh(self._data)
                 self.set_status(f"✓  {t('msg_device_updated')}: {device['name']}.")
@@ -671,6 +718,13 @@ class MainWindow(QMainWindow):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
+            # Taak2 — log device verwijderen (vóór de verwijdering)
+            log_change(
+                action=ACTION_DELETE,
+                entity=ENTITY_DEVICE,
+                entity_id=device_id,
+                label=f"{device['type']} — {device['name']}"
+            )
             port_ids = {p["id"] for p in self._data.get("ports", [])
                         if p["device_id"] == device_id}
             self._data["ports"] = [
@@ -817,6 +871,14 @@ class MainWindow(QMainWindow):
                 "notes":      "",
             })
             self._save_and_backup()
+            # Taak2 — log verbinding aanmaken via klik-klik
+            log_change(
+                action=ACTION_ADD,
+                entity=ENTITY_CONNECTION,
+                entity_id=new_id,
+                label=f"{port_a_id} → {port_b_id}",
+                details={"cable_type": "utp_cat6"}
+            )
 
             self._connect_mode = False
             self._act_connect.setChecked(False)
@@ -879,6 +941,13 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+        # Taak2 — log verbinding verwijderen (vóór de verwijdering)
+        log_change(
+            action=ACTION_DELETE,
+            entity=ENTITY_CONNECTION,
+            entity_id=conn_id,
+            label=conn.get("label") or f"{conn.get('from_id', '')} → {conn.get('to_id', '')}"
+        )
         self._data["connections"] = [
             c for c in self._data.get("connections", []) if c.get("id") != conn_id
         ]
@@ -914,12 +983,26 @@ class MainWindow(QMainWindow):
         if result is None:
             return
 
+        old_cable = conn.get("cable_type", "")
+        old_label = conn.get("label", "")
+
         # Sla wijzigingen op in de verbinding
         conn["label"]      = result["label"]
         conn["cable_type"] = result["cable_type"]
         conn["notes"]      = result["notes"]
 
         self._save_and_backup()
+        # Taak2 — log verbinding bewerken
+        log_change(
+            action=ACTION_EDIT,
+            entity=ENTITY_CONNECTION,
+            entity_id=conn["id"],
+            label=conn.get("label") or f"{conn.get('from_id', '')} → {conn.get('to_id', '')}",
+            details={
+                "from": {"cable_type": old_cable, "label": old_label},
+                "to":   {"cable_type": result["cable_type"], "label": result["label"]}
+            }
+        )
 
         # Info-regel in wire_detail bijwerken zonder volledige rebuild
         self._wire_detail.refresh_info(self._data)
@@ -1001,10 +1084,7 @@ class MainWindow(QMainWindow):
                 conn = dlg.get_result()
                 self._data.setdefault("connections", []).append(conn)
                 self._save_and_backup()
-                if isinstance(self._current_view, RackView):
-                    self._current_view.refresh(self._data)
-                steps = tracing.trace_from_port(self._data, port_id)
-                self._wire_detail.set_trace(steps, port_label, data=self._data)
+                # Taak2 — log verbinding poort ↔ wandpunt
                 outlet = next(
                     (wo for s in self._data.get("sites", [])
                      for r in s.get("rooms", [])
@@ -1013,6 +1093,17 @@ class MainWindow(QMainWindow):
                     None
                 )
                 outlet_name = outlet["name"] if outlet else conn["to_id"]
+                log_change(
+                    action=ACTION_ADD,
+                    entity=ENTITY_CONNECTION,
+                    entity_id=conn["id"],
+                    label=f"{port_label} → 🌐 {outlet_name}",
+                    details={"cable_type": conn["cable_type"]}
+                )
+                if isinstance(self._current_view, RackView):
+                    self._current_view.refresh(self._data)
+                steps = tracing.trace_from_port(self._data, port_id)
+                self._wire_detail.set_trace(steps, port_label, data=self._data)
                 self.set_status(
                     f"✓  {port_label}  ►  🌐  {outlet_name}"
                 )
@@ -1380,6 +1471,13 @@ class MainWindow(QMainWindow):
         if dlg.exec() and dlg.get_result():
             device.update(dlg.get_result())
             self._save_and_backup()
+            # Taak2 — log device bewerken via toolbar
+            log_change(
+                action=ACTION_EDIT,
+                entity=ENTITY_DEVICE,
+                entity_id=device["id"],
+                label=f"{device['type']} — {device['name']}"
+            )
             if isinstance(self._current_view, RackView):
                 self._current_view.refresh(self._data)
             self.set_status(f"✓  {t('msg_device_updated')}: {device['name']}.")
@@ -1426,6 +1524,13 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        # Taak2 — log device verwijderen via toolbar (vóór de verwijdering)
+        log_change(
+            action=ACTION_DELETE,
+            entity=ENTITY_DEVICE,
+            entity_id=dev_id,
+            label=f"{device['type']} — {device['name']}"
+        )
         port_ids = {p["id"] for p in self._data.get("ports", [])
                     if p["device_id"] == dev_id}
         self._data["ports"] = [
@@ -1487,6 +1592,13 @@ class MainWindow(QMainWindow):
             rack.setdefault("slots", []).append(slot)
 
             self._save_and_backup()
+            # Taak2 — log device toevoegen
+            log_change(
+                action=ACTION_ADD,
+                entity=ENTITY_DEVICE,
+                entity_id=device["id"],
+                label=f"{device['type']} — {device['name']} ({rack['name']})"
+            )
 
             if isinstance(self._current_view, RackView):
                 self._current_view.refresh(self._data)
@@ -1584,6 +1696,14 @@ class MainWindow(QMainWindow):
             slot["device_id"] = new_dev["id"]
             rack.setdefault("slots", []).append(slot)
             self._save_and_backup()
+            # Taak2 — log device dupliceren
+            log_change(
+                action=ACTION_ADD,
+                entity=ENTITY_DEVICE,
+                entity_id=new_dev["id"],
+                label=f"{new_dev['type']} — {new_dev['name']} ({rack['name']})",
+                details={"duplicated_from": src_id}
+            )
             if isinstance(self._current_view, RackView):
                 self._current_view.refresh(self._data)
             self.set_status(f"✓  '{new_dev['name']}' gedupliceerd.")
@@ -1598,6 +1718,23 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Help — H1
     # ------------------------------------------------------------------
+
+    def _on_report_bug(self):
+        """Opent de bug/feature meld dialog — bug voorgeselecteerd."""
+        dlg = BugReportDialog(parent=self)
+        dlg._type_select.setCurrentIndex(0)  # Bug
+        dlg.exec()
+
+    def _on_report_feature(self):
+        """Opent de bug/feature meld dialog — feature voorgeselecteerd."""
+        dlg = BugReportDialog(parent=self)
+        dlg._type_select.setCurrentIndex(1)  # Feature
+        dlg.exec()
+
+    def _on_show_cases(self):
+        """Toont open GitHub Issues en Pull Requests."""
+        dlg = GithubCasesDialog(parent=self)
+        dlg.exec()
 
     def _on_help(self):
         """Opent het Help venster op de sneltoetsen tab."""
@@ -1810,6 +1947,11 @@ class MainWindow(QMainWindow):
                     self.set_status(f"⚠  {t('msg_import_fail')}: {err}")
                     return
                 self._data = data
+                # Integriteitscontrole ook na import
+                self._data, _repaired, _rapport = validate_and_repair(self._data)
+                if _repaired:
+                    for regel in _rapport:
+                        log_info(f"[data_integrity] {regel}")
                 self._save_and_backup()
                 self._populate_tree()
                 log_info(f"Import replace: {filepath}")
@@ -1823,6 +1965,11 @@ class MainWindow(QMainWindow):
                     self.set_status(f"⚠  {t('msg_import_fail')}: {err}")
                     return
                 self._data = data
+                # Integriteitscontrole ook na import
+                self._data, _repaired, _rapport = validate_and_repair(self._data)
+                if _repaired:
+                    for regel in _rapport:
+                        log_info(f"[data_integrity] {regel}")
                 self._save_and_backup()
                 self._populate_tree()
                 log_info(f"Import merge: {filepath} — {stats}")
@@ -2056,12 +2203,13 @@ class MainWindow(QMainWindow):
             log_error("Backup fout", e)
 
     # ------------------------------------------------------------------
-    # ID generator
+    # ID generator — v1.25.0
+    # random suffix + ports opgenomen → nooit meer duplicate port IDs
     # ------------------------------------------------------------------
 
     def _gen_id(self, prefix: str) -> str:
-        import time
-        base = f"{prefix}_{int(time.time() * 1000) % 1_000_000}"
+        import time, random
+        base = f"{prefix}_{int(time.time() * 1000) % 1_000_000}_{random.randint(100, 999)}"
         all_ids = set()
         for site in self._data.get("sites", []):
             all_ids.add(site["id"])
@@ -2073,8 +2221,10 @@ class MainWindow(QMainWindow):
                     all_ids.add(wo["id"])
         for d in self._data.get("devices", []):
             all_ids.add(d["id"])
+        for p in self._data.get("ports", []):
+            all_ids.add(p["id"])
         while base in all_ids:
-            base += "_"
+            base = f"{prefix}_{int(time.time() * 1000) % 1_000_000}_{random.randint(100, 999)}"
         return base
 
     # ------------------------------------------------------------------
@@ -2088,6 +2238,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t("app_title"))
         # Menubar
         self._menu_file.setTitle(t("menubar_file"))
+        self._menu_inex.setTitle(t("menubar_inexport"))
+        self._menu_report.setTitle(t("menubar_report"))
         self._menu_help.setTitle(t("menubar_help"))
         # Toolbar
         self._act_new.setText(t("menu_new"))

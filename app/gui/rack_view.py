@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.4.0
+# Version: 1.9.2
 # Author:  Barremans
 # Changes: 1.4.0 — bezettingsindicator in titelregel (percentage + kleurenbalk)
+#          1.5.0 — refresh() hergebruikt bestaande layout via _populate()
+#          1.9.0 — revert naar v1.3.0 event handling (QFrame + mousePressEvent)
+#          1.9.1 — fix: set_connect_mode kleurt alleen VRIJE poorten rood
+#                  verbonden poorten (port-connected) blijven oranje zichtbaar
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -12,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QSizePolicy, QMenu
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QCursor, QAction, QMouseEvent
+from PySide6.QtGui import QCursor, QMouseEvent
 
 from app.helpers.i18n import t
 
@@ -22,13 +26,11 @@ _PORT_SIZE     = 14
 _PORT_GAP      = 2
 _MAX_PORTS_ROW = 12
 
-# Vaste actie-sleutels — nooit tekst vergelijken, altijd sleutel
 _ACT_EDIT   = "edit"
 _ACT_DELETE = "delete"
 
-# Bezettingsgraad drempelwaarden
-_OCC_WARN     = 0.75   # >= 75% → oranje
-_OCC_CRITICAL = 0.90   # >= 90% → rood
+_OCC_WARN     = 0.75
+_OCC_CRITICAL = 0.90
 
 
 def _refresh_style(widget: QWidget):
@@ -39,33 +41,23 @@ def _refresh_style(widget: QWidget):
 
 
 def _rack_occupancy(rack: dict, slots: list | None = None) -> tuple[int, int]:
-    """
-    Berekent (bezette_u, totale_u) voor een rack.
-    Telt de daadwerkelijke hoogte van elk slot op.
-    """
     total = rack.get("total_units", 0)
     used  = sum(s.get("height", 1) for s in rack.get("slots", []))
     return used, total
 
 
 def _occupancy_color(used: int, total: int) -> str:
-    """Geeft een CSS kleurstring terug op basis van bezettingsgraad."""
     if total == 0:
-        return "#4a9eda"   # blauw — leeg/onbekend
+        return "#4a9eda"
     ratio = used / total
     if ratio >= _OCC_CRITICAL:
-        return "#e05252"   # rood
+        return "#e05252"
     if ratio >= _OCC_WARN:
-        return "#e09a2a"   # oranje
-    return "#4caf7d"       # groen
+        return "#e09a2a"
+    return "#4caf7d"
 
 
 class OccupancyBar(QWidget):
-    """
-    Kleine horizontale bezettingsbalk — groen/oranje/rood.
-    Toont ook percentage als tekst.
-    """
-
     def __init__(self, used: int, total: int, parent=None):
         super().__init__(parent)
         self._used  = used
@@ -81,7 +73,6 @@ class OccupancyBar(QWidget):
         pct   = (used / total * 100) if total else 0
         color = _occupancy_color(used, total)
 
-        # Balk container
         bar_container = QFrame()
         bar_container.setFixedSize(80, 10)
         bar_container.setStyleSheet(
@@ -95,7 +86,6 @@ class OccupancyBar(QWidget):
         )
         layout.addWidget(bar_container)
 
-        # Percentage tekst
         pct_lbl = QLabel(f"{pct:.0f}%  ({used}/{total}U)")
         pct_lbl.setObjectName("secondary")
         pct_lbl.setStyleSheet(f"color: {color}; font-size: 11px;")
@@ -117,14 +107,19 @@ class RackView(QWidget):
         self._connect_mode  = False
         self._selected_port = None
         self._port_widgets  = {}
-        self._build()
 
-    def _build(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        self._populate(outer)
 
-        # Titelregel met bezettingsindicator  [1.4.0]
+    # ------------------------------------------------------------------
+    # Inhoud opbouwen
+    # ------------------------------------------------------------------
+
+    def _populate(self, outer: QVBoxLayout):
+        """Vult de gegeven layout met titelregel + rack inhoud."""
+
         title_bar = QFrame()
         title_bar.setObjectName("rack_frame")
         tl = QHBoxLayout(title_bar)
@@ -148,7 +143,7 @@ class RackView(QWidget):
 
         tl.addWidget(title_lbl)
         tl.addStretch()
-        tl.addWidget(occ_bar)           # [1.4.0]
+        tl.addWidget(occ_bar)
         tl.addSpacing(12)
         tl.addWidget(units_lbl)
         outer.addWidget(title_bar)
@@ -272,7 +267,7 @@ class RackView(QWidget):
     # ------------------------------------------------------------------
 
     def _show_device_context_menu(self, device_id: str, global_pos):
-        menu = QMenu()
+        menu = QMenu(self)
         act_edit   = menu.addAction(t("ctx_edit_device"))
         act_delete = menu.addAction(t("ctx_delete_device"))
         chosen = menu.exec(global_pos)
@@ -339,7 +334,7 @@ class RackView(QWidget):
     def _attach_port_click(self, widget, port_id, device_id, side):
         def on_click(event: QMouseEvent, pid=port_id, did=device_id, s=side):
             if event.button() == Qt.MouseButton.RightButton:
-                self.port_context_menu.emit(pid, widget.mapToGlobal(event.pos()))
+                self.port_context_menu.emit(pid, widget.mapToGlobal(event.position().toPoint()))
                 event.accept()
                 return
             if self._connect_mode:
@@ -389,15 +384,25 @@ class RackView(QWidget):
     def set_connect_mode(self, active):
         self._connect_mode  = active
         self._selected_port = None
-        for pid, w in self._port_widgets.items():
-            self._restore_port_style(pid, w)
+
         if active:
+            # Herstel eerst alle poorten naar hun correcte stijl
             for pid, w in self._port_widgets.items():
-                if w.objectName() != "port-selected":
+                self._restore_port_style(pid, w)
+            # Kleur dan alleen de VRIJE poorten rood
+            # Verbonden poorten (port-connected) blijven oranje — niet aanklikbaar
+            for pid, w in self._port_widgets.items():
+                current = w.objectName()
+                if current not in ("port-connected", "port-selected"):
                     w.setObjectName("port-connect-mode")
                     _refresh_style(w)
+        else:
+            # Verbindingsmodus uit — herstel alle poorten naar correcte stijl
+            for pid, w in self._port_widgets.items():
+                self._restore_port_style(pid, w)
 
     def refresh(self, data):
+        """Herlaad rack inhoud zonder nieuwe QVBoxLayout aan te maken."""
         self._data = data
         layout = self.layout()
         while layout.count():
@@ -406,7 +411,7 @@ class RackView(QWidget):
                 item.widget().deleteLater()
         self._port_widgets.clear()
         self._selected_port = None
-        self._build()
+        self._populate(layout)
 
     def highlight_trace(self, port_ids: list):
         for pid, widget in self._port_widgets.items():
@@ -423,13 +428,14 @@ class RackView(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# _DeviceRow
+# _DeviceRow — identiek aan v1.3.0
 # ---------------------------------------------------------------------------
 
 class _DeviceRow(QFrame):
     """
     Device rij widget met eigen mousePressEvent override.
     Rechtermuisklik op elk onderdeel van de rij wordt hier correct opgevangen.
+    Linkermuisklik via super() — port QFrame widgets hebben eigen override.
     """
     device_right_clicked = Signal(str, object)
 
@@ -441,7 +447,7 @@ class _DeviceRow(QFrame):
         if event.button() == Qt.MouseButton.RightButton:
             self.device_right_clicked.emit(
                 self._device_id,
-                self.mapToGlobal(event.pos())
+                self.mapToGlobal(event.position().toPoint())
             )
             event.accept()
             return

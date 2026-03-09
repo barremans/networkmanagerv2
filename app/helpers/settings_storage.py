@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.4.0
+# Version: 1.5.0
 # Author:  Barremans
 # Changes: F2 — Device types configureerbaar via settings.json
 #               _DEFAULT_DEVICE_TYPES, load/save/get_device_type_*
@@ -11,6 +11,11 @@
 #               is_network_path_available(), get_network_data_source_label()
 #          B  — PyInstaller compatibel pad via sys.frozen
 #          D  — update_check_url toegevoegd aan _DEFAULT_SETTINGS
+#          1.5.0 — APPDATA fix: data opslaan in %APPDATA%\Networkmap_Creator
+#                  wanneer app draait vanuit write-protected map (Program Files)
+#          1.6.0 — Vaste data map: C:\Networkmap_Creator\data\
+#                  Data staat altijd op dezelfde plek, onafhankelijk van
+#                  installatielocatie. Geen dataverlies bij herinstallatie.
 # =============================================================================
 
 import json
@@ -19,17 +24,63 @@ import sys
 import shutil
 from datetime import datetime
 
-# Paden relatief aan de projectroot
-# In dev:        één niveau boven app/helpers/ = projectroot
-# In PyInstaller EXE: map van de EXE (naast _internal/, css/, data/)
-if getattr(sys, 'frozen', False):
-    _BASE_DIR = os.path.dirname(sys.executable)
-else:
-    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# ---------------------------------------------------------------------------
+# Pad bepaling — v1.5.0
+#
+# Prioriteit:
+#   1. Dev (niet frozen)          → projectroot/data/
+#   2. Frozen + schrijfbaar       → naast .exe / data/
+#   3. Frozen + niet schrijfbaar  → %APPDATA%\Networkmap_Creator\data/
+#      (treedt op bij installatie in C:\Program Files\)
+# ---------------------------------------------------------------------------
 
-_DATA_DIR        = os.path.join(_BASE_DIR, "data")
-_SETTINGS_FILE   = os.path.join(_DATA_DIR, "settings.json")
-_NETWORK_FILE    = os.path.join(_DATA_DIR, "network_data.json")
+_APP_NAME    = "Networkmap_Creator"
+_FIXED_DATA  = r"C:\Networkmap_Creator"   # Vaste datamap — altijd schrijfbaar
+
+
+def _get_base_dir() -> str:
+    """
+    Bepaal de basismap voor data opslag.
+
+    Development (niet frozen):
+        Projectroot — twee niveaus boven app/helpers/
+
+    PyInstaller exe (frozen):
+        Altijd C:\\Networkmap_Creator\\
+        → buiten Program Files → altijd schrijfbaar
+        → vaste locatie → geen dataverlies bij herinstallatie
+
+    Fallback (C:\\ niet schrijfbaar, bijv. gelimiteerde omgeving):
+        %APPDATA%\\Networkmap_Creator\\
+    """
+    if not getattr(sys, "frozen", False):
+        # Development
+        return os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+
+    # PyInstaller exe — gebruik altijd de vaste map op C:\
+    try:
+        os.makedirs(_FIXED_DATA, exist_ok=True)
+        test_file = os.path.join(_FIXED_DATA, ".write_test")
+        with open(test_file, "w") as f:
+            f.write("ok")
+        os.remove(test_file)
+        return _FIXED_DATA      # ✅ C:\Networkmap_Creator — beschrijfbaar
+    except OSError:
+        pass
+
+    # Fallback: C:\ niet schrijfbaar → gebruik APPDATA
+    appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+    appdata_dir = os.path.join(appdata, _APP_NAME)
+    os.makedirs(appdata_dir, exist_ok=True)
+    return appdata_dir
+
+
+_BASE_DIR      = _get_base_dir()
+_DATA_DIR      = os.path.join(_BASE_DIR, "data")
+_SETTINGS_FILE = os.path.join(_DATA_DIR, "settings.json")
+_NETWORK_FILE  = os.path.join(_DATA_DIR, "network_data.json")
 
 # Verplichte sleutels voor validatie
 _REQUIRED_SETTINGS_KEYS = ["app_version", "language", "backup", "ui"]
@@ -299,6 +350,11 @@ def get_network_data_source_label() -> tuple[str, bool]:
 
 def get_settings_path() -> str:
     return _SETTINGS_FILE
+
+
+def get_data_dir() -> str:
+    """Geeft de actieve data map terug — handig voor diagnostiek."""
+    return _DATA_DIR
 
 
 # ---------------------------------------------------------------------------

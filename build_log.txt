@@ -1,10 +1,10 @@
---- Build gestart op 04/03/2026 15:30:41.21 --- 
-146 INFO: PyInstaller: 6.19.0, contrib hooks: 2026.2
-147 INFO: Python: 3.12.10
-209 INFO: Platform: Windows-11-10.0.26200-SP0
-209 INFO: Python environment: C:\PY\networkmanager\.venv
-213 INFO: Removing temporary files and cleaning cache in C:\Users\BBossuyt\AppData\Local\pyinstaller
-261 INFO: Module search paths (PYTHONPATH):
+--- Build gestart op 06/03/2026 14:09:26.42 --- 
+139 INFO: PyInstaller: 6.19.0, contrib hooks: 2026.2
+140 INFO: Python: 3.12.10
+184 INFO: Platform: Windows-11-10.0.26200-SP0
+184 INFO: Python environment: C:\PY\networkmanager\.venv
+186 INFO: Removing temporary files and cleaning cache in C:\Users\BBossuyt\AppData\Local\pyinstaller
+233 INFO: Module search paths (PYTHONPATH):
 ['C:\\PY\\networkmanager',
  'C:\\Users\\BBossuyt\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
  'C:\\Users\\BBossuyt\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
@@ -13,113 +13,138 @@
  'C:\\PY\\networkmanager\\.venv',
  'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages',
  'C:\\PY\\networkmanager']
-533 INFO: Appending 'datas' from .spec
-533 INFO: checking Analysis
-533 INFO: Building Analysis because Analysis-00.toc is non existent
-533 INFO: Looking for Python shared library...
-534 INFO: Using Python shared library: C:\Users\BBossuyt\AppData\Local\Programs\Python\Python312\python312.dll
-534 INFO: Running Analysis Analysis-00.toc
-534 INFO: Target bytecode optimization level: 0
-534 INFO: Initializing module dependency graph...
-535 INFO: Initializing module graph hook caches...
-544 INFO: Analyzing modules for base_library.zip ...
-1772 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-2826 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-3551 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-3778 INFO: Caching module dependency graph...
-3800 INFO: Analyzing C:\PY\networkmanager\app\main.py
-3805 INFO: Processing standard module hook 'hook-PySide6.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-3979 INFO: Processing standard module hook 'hook-shiboken6.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-4067 INFO: Processing standard module hook 'hook-PySide6.QtNetwork.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-5644 INFO: Processing standard module hook 'hook-PySide6.QtCore.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-8210 INFO: Processing standard module hook 'hook-PySide6.QtWidgets.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-10792 INFO: Processing standard module hook 'hook-PySide6.QtGui.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-35825 INFO: Processing standard module hook 'hook-PySide6.QtPrintSupport.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-36310 INFO: Processing standard module hook 'hook-docx.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-36373 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-36374 INFO: SetuptoolsInfo: initializing cached setuptools info...
-37025 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-37181 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-37413 INFO: Processing standard module hook 'hook-lxml.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-37746 INFO: Processing standard module hook 'hook-lxml.etree.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-37962 INFO: Analyzing hidden import 'PySide6.QtSvg'
-37967 INFO: Processing standard module hook 'hook-PySide6.QtSvg.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-38265 INFO: Analyzing hidden import 'PySide6.QtXml'
-38279 INFO: Processing standard module hook 'hook-PySide6.QtXml.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-38563 INFO: Analyzing hidden import 'lxml._elementpath'
-38571 INFO: Processing module hooks (post-graph stage)...
-38638 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-38786 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-38808 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-39110 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-39136 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-39170 INFO: Processing standard module hook 'hook-lxml.objectify.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-39178 INFO: Performing binary vs. data reclassification (155 entries)
-39201 INFO: Looking for ctypes DLLs
-39209 INFO: Analyzing run-time hooks ...
-39211 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-39213 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-39214 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-39216 INFO: Including run-time hook 'pyi_rth_pyside6.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-39217 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
-39218 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
-39228 INFO: Creating base_library.zip...
-39247 INFO: Looking for dynamic libraries
-39598 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\shiboken6']
-39598 INFO: Extra DLL search directories (PATH): ['C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PySide6']
-40442 INFO: Warnings written to C:\PY\networkmanager\build\networkmap\warn-networkmap.txt
-40465 INFO: Graph cross-reference written to C:\PY\networkmanager\build\networkmap\xref-networkmap.html
-40484 INFO: checking PYZ
-40484 INFO: Building PYZ because PYZ-00.toc is non existent
-40484 INFO: Building PYZ (ZlibArchive) C:\PY\networkmanager\build\networkmap\PYZ-00.pyz
-40775 INFO: Building PYZ (ZlibArchive) C:\PY\networkmanager\build\networkmap\PYZ-00.pyz completed successfully.
-40791 INFO: checking PKG
-40791 INFO: Building PKG because PKG-00.toc is non existent
-40791 INFO: Building PKG (CArchive) Networkmap_Creator.pkg
-40836 INFO: Building PKG (CArchive) Networkmap_Creator.pkg completed successfully.
-40836 INFO: Bootloader C:\PY\networkmanager\.venv\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
-40836 INFO: checking EXE
-40836 INFO: Building EXE because EXE-00.toc is non existent
-40837 INFO: Building EXE from EXE-00.toc
-40837 INFO: Copying bootloader EXE to C:\PY\networkmanager\build\networkmap\Networkmap_Creator.exe
-40847 INFO: Copying icon to EXE
-40997 INFO: Copying 0 resources to EXE
-40997 INFO: Embedding manifest in EXE
-41124 INFO: Appending PKG archive to EXE
-41419 INFO: Fixing EXE headers
-43135 INFO: Building EXE from EXE-00.toc completed successfully.
-43136 INFO: checking Tree
-43136 INFO: Building Tree because Tree-00.toc is non existent
-43136 INFO: Building Tree Tree-00.toc
-43138 INFO: checking Tree
-43138 INFO: Building Tree because Tree-01.toc is non existent
-43138 INFO: Building Tree Tree-01.toc
-43139 INFO: checking Tree
-43140 INFO: Building Tree because Tree-02.toc is non existent
-43140 INFO: Building Tree Tree-02.toc
-43141 INFO: checking Tree
-43141 INFO: Building Tree because Tree-03.toc is non existent
-43141 INFO: Building Tree Tree-03.toc
-43142 INFO: checking Tree
-43142 INFO: Building Tree because Tree-04.toc is non existent
-43142 INFO: Building Tree Tree-04.toc
-43143 INFO: checking Tree
-43143 INFO: Building Tree because Tree-05.toc is non existent
-43143 INFO: Building Tree Tree-05.toc
-43144 INFO: checking Tree
-43144 INFO: Building Tree because Tree-06.toc is non existent
-43144 INFO: Building Tree Tree-06.toc
-43145 INFO: checking Tree
-43145 INFO: Building Tree because Tree-07.toc is non existent
-43145 INFO: Building Tree Tree-07.toc
-43145 INFO: checking Tree
-43146 INFO: Building Tree because Tree-08.toc is non existent
-43146 INFO: Building Tree Tree-08.toc
-43146 INFO: checking Tree
-43146 INFO: Building Tree because Tree-09.toc is non existent
-43146 INFO: Building Tree Tree-09.toc
-43165 INFO: checking COLLECT
-43165 INFO: Building COLLECT because COLLECT-00.toc is non existent
-43165 INFO: Building COLLECT COLLECT-00.toc
-44177 INFO: Building COLLECT COLLECT-00.toc completed successfully.
-44185 INFO: Build complete! The results are available in: C:\PY\networkmanager\dist
+550 INFO: Appending 'datas' from .spec
+551 INFO: checking Analysis
+551 INFO: Building Analysis because Analysis-00.toc is non existent
+551 INFO: Looking for Python shared library...
+551 INFO: Using Python shared library: C:\Users\BBossuyt\AppData\Local\Programs\Python\Python312\python312.dll
+551 INFO: Running Analysis Analysis-00.toc
+551 INFO: Target bytecode optimization level: 0
+551 INFO: Initializing module dependency graph...
+552 INFO: Initializing module graph hook caches...
+562 INFO: Analyzing modules for base_library.zip ...
+1672 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+2875 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3637 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3912 INFO: Caching module dependency graph...
+3933 INFO: Analyzing C:\PY\networkmanager\app\main.py
+3939 INFO: Processing standard module hook 'hook-PySide6.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+4117 INFO: Processing standard module hook 'hook-shiboken6.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+4206 INFO: Processing standard module hook 'hook-PySide6.QtNetwork.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+5694 INFO: Processing standard module hook 'hook-PySide6.QtCore.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+8199 INFO: Processing standard module hook 'hook-PySide6.QtWidgets.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+10545 INFO: Processing standard module hook 'hook-PySide6.QtGui.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+38754 INFO: Processing standard module hook 'hook-PySide6.QtPrintSupport.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+39322 INFO: Processing standard module hook 'hook-docx.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+39387 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+39388 INFO: SetuptoolsInfo: initializing cached setuptools info...
+40076 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+40266 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+40597 INFO: Processing standard module hook 'hook-lxml.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+40977 INFO: Processing standard module hook 'hook-lxml.etree.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+41322 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+41329 INFO: Processing standard module hook 'hook-urllib3.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+41396 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41397 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+41400 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+41407 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41436 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+41444 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41444 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+41470 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41471 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+41595 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41688 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+41689 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41793 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41793 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+41809 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+41835 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+41836 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+42075 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+42076 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+42435 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+42436 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+42741 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+42826 INFO: Processing standard module hook 'hook-certifi.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+42933 INFO: Analyzing hidden import 'PySide6.QtSvg'
+42938 INFO: Processing standard module hook 'hook-PySide6.QtSvg.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+43284 INFO: Analyzing hidden import 'PySide6.QtXml'
+43299 INFO: Processing standard module hook 'hook-PySide6.QtXml.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+43647 INFO: Analyzing hidden import 'lxml._elementpath'
+43653 INFO: Processing module hooks (post-graph stage)...
+43653 WARNING: Hidden import "charset_normalizer.md__mypyc" not found!
+43722 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+44049 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+44061 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+44145 INFO: Processing standard module hook 'hook-lxml.objectify.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+44152 INFO: Performing binary vs. data reclassification (165 entries)
+44173 INFO: Looking for ctypes DLLs
+44181 INFO: Analyzing run-time hooks ...
+44183 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+44185 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+44187 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+44188 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+44188 INFO: Including run-time hook 'pyi_rth_pyside6.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+44190 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+44192 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+44201 INFO: Creating base_library.zip...
+44215 INFO: Looking for dynamic libraries
+44823 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\shiboken6']
+44823 INFO: Extra DLL search directories (PATH): ['C:\\PY\\networkmanager\\.venv\\Lib\\site-packages\\PySide6']
+45696 INFO: Warnings written to C:\PY\networkmanager\build\networkmap\warn-networkmap.txt
+45742 INFO: Graph cross-reference written to C:\PY\networkmanager\build\networkmap\xref-networkmap.html
+45764 INFO: checking PYZ
+45764 INFO: Building PYZ because PYZ-00.toc is non existent
+45764 INFO: Building PYZ (ZlibArchive) C:\PY\networkmanager\build\networkmap\PYZ-00.pyz
+46153 INFO: Building PYZ (ZlibArchive) C:\PY\networkmanager\build\networkmap\PYZ-00.pyz completed successfully.
+46163 INFO: checking PKG
+46163 INFO: Building PKG because PKG-00.toc is non existent
+46163 INFO: Building PKG (CArchive) Networkmap_Creator.pkg
+46200 INFO: Building PKG (CArchive) Networkmap_Creator.pkg completed successfully.
+46201 INFO: Bootloader C:\PY\networkmanager\.venv\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+46201 INFO: checking EXE
+46201 INFO: Building EXE because EXE-00.toc is non existent
+46201 INFO: Building EXE from EXE-00.toc
+46202 INFO: Copying bootloader EXE to C:\PY\networkmanager\build\networkmap\Networkmap_Creator.exe
+46209 INFO: Copying icon to EXE
+46213 INFO: Copying 0 resources to EXE
+46213 INFO: Embedding manifest in EXE
+46390 INFO: Appending PKG archive to EXE
+46708 INFO: Fixing EXE headers
+48530 INFO: Building EXE from EXE-00.toc completed successfully.
+48531 INFO: checking Tree
+48531 INFO: Building Tree because Tree-00.toc is non existent
+48531 INFO: Building Tree Tree-00.toc
+48532 INFO: checking Tree
+48532 INFO: Building Tree because Tree-01.toc is non existent
+48532 INFO: Building Tree Tree-01.toc
+48532 INFO: checking Tree
+48532 INFO: Building Tree because Tree-02.toc is non existent
+48532 INFO: Building Tree Tree-02.toc
+48533 INFO: checking Tree
+48533 INFO: Building Tree because Tree-03.toc is non existent
+48533 INFO: Building Tree Tree-03.toc
+48534 INFO: checking Tree
+48534 INFO: Building Tree because Tree-04.toc is non existent
+48534 INFO: Building Tree Tree-04.toc
+48534 INFO: checking Tree
+48534 INFO: Building Tree because Tree-05.toc is non existent
+48534 INFO: Building Tree Tree-05.toc
+48535 INFO: checking Tree
+48535 INFO: Building Tree because Tree-06.toc is non existent
+48535 INFO: Building Tree Tree-06.toc
+48536 INFO: checking Tree
+48536 INFO: Building Tree because Tree-07.toc is non existent
+48536 INFO: Building Tree Tree-07.toc
+48536 INFO: checking Tree
+48536 INFO: Building Tree because Tree-08.toc is non existent
+48536 INFO: Building Tree Tree-08.toc
+48537 INFO: checking Tree
+48537 INFO: Building Tree because Tree-09.toc is non existent
+48537 INFO: Building Tree Tree-09.toc
+48539 INFO: checking COLLECT
+48539 INFO: Building COLLECT because COLLECT-00.toc is non existent
+48540 INFO: Building COLLECT COLLECT-00.toc
+49771 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+49774 INFO: Build complete! The results are available in: C:\PY\networkmanager\dist

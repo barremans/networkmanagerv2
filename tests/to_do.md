@@ -2,26 +2,25 @@
 
 ## A — Bugs & bijsturing
 
-### Bugs
-- [ ] **Device verwijderen**: scherm refresht niet automatisch  
-  _Workaround_: eerst naar een ander object navigeren en terug.
-- [ ] **Wandpunten**: dubbel icoon zichtbaar
+### Bug
+- nieuw toestel (via instellingen -Device) toegevoegd
+  -- nieuw device toevoegen aan Rack => device staat niet in de lijst van keuzes
+  -- bij nader inzien zijn niet alle types beschikbaar (waarschijnlijk hardcoded?).
+- visueele bug
+  - toevoegen nieuw toestel => geen refresh, ik moet naar ander object en dan terug naar het eerste object (in dit geval rack 1)
+
 
 ### Bijsturing
-- [ ] **Logging**
-  - [ ] Logging bijhouden van **wijzigingen/toevoegingen**
-  - [ ] Later uitbreiden met **wie** de aanpassingen deed (na fase F)
+- Rack nummering
+  -- keuze hoogste  rij boven of onder
+  -- bestaande volgorde aanpassen bij aanpassen rackrij volgorde
+- patchpanel aantal poorten 
+  - patchpanel is altijd 2 rijen
+    -- keuze 1 of 2 rijen.
+- Switch
+  -- switch keuze 1 of 2 rijen (nu 28 en wordt 3 rijen, 24 wordt 2 rijen, dus aanpassen breedte)
 
----
-
-## E — Rapporteren naar GitHub
-
-- [ ] **Bug melden**: knop in Help-menu → opent GitHub Issues met vooringevulde template
-- [ ] **Feature aanvragen**: idem
-
----
-
-## F — MFA / Active Directory
+## D — MFA / Active Directory
 
 - [ ] **MFA introduceren**
   - [ ] Standaard **niet actief**
@@ -35,15 +34,3 @@
 
 ---
 
-## G — Uitbreiding
-
-### Layout
-
-#### Menubalk (eerste)
-- [ ] Extra menu toevoegen: **In/Ex-port (New)**
-  - [ ] **Importeren** verplaatsen van menu **Bestand** → **In/Ex-port**
-  - [ ] **Exporteren** verplaatsen van menu **Bestand** → **In/Ex-port**
-
-#### Menubalk (tweede)
-- [ ] **Importeren** verwijderen (zit al onder **In/Ex-port**)
-- [ ] **Exporteren** verwijderen (zit al onder **In/Ex-port**)

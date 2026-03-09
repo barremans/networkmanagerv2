@@ -8,3 +8,4 @@
 # Core dependencies
 PySide6
 python-docx
+requests

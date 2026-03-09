@@ -2,8 +2,16 @@
    Networkmap_Creator
    File:    css/main.qss
    Role:    Volledige QSS styling — alle kleuren, device types, kabelkleuren
-   Version: 1.0.3
+   Version: 1.1.0
    Author:  Barremans
+   Changes: 1.1.0 — poort kleuren vervangen door Wong 2011 kleurenblind-vriendelijk palette
+                    onderscheidbaar voor rood-groen kleurenblinden (deuteranopie/protanopie)
+                    port-front        #0072B2  donkerblauw   — vrije front poort
+                    port-back         #E69F00  oranje/amber  — vrije back poort
+                    port-connected    #F0E442  geel          — heeft verbinding
+                    port-connect-mode #56B4E9  lichtblauw    — vrij + klikbaar
+                    port-selected     #FFFFFF  wit           — geselecteerd als poort A
+                    port-trace        #CC79A7  roze/lila     — actieve trace
    ============================================================================= */
 
 
@@ -425,11 +433,29 @@ QLabel[objectName="device-sublabel"] {
 
 
 /* ============================================================
-   POORTEN — FRONT en BACK
+   POORTEN — Wong 2011 kleurenblind-vriendelijk palette
+   ──────────────────────────────────────────────────────────
+   Normaal (geen verbindingsmodus):
+     port-front        donkerblauw  #0072B2  vrije front poort
+     port-back         amber        #E69F00  vrije back poort
+     port-connected    geel         #F0E442  poort heeft verbinding
+     port-selected     wit          #FFFFFF  geselecteerde poort
+
+   Verbindingsmodus actief:
+     port-connect-mode lichtblauw   #56B4E9  vrij — klik om te verbinden
+     port-connected    geel         #F0E442  al in gebruik — niet klikbaar
+     port-selected     wit          #FFFFFF  poort A gekozen — klik poort B
+
+   Trace:
+     port-trace        roze/lila    #CC79A7  poort in actieve trace
+
+   Donkerblauw / lichtblauw / geel / wit / roze zijn allemaal
+   onderscheidbaar voor deuteranopie én protanopie.
    ============================================================ */
 
+/* Vrije front poort — donkerblauw */
 QFrame[objectName="port-front"] {
-    background-color: #2E6E9E;
+    background-color: #0072B2;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
@@ -438,11 +464,12 @@ QFrame[objectName="port-front"] {
 }
 
 QFrame[objectName="port-front"]:hover {
-    background-color: #4A9EE0;
+    background-color: #56B4E9;
 }
 
+/* Vrije back poort — amber/oranje */
 QFrame[objectName="port-back"] {
-    background-color: #6E4E2E;
+    background-color: #E69F00;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
@@ -451,20 +478,13 @@ QFrame[objectName="port-back"] {
 }
 
 QFrame[objectName="port-back"]:hover {
-    background-color: #9E7E4E;
+    background-color: #F5C842;
 }
 
-QFrame[objectName="port-selected"] {
-    background-color: #4AE0A0;
-    border-radius: 2px;
-    min-width: 14px;
-    max-width: 14px;
-    min-height: 14px;
-    max-height: 14px;
-}
-
+/* Verbonden poort — geel, donkere rand voor zichtbaarheid op donkere achtergrond */
 QFrame[objectName="port-connected"] {
-    background-color: #E0A04A;
+    background-color: #F0E442;
+    border: 1px solid #A09820;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
@@ -473,11 +493,13 @@ QFrame[objectName="port-connected"] {
 }
 
 QFrame[objectName="port-connected"]:hover {
-    background-color: #F0C060;
+    background-color: #F8F060;
+    border-color: #C0B828;
 }
 
+/* Verbindingsmodus — vrije klikbare poort — lichtblauw (hemelsblauw) */
 QFrame[objectName="port-connect-mode"] {
-    background-color: #E04A4A;
+    background-color: #56B4E9;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
@@ -486,13 +508,25 @@ QFrame[objectName="port-connect-mode"] {
 }
 
 QFrame[objectName="port-connect-mode"]:hover {
-    background-color: #FF6060;
+    background-color: #80CCFF;
 }
 
-QFrame[objectName="port-trace"] {
-    background-color: #A0E0FF;
+/* Geselecteerde poort (poort A) — wit met lichtblauwe rand */
+QFrame[objectName="port-selected"] {
+    background-color: #FFFFFF;
+    border: 2px solid #56B4E9;
     border-radius: 2px;
-    border: 1px solid #60C0FF;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+/* Trace poort — roze/lila, verschilt van alle andere kleuren */
+QFrame[objectName="port-trace"] {
+    background-color: #CC79A7;
+    border-radius: 2px;
+    border: 1px solid #AA5585;
     min-width: 14px;
     max-width: 14px;
     min-height: 14px;
@@ -500,7 +534,7 @@ QFrame[objectName="port-trace"] {
 }
 
 QFrame[objectName="port-trace"]:hover {
-    background-color: #C0EEFF;
+    background-color: #DD99BB;
 }
 
 
@@ -552,11 +586,11 @@ QLabel[objectName="endpoint-label"] {
 
 /* ============================================================
    KABELKLEUREN — wire_detail_view via objectName
+   Wong 2011 kleurblindvriendelijk palet
+   Onderscheidbaar voor deuteranopia, protanopia en tritanopia.
+   Symbool in trace-pijl biedt extra redundantie naast kleur.
    ============================================================ */
 
-/* Kabeltype kleuren — Wong 2011 kleurblindvriendelijk palet
-   Onderscheidbaar voor deuteranopia, protanopia en tritanopia.
-   Symbool in trace-pijl biedt extra redundantie naast kleur. */
 QLabel[objectName="cable-utp-cat5e"] { color: #56B4E9; }   /* lichtblauw  ══ */
 QLabel[objectName="cable-utp-cat6"]  { color: #009E73; }   /* groen       ══ */
 QLabel[objectName="cable-utp-cat6a"] { color: #0072B2; }   /* donkerblauw ══ */
@@ -592,6 +626,7 @@ QFrame#detail_frame QLabel#trace_info {
     color: #8080A0;
     font-size: 8pt;
 }
+
 
 /* ============================================================
    RACK NAVIGATIE KNOP (E5 — cross-rack trace)
