@@ -55,3 +55,6 @@ logs/
 
 # PyInstaller
 *.spec
+
+# GitHub credentials — NOOIT committen
+app/config/github_config.py

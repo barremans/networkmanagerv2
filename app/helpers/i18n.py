@@ -477,6 +477,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cases_btn_refresh":          "Vernieuwen",
         "cases_btn_open_browser":     "Openen in browser",
         "cases_no_selection":         "Selecteer eerst een rij.",
+        
+        # --- rack sortering
+        "rack_numbering_label":   "Nummering:",
+        "rack_numbering_top_down":  "1 bovenaan (standaard)",
+        "rack_numbering_bottom_up": "1 onderaan (professioneel)",
+        "label_ports_per_row": "Poorten per rij:",
+        "label_sfp_ports": "SFP poorten:",
+        "ctx_ports_device": "Poorten beheren",
+        # --- VLAN
+        "vlan_report_no_vlans":     "Geen VLAN toewijzingen gevonden.",
+        "vlan_report_title":        "VLAN rapport",
+        "vlan_manager_title":       "VLAN beheer",
+        "vlan_conflict_title":      "VLAN conflict",
+        "vlan_propagate_confirm":   "Propageer naar hele trace?",
+ 
     },
 
     # -------------------------------------------------------------------------
@@ -940,6 +955,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cases_btn_refresh":          "Refresh",
         "cases_btn_open_browser":     "Open in browser",
         "cases_no_selection":         "Select a row first.",
+        
+        # --- rack sortering
+        "rack_numbering_label":   "Numbering:",
+        "rack_numbering_top_down":  "1 at top (default)",
+        "rack_numbering_bottom_up": "1 at bottom (professional)",
+        "label_ports_per_row": "Ports per row:",
+        "label_sfp_ports": "SFP ports:",
+        "ctx_ports_device": "Manage ports",
+        # --- VLAN
+        "vlan_report_no_vlans":     "No VLAN assignments found.",
+        "vlan_report_title":        "VLAN report",
+        "vlan_manager_title":       "VLAN management",
+        "vlan_conflict_title":      "VLAN conflict",
+        "vlan_propagate_confirm":   "Propagate to entire trace?",
+
     },
 }
 

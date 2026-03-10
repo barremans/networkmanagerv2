@@ -2,7 +2,7 @@
    Networkmap_Creator
    File:    css/main.qss
    Role:    Volledige QSS styling — alle kleuren, device types, kabelkleuren
-   Version: 1.1.0
+   Version: 1.2.0
    Author:  Barremans
    Changes: 1.1.0 — poort kleuren vervangen door Wong 2011 kleurenblind-vriendelijk palette
                     onderscheidbaar voor rood-groen kleurenblinden (deuteranopie/protanopie)
@@ -649,4 +649,20 @@ QPushButton[objectName="btn_rack_nav"]:hover {
 
 QPushButton[objectName="btn_rack_nav"]:pressed {
     background-color: #1A2A4A;
+}
+
+/* SFP uplink poort — cyaan/groen, 18px */
+QFrame[objectName="port-sfp"] {
+    background-color: #009E73;
+    border: 1px solid #007A58;
+    border-radius: 3px;
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 18px;
+    max-height: 18px;
+}
+
+QFrame[objectName="port-sfp"]:hover {
+    background-color: #00C48A;
+    border-color: #009E73;
 }

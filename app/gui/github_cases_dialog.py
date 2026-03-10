@@ -6,6 +6,9 @@
 # Author:  Barremans
 # =============================================================================
 
+import os
+import sys
+
 import requests
 import webbrowser
 
@@ -20,9 +23,39 @@ from PySide6.QtGui import QColor, QBrush
 
 from app.helpers.i18n import t
 
-_GITHUB_OWNER  = "barremans"
-_GITHUB_REPO   = "networkmanagerv2"
-_GITHUB_TOKEN  = "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"
+try:
+    from app.config.github_config import (
+        GITHUB_TOKEN  as _GITHUB_TOKEN,
+        GITHUB_OWNER  as _GITHUB_OWNER,
+        GITHUB_REPO   as _GITHUB_REPO,
+        GITHUB_BRANCH as _GITHUB_BRANCH,
+    )
+except ImportError:
+    _GITHUB_TOKEN  = ""
+    _GITHUB_OWNER  = ""
+    _GITHUB_REPO   = ""
+    _GITHUB_BRANCH = "main"
+
+
+def _get_verify() -> str | bool:
+    """
+    Geeft het pad naar cacert.pem terug.
+    In een PyInstaller .exe zit certifi gebundeld in _MEIPASS.
+    In development wordt het systeem-certifi gebruikt.
+    """
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        pem  = os.path.join(base, "certifi", "cacert.pem")
+        if os.path.exists(pem):
+            return pem
+        pem2 = os.path.join(os.path.dirname(sys.executable), "certifi", "cacert.pem")
+        if os.path.exists(pem2):
+            return pem2
+    try:
+        import certifi
+        return certifi.where()
+    except ImportError:
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +77,7 @@ class _FetchWorker(QThread):
             issues_raw = requests.get(
                 f"{base}/issues",
                 params={"state": "open", "per_page": 100},
-                headers=hdrs, timeout=15
+                headers=hdrs, timeout=15, verify=_get_verify()
             )
             issues_raw.raise_for_status()
             all_items = issues_raw.json()
@@ -56,7 +89,7 @@ class _FetchWorker(QThread):
             prs_raw = requests.get(
                 f"{base}/pulls",
                 params={"state": "open", "per_page": 100},
-                headers=hdrs, timeout=15
+                headers=hdrs, timeout=15, verify=_get_verify()
             )
             prs_raw.raise_for_status()
             pulls = prs_raw.json()

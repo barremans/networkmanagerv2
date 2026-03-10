@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.29.0
+# Version: 1.30.0
 # Author:  Barremans
 # Changes: F1 — ESC annuleert verbindingsmodus
 #               Klik op lege poort wist vorige trace + highlight
@@ -15,8 +15,13 @@
 #          1.25.0 — data_integrity.validate_and_repair() na laden
 #                   _gen_id: random suffix + ports opgenomen in ID-check
 #          1.26.0 — Menubar: In/Ex-port menu (nieuw)
+#          1.27.0 — Rapporteren menu (bug report + GitHub cases)
+#                   Refresh fix: boom hertekent na toevoegen device
 #                   Import/Export verplaatst van Bestand → In/Ex-port
 #                   Toolbar opgeschoond: import/export knoppen verwijderd
+#          1.28.0 — Versie dynamisch uit version.py (fix statusbalk vs Over)
+#          1.29.0 — Dubbelklik device → info popup; PortDialog; VLAN rapport zijpaneel
+#          1.30.0 — VLAN beheer knop + automatische propagatie na opslaan poort/wandpunt
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -55,12 +60,22 @@ from app.services.logger import log_info, log_warning, log_error
 from app.services import export_renderer
 from app.services import report_generator
 from app.gui.bug_report_dialog import BugReportDialog
+from app.gui.dialogs.device_info_dialog import DeviceInfoDialog
+from app.gui.dialogs.port_dialog import PortDialog
+from app.services import vlan_service
+from app.gui.dialogs.vlan_propagation_dialog import VlanPropagationDialog
 from app.gui.github_cases_dialog import GithubCasesDialog
 from app.services.changelog_service import (   # Taak2
     log_change,
     ENTITY_DEVICE, ENTITY_CONNECTION,
     ACTION_ADD, ACTION_EDIT, ACTION_DELETE
 )
+
+try:
+    from app import version as _ver
+    _APP_VERSION = _ver.__version__
+except Exception:
+    _APP_VERSION = "—"
 
 _COL              = 0
 _TYPE_SITE        = "site"
@@ -296,6 +311,16 @@ class MainWindow(QMainWindow):
         self._btn_new_tree.clicked.connect(self._on_new)
         left_layout.addWidget(self._btn_new_tree)
 
+        self._btn_vlan_report = QPushButton("🔷  VLAN rapport")
+        self._btn_vlan_report.setFixedHeight(32)
+        self._btn_vlan_report.clicked.connect(self._on_vlan_report)
+        left_layout.addWidget(self._btn_vlan_report)
+
+        self._btn_vlan_mgr = QPushButton("⚙  VLAN beheer")
+        self._btn_vlan_mgr.setFixedHeight(32)
+        self._btn_vlan_mgr.clicked.connect(self._on_vlan_manager)
+        left_layout.addWidget(self._btn_vlan_mgr)
+
         # Midden frame
         self._mid_frame = QFrame()
         self._mid_frame.setObjectName("mid_frame")
@@ -354,7 +379,7 @@ class MainWindow(QMainWindow):
     def _build_statusbar(self):
         sb = QStatusBar()
         sb.setObjectName("status_bar")
-        version_label = QLabel(t("app_version"))
+        version_label = QLabel(f"Networkmap Creator v{_APP_VERSION}")
         version_label.setObjectName("secondary")
         sb.addPermanentWidget(version_label)
         self.setStatusBar(sb)
@@ -697,6 +722,23 @@ class MainWindow(QMainWindow):
             dlg = DeviceDialog(parent=self, device=device)
             if dlg.exec() and dlg.get_result():
                 device.update(dlg.get_result())
+                # Genereer ontbrekende SFP poorten
+                new_front = device.get("front_ports", 0)
+                new_sfp   = device.get("sfp_ports",   0)
+                existing_nums = {
+                    p["number"] for p in self._data.get("ports", [])
+                    if p["device_id"] == device["id"] and p["side"] == "front"
+                }
+                for i in range(1, new_sfp + 1):
+                    sfp_num = new_front + i
+                    if sfp_num not in existing_nums:
+                        self._data.setdefault("ports", []).append({
+                            "id":        self._gen_id("p"),
+                            "device_id": device["id"],
+                            "name":      f"SFP {i}",
+                            "side":      "front",
+                            "number":    sfp_num,
+                        })
                 self._save_and_backup()
                 # Taak2 — log device bewerken
                 log_change(
@@ -708,6 +750,26 @@ class MainWindow(QMainWindow):
                 if isinstance(self._current_view, RackView):
                     self._current_view.refresh(self._data)
                 self.set_status(f"✓  {t('msg_device_updated')}: {device['name']}.")
+
+        elif action == "ports":
+            ports = [p for p in self._data.get("ports", [])
+                     if p["device_id"] == device_id]
+            dlg = PortDialog(parent=self, device=device, ports=ports)
+            if dlg.exec():
+                updated  = dlg.get_result()
+                port_map = {p["id"]: p for p in self._data.get("ports", [])}
+                for up in updated:
+                    if up["id"] in port_map:
+                        port_map[up["id"]].update(up)
+                # Propageer VLAN voor elke poort die een VLAN heeft
+                for up in updated:
+                    if up.get("vlan"):
+                        self._propagate_vlan_after_save(up["id"], "port", up["vlan"])
+                self._save_and_backup()
+                if isinstance(self._current_view, __import__(
+                        "app.gui.rack_view", fromlist=["RackView"]).RackView):
+                    self._current_view.refresh(self._data)
+                self.set_status(f"✓  Poorten bijgewerkt: {device['name']}")
 
         elif action == "delete":
             from PySide6.QtWidgets import QMessageBox
@@ -807,6 +869,7 @@ class MainWindow(QMainWindow):
         rack_view.port_selected_for_connect.connect(self._on_port_selected_for_connect)
         rack_view.device_context_menu.connect(self._on_device_context_menu)
         rack_view.port_context_menu.connect(self._on_port_context_menu)
+        rack_view.device_double_clicked.connect(self._on_device_double_clicked)
         self._mid_layout.addWidget(rack_view)
         self._current_view = rack_view
 
@@ -966,7 +1029,6 @@ class MainWindow(QMainWindow):
         if not conn:
             return
 
-        # Leesbare from/to labels voor in de dialog header
         conn_with_labels = dict(conn)
         conn_with_labels["_from_label"] = self._resolve_port_label(
             conn.get("from_id", ""), conn.get("from_type", "port")
@@ -986,13 +1048,11 @@ class MainWindow(QMainWindow):
         old_cable = conn.get("cable_type", "")
         old_label = conn.get("label", "")
 
-        # Sla wijzigingen op in de verbinding
         conn["label"]      = result["label"]
         conn["cable_type"] = result["cable_type"]
         conn["notes"]      = result["notes"]
 
         self._save_and_backup()
-        # Taak2 — log verbinding bewerken
         log_change(
             action=ACTION_EDIT,
             entity=ENTITY_CONNECTION,
@@ -1004,9 +1064,7 @@ class MainWindow(QMainWindow):
             }
         )
 
-        # Info-regel in wire_detail bijwerken zonder volledige rebuild
         self._wire_detail.refresh_info(self._data)
-
         self.set_status(f"✓  {t('msg_connection_updated')}")
 
     def _resolve_port_label(self, obj_id: str, obj_type: str) -> str:
@@ -1084,7 +1142,6 @@ class MainWindow(QMainWindow):
                 conn = dlg.get_result()
                 self._data.setdefault("connections", []).append(conn)
                 self._save_and_backup()
-                # Taak2 — log verbinding poort ↔ wandpunt
                 outlet = next(
                     (wo for s in self._data.get("sites", [])
                      for r in s.get("rooms", [])
@@ -1104,9 +1161,7 @@ class MainWindow(QMainWindow):
                     self._current_view.refresh(self._data)
                 steps = tracing.trace_from_port(self._data, port_id)
                 self._wire_detail.set_trace(steps, port_label, data=self._data)
-                self.set_status(
-                    f"✓  {port_label}  ►  🌐  {outlet_name}"
-                )
+                self.set_status(f"✓  {port_label}  ►  🌐  {outlet_name}")
 
         elif chosen == act_disconnect:
             conn = next(
@@ -1310,6 +1365,9 @@ class MainWindow(QMainWindow):
             room = self._find_room(room_id)
             if room:
                 room.setdefault("wall_outlets", []).append(obj)
+                vlan_val = dlg.get_vlan()
+                if vlan_val and obj.get("id"):
+                    self._propagate_vlan_after_save(obj["id"], "wall_outlet", vlan_val)
                 self._save_and_backup()
                 self._populate_tree()
                 self.set_status(f"✓  {t('label_wall_outlet')} '{obj['name']}' aangemaakt.")
@@ -1470,8 +1528,25 @@ class MainWindow(QMainWindow):
         dlg = DeviceDialog(parent=self, device=device)
         if dlg.exec() and dlg.get_result():
             device.update(dlg.get_result())
+            new_front = device.get("front_ports", 0)
+            new_sfp   = device.get("sfp_ports",   0)
+
+            existing_nums = {
+                p["number"] for p in self._data.get("ports", [])
+                if p["device_id"] == device["id"] and p["side"] == "front"
+            }
+            for i in range(1, new_sfp + 1):
+                sfp_num = new_front + i
+                if sfp_num not in existing_nums:
+                    self._data.setdefault("ports", []).append({
+                        "id":        self._gen_id("p"),
+                        "device_id": device["id"],
+                        "name":      f"SFP {i}",
+                        "side":      "front",
+                        "number":    sfp_num,
+                    })
+
             self._save_and_backup()
-            # Taak2 — log device bewerken via toolbar
             log_change(
                 action=ACTION_EDIT,
                 entity=ENTITY_DEVICE,
@@ -1524,7 +1599,6 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Taak2 — log device verwijderen via toolbar (vóór de verwijdering)
         log_change(
             action=ACTION_DELETE,
             entity=ENTITY_DEVICE,
@@ -1592,7 +1666,6 @@ class MainWindow(QMainWindow):
             rack.setdefault("slots", []).append(slot)
 
             self._save_and_backup()
-            # Taak2 — log device toevoegen
             log_change(
                 action=ACTION_ADD,
                 entity=ENTITY_DEVICE,
@@ -1602,6 +1675,7 @@ class MainWindow(QMainWindow):
 
             if isinstance(self._current_view, RackView):
                 self._current_view.refresh(self._data)
+            self._populate_tree()
 
             self.set_status(f"✓  {t('label_device')} '{device['name']}' toegevoegd aan {rack['name']}.")
 
@@ -1609,6 +1683,7 @@ class MainWindow(QMainWindow):
         dev_id      = device["id"]
         front_count = device.get("front_ports", 0)
         back_count  = device.get("back_ports",  0)
+        sfp_count   = device.get("sfp_ports",   0)
 
         for i in range(1, front_count + 1):
             self._data.setdefault("ports", []).append({
@@ -1617,6 +1692,16 @@ class MainWindow(QMainWindow):
                 "name":      f"Port {i}",
                 "side":      "front",
                 "number":    i,
+            })
+
+        for i in range(1, sfp_count + 1):
+            sfp_num = front_count + i
+            self._data.setdefault("ports", []).append({
+                "id":        self._gen_id("p"),
+                "device_id": dev_id,
+                "name":      f"SFP {i}",
+                "side":      "front",
+                "number":    sfp_num,
             })
 
         for i in range(1, back_count + 1):
@@ -1696,7 +1781,6 @@ class MainWindow(QMainWindow):
             slot["device_id"] = new_dev["id"]
             rack.setdefault("slots", []).append(slot)
             self._save_and_backup()
-            # Taak2 — log device dupliceren
             log_change(
                 action=ACTION_ADD,
                 entity=ENTITY_DEVICE,
@@ -1719,30 +1803,107 @@ class MainWindow(QMainWindow):
     # Help — H1
     # ------------------------------------------------------------------
 
+    def _on_device_double_clicked(self, device_id: str):
+        """Dubbelklik op device — toon readonly info popup."""
+        device = next((d for d in self._data.get("devices", [])
+                       if d["id"] == device_id), None)
+        if not device:
+            return
+        rack = room = site = None
+        for s in self._data.get("sites", []):
+            for r in s.get("rooms", []):
+                for ra in r.get("racks", []):
+                    for slot in ra.get("slots", []):
+                        if slot.get("device_id") == device_id:
+                            rack, room, site = ra, r, s
+        dlg = DeviceInfoDialog(
+            parent=self, device=device, data=self._data,
+            rack=rack or {}, room=room or {}, site=site or {}
+        )
+        dlg.exec()
+
+    def _on_vlan_report(self):
+        """VLAN rapport knop — toon VlanReportView in midden paneel."""
+        self._show_vlan_report()
+        self.set_status("🔷  VLAN rapport")
+
+    def _show_vlan_report(self):
+        from app.gui.vlan_report_view import VlanReportView
+        while self._mid_layout.count():
+            item = self._mid_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        view = VlanReportView(self._data, parent=self._mid_frame)
+        self._mid_layout.addWidget(view)
+        self._current_view = view
+
+    def _on_vlan_manager(self):
+        from app.gui.vlan_manager_window import VlanManagerWindow
+        dlg = VlanManagerWindow(parent=self)
+        dlg.exec()
+        # Herlaad VLAN rapport als dat zichtbaar is
+        if self._current_view and hasattr(self._current_view, "refresh"):
+            try:
+                from app.gui.vlan_report_view import VlanReportView
+                if isinstance(self._current_view, VlanReportView):
+                    self._current_view.refresh(self._data)
+            except Exception:
+                pass
+
+    def _propagate_vlan_after_save(self, start_id: str, start_type: str, vlan_id: int | None):
+        """
+        Propageer VLAN naar de volledige trace na opslaan van een poort of wandpunt.
+        Toont waarschuwingsdialog bij conflicten.
+        """
+        if vlan_id is None:
+            return
+
+        trace = vlan_service.collect_trace_objects(self._data, start_id, start_type)
+        port_ids   = trace["port_ids"]
+        outlet_ids = trace["outlet_ids"]
+
+        conflicts = vlan_service.propagate_vlan(
+            self._data, port_ids, outlet_ids, vlan_id
+        )
+
+        has_conflicts = (conflicts["port_conflicts"] or conflicts["outlet_conflicts"])
+
+        if has_conflicts:
+            dlg = VlanPropagationDialog(
+                parent=self,
+                new_vlan=vlan_id,
+                port_conflicts=conflicts["port_conflicts"],
+                outlet_conflicts=conflicts["outlet_conflicts"],
+            )
+            if dlg.exec() != VlanPropagationDialog.DialogCode.Accepted:
+                return   # gebruiker geannuleerd — geen propagatie
+
+        vlan_service.apply_vlan(self._data, port_ids, outlet_ids, vlan_id)
+        self._save_and_backup()
+
+        if isinstance(self._current_view, __import__(
+                "app.gui.rack_view", fromlist=["RackView"]).RackView):
+            self._current_view.refresh(self._data)
+
     def _on_report_bug(self):
-        """Opent de bug/feature meld dialog — bug voorgeselecteerd."""
         dlg = BugReportDialog(parent=self)
-        dlg._type_select.setCurrentIndex(0)  # Bug
+        dlg._type_select.setCurrentIndex(0)
         dlg.exec()
 
     def _on_report_feature(self):
-        """Opent de bug/feature meld dialog — feature voorgeselecteerd."""
         dlg = BugReportDialog(parent=self)
-        dlg._type_select.setCurrentIndex(1)  # Feature
+        dlg._type_select.setCurrentIndex(1)
         dlg.exec()
 
     def _on_show_cases(self):
-        """Toont open GitHub Issues en Pull Requests."""
         dlg = GithubCasesDialog(parent=self)
         dlg.exec()
 
     def _on_help(self):
-        """Opent het Help venster op de sneltoetsen tab."""
         dlg = HelpWindow(parent=self)
         dlg.exec()
 
     def _on_about(self):
-        """Opent het Help venster direct op de versie-info tab."""
         dlg = HelpWindow(parent=self)
         dlg.set_tab(2)
         dlg.exec()
@@ -1761,7 +1922,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_export(self):
-        """Exporteer huidige data naar een gekozen JSON bestand."""
         from PySide6.QtWidgets import QFileDialog
         suggested = import_export_service.suggested_filename()
         filepath, _ = QFileDialog.getSaveFileName(
@@ -1783,7 +1943,6 @@ class MainWindow(QMainWindow):
             self.set_status(f"⚠  {t('msg_export_failed')}")
 
     def _on_export_image(self):
-        """G2 — Exporteer actieve view als PNG/JPG via export_renderer."""
         if not self._current_view:
             self.set_status(t("err_no_view_to_export"))
             return
@@ -1810,13 +1969,12 @@ class MainWindow(QMainWindow):
         if ok:
             log_info(f"Afbeelding geëxporteerd: {filepath}")
             self.set_status(f"✓  {t('msg_image_exported')}: {filepath}")
-            import os; os.startfile(filepath)   # auto-open
+            import os; os.startfile(filepath)
         else:
             log_warning(f"Afbeelding export mislukt: {err}")
             self.set_status(f"⚠  {t('msg_image_export_failed')}: {err}")
 
     def _on_export_pdf(self):
-        """G1 — Exporteer actieve view als PDF via export_renderer."""
         if not self._current_view:
             self.set_status(t("err_no_view_to_export"))
             return
@@ -1844,7 +2002,6 @@ class MainWindow(QMainWindow):
             self.set_status(f"⚠  {t('msg_pdf_export_failed')}: {err}")
 
     def _on_export_report(self):
-        """G3 — Exporteer volledige infrastructuur als Word rapport (.docx)."""
         import datetime
         from PySide6.QtWidgets import QFileDialog
 
@@ -1866,16 +2023,12 @@ class MainWindow(QMainWindow):
         if ok:
             log_info(f"Rapport geëxporteerd: {filepath}")
             self.set_status(f"✓  {t('msg_report_exported')}: {filepath}")
-            import os; os.startfile(filepath)   # auto-open
+            import os; os.startfile(filepath)
         else:
             log_warning(f"Rapport export mislukt: {err}")
             self.set_status(f"⚠  {t('msg_report_export_failed')}: {err}")
 
     def _resolve_export_context(self, datum: str, ext: str):
-        """
-        Bepaalt bestandsnaam suggestie + export functie op basis van actieve view.
-        Retourneert (suggested_filename, callable(filepath) -> (bool, str)).
-        """
         if isinstance(self._current_view, RackView):
             rack = self._current_view._rack
             room = self._current_view._room
@@ -1909,11 +2062,9 @@ class MainWindow(QMainWindow):
             return None, None
 
     def _export_folder(self) -> str:
-        """H1d — Geeft de ingestelde standaard exportmap terug, of lege string."""
         return self._settings.get("ui", {}).get("export_folder", "")
 
     def _on_import(self):
-        """Importeer een JSON bestand — keuze: vervangen of samenvoegen."""
         from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog
         filepath, _ = QFileDialog.getOpenFileName(
             self, t("menu_import"), "",
@@ -1933,6 +2084,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            from app.services.data_integrity import validate_and_repair
             if t("import_mode_replace") in modus:
                 reply = QMessageBox.warning(
                     self, t("menu_import"),
@@ -1947,7 +2099,6 @@ class MainWindow(QMainWindow):
                     self.set_status(f"⚠  {t('msg_import_fail')}: {err}")
                     return
                 self._data = data
-                # Integriteitscontrole ook na import
                 self._data, _repaired, _rapport = validate_and_repair(self._data)
                 if _repaired:
                     for regel in _rapport:
@@ -1965,7 +2116,6 @@ class MainWindow(QMainWindow):
                     self.set_status(f"⚠  {t('msg_import_fail')}: {err}")
                     return
                 self._data = data
-                # Integriteitscontrole ook na import
                 self._data, _repaired, _rapport = validate_and_repair(self._data)
                 if _repaired:
                     for regel in _rapport:
@@ -2204,7 +2354,6 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     # ID generator — v1.25.0
-    # random suffix + ports opgenomen → nooit meer duplicate port IDs
     # ------------------------------------------------------------------
 
     def _gen_id(self, prefix: str) -> str:
@@ -2236,12 +2385,10 @@ class MainWindow(QMainWindow):
 
     def reload_ui_labels(self):
         self.setWindowTitle(t("app_title"))
-        # Menubar
         self._menu_file.setTitle(t("menubar_file"))
         self._menu_inex.setTitle(t("menubar_inexport"))
         self._menu_report.setTitle(t("menubar_report"))
         self._menu_help.setTitle(t("menubar_help"))
-        # Toolbar
         self._act_new.setText(t("menu_new"))
         self._act_edit.setText(t("menu_edit"))
         self._act_delete.setText(t("menu_delete"))
@@ -2250,9 +2397,9 @@ class MainWindow(QMainWindow):
         self._act_connect.setText(t("menu_connect"))
         self._act_import.setText(t("menu_import"))
         self._act_export.setText(t("menu_export"))
-        self._act_export_image.setText(t("menu_export_image"))    # G2
-        self._act_export_pdf.setText(t("menu_export_pdf"))        # G1
-        self._act_export_report.setText(t("menu_export_report"))  # G3
+        self._act_export_image.setText(t("menu_export_image"))
+        self._act_export_pdf.setText(t("menu_export_pdf"))
+        self._act_export_report.setText(t("menu_export_report"))
         self._act_settings.setText(t("menu_settings"))
         self._populate_tree()
 

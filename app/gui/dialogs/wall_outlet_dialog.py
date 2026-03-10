@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
 # Changes: 1.3.0 — duplicaat-check: naam uniek per ruimte verplichten
+#          1.4.0 — VLAN veld: DDL uit vlan_config
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -13,38 +14,44 @@ from PySide6.QtWidgets import (
     QMessageBox, QFrame, QLabel
 )
 from app.helpers.i18n import t
+from app.services.vlan_service import load_vlans
+
+
+def _build_vlan_ddl(current_vlan=None) -> QComboBox:
+    ddl = QComboBox()
+    ddl.addItem("— geen VLAN —", None)
+    for v in load_vlans():
+        label = f"VLAN {v['id']}"
+        if v.get("name"):
+            label += f"  —  {v['name']}"
+        ddl.addItem(label, v["id"])
+    if current_vlan is not None:
+        for i in range(ddl.count()):
+            if ddl.itemData(i) == int(current_vlan):
+                ddl.setCurrentIndex(i)
+                break
+    return ddl
 
 
 class WallOutletDialog(QDialog):
     """
     Dialog voor wandpunt aanmaken / bewerken.
-    Bevat volledige inline eindapparaat-beheer:
-      - Nieuw eindapparaat aanmaken
-      - Geselecteerd eindapparaat bewerken
-      - Geselecteerd eindapparaat verwijderen
-    Wijzigingen aan eindapparaten zijn beschikbaar via get_endpoints_result().
-
-    Parameters
-    ----------
-    existing_outlets : list[dict]
-        Alle bestaande wandpunten van dezelfde ruimte — gebruikt voor
-        duplicaat-check op naam. Bij bewerken wordt het huidige wandpunt
-        automatisch uitgesloten via outlet['id'].
+    Bevat volledige inline eindapparaat-beheer + VLAN toewijzing.
     """
 
     def __init__(self, parent=None, outlet: dict = None,
                  room_id: str = "", endpoints: list = None,
-                 existing_outlets: list = None):          # [1.3.0]
+                 existing_outlets: list = None):
         super().__init__(parent)
-        self._outlet          = outlet or {}
-        self._room_id         = room_id
-        self._endpoints_data  = [dict(ep) for ep in (endpoints or [])]
-        self._existing_outlets = existing_outlets or []   # [1.3.0]
-        self._result          = None
+        self._outlet           = outlet or {}
+        self._room_id          = room_id
+        self._endpoints_data   = [dict(ep) for ep in (endpoints or [])]
+        self._existing_outlets = existing_outlets or []
+        self._result           = None
         self.setWindowTitle(
             t("title_edit_outlet") if self._outlet else t("title_new_outlet")
         )
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
         self.setModal(True)
         self._build()
         if self._outlet:
@@ -58,28 +65,29 @@ class WallOutletDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        # Wandpunt velden
         form = QFormLayout()
         form.setSpacing(8)
         self._name     = QLineEdit()
         self._location = QLineEdit()
         self._notes    = QTextEdit()
         self._notes.setFixedHeight(56)
+
+        # VLAN DDL
+        self._ddl_vlan = _build_vlan_ddl()
+
         form.addRow(t("label_name")     + " *:", self._name)
         form.addRow(t("label_location") + ":",   self._location)
+        form.addRow("VLAN:",                     self._ddl_vlan)
         form.addRow(t("label_notes")    + ":",   self._notes)
         layout.addLayout(form)
 
-        # Scheiding
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         layout.addWidget(sep)
 
-        # Eindapparaat sectie header
         ep_header = QLabel(t("label_endpoint") + ":")
         layout.addWidget(ep_header)
 
-        # DDL + beheer knoppen
         ep_row = QHBoxLayout()
         self._ddl_ep = QComboBox()
         self._ddl_ep.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
@@ -107,12 +115,10 @@ class WallOutletDialog(QDialog):
         ep_row.addWidget(self._btn_ep_del)
         layout.addLayout(ep_row)
 
-        # Scheiding
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         layout.addWidget(sep2)
 
-        # Knoppen
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_cancel = QPushButton(t("btn_cancel"))
@@ -132,7 +138,6 @@ class WallOutletDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _refresh_ddl(self, select_id: str = None):
-        """Herbouw de eindapparaat-DDL. Behoudt huidige selectie tenzij select_id opgegeven."""
         from app.helpers import settings_storage
         from app.helpers.i18n import get_language
         lang        = get_language()
@@ -215,6 +220,15 @@ class WallOutletDialog(QDialog):
         self._name.setText(self._outlet.get("name", ""))
         self._location.setText(self._outlet.get("location_description", ""))
         self._notes.setPlainText(self._outlet.get("notes", ""))
+
+        # VLAN
+        current_vlan = self._outlet.get("vlan")
+        if current_vlan is not None:
+            for i in range(self._ddl_vlan.count()):
+                if self._ddl_vlan.itemData(i) == int(current_vlan):
+                    self._ddl_vlan.setCurrentIndex(i)
+                    break
+
         ep_id = self._outlet.get("endpoint_id", "")
         if ep_id:
             idx = self._ddl_ep.findData(ep_id)
@@ -223,7 +237,7 @@ class WallOutletDialog(QDialog):
         self._update_ep_buttons()
 
     # ------------------------------------------------------------------
-    # Opslaan — [1.3.0] met duplicaat-check
+    # Opslaan
     # ------------------------------------------------------------------
 
     def _on_save(self):
@@ -232,25 +246,23 @@ class WallOutletDialog(QDialog):
             QMessageBox.warning(self, t("label_wall_outlet"), t("err_field_required"))
             return
 
-        # [1.3.0] Duplicaat-check — naam moet uniek zijn per ruimte
-        current_id = self._outlet.get("id", "")   # leeg bij nieuw aanmaken
-        duplicate = next(
-            (
-                wo for wo in self._existing_outlets
-                if wo.get("name", "").strip().lower() == name.lower()
-                and wo.get("id", "") != current_id   # eigen record uitsluiten bij bewerken
-            ),
+        current_id = self._outlet.get("id", "")
+        duplicate  = next(
+            (wo for wo in self._existing_outlets
+             if wo.get("name", "").strip().lower() == name.lower()
+             and wo.get("id", "") != current_id),
             None
         )
         if duplicate:
             QMessageBox.warning(
-                self,
-                t("label_wall_outlet"),
+                self, t("label_wall_outlet"),
                 t("err_outlet_duplicate_name").replace("{name}", name),
             )
             self._name.setFocus()
             self._name.selectAll()
             return
+
+        vlan_val = self._ddl_vlan.currentData()
 
         self._result = {
             "id":                   self._outlet.get("id", ""),
@@ -260,6 +272,9 @@ class WallOutletDialog(QDialog):
             "endpoint_id":          self._ddl_ep.currentData() or "",
             "notes":                self._notes.toPlainText().strip(),
         }
+        if vlan_val is not None:
+            self._result["vlan"] = int(vlan_val)
+
         self.accept()
 
     # ------------------------------------------------------------------
@@ -269,9 +284,9 @@ class WallOutletDialog(QDialog):
     def get_result(self) -> dict | None:
         return self._result
 
+    def get_vlan(self) -> int | None:
+        """Geeft het geselecteerde VLAN ID terug (of None)."""
+        return self._ddl_vlan.currentData()
+
     def get_endpoints_result(self) -> list:
-        """
-        Geeft de gewijzigde lijst van eindapparaten terug.
-        main_window moet self._data['endpoints'] synchroniseren na sluiten.
-        """
         return self._endpoints_data

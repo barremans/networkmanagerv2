@@ -8,16 +8,14 @@ cd /d "%~dp0"
 rem ================================================
 rem build.bat — Networkmap_Creator
 rem Stappen:
-rem   0. Python/.venv detecteren
-rem   1. Versie verhogen via bump_version.py
-rem   2. Versie uitlezen uit app/version.py
-rem   3. pip + vereisten installeren
-rem   4. PyInstaller bouwen via networkmap.spec
-rem   5. EXE optioneel signen
+rem   1. Python/.venv detecteren
+rem   2. Versie verhogen via bump_version.py
+rem   3. Versie uitlezen uit app/version.py
+rem   4. pip + vereisten installeren
+rem   5. PyInstaller bouwen via networkmap.spec
 rem   6. Map hernoemen naar versie
 rem   7. Assets kopiëren
 rem   8. Inno Setup installer compileren
-rem   9. Installer optioneel signen
 rem ================================================
 
 set "PROJECT_NAME=Networkmap_Creator"
@@ -26,13 +24,6 @@ set "DST_FOLDER=dist"
 set "LOGFILE=build_log.txt"
 set "VERSION_FILE=app\version.py"
 set "ISS_FILE=installer\networkmap_setup.iss"
-
-rem ---- Signing config ----
-rem Gebruik certificaat uit Windows cert store.
-rem Laat SIGN_SUBJECT leeg om /a automatisch het beste certificaat te laten kiezen.
-rem Vul SIGN_SUBJECT in als je expliciet op subject wil filteren.
-set "SIGN_SUBJECT="
-set "TIMESTAMP_URL=http://timestamp.digicert.com"
 
 rem ---- Python uit .venv prefereren ----
 set "PYEXE="
@@ -46,28 +37,6 @@ for %%I in ("%PYEXE%") do (
 
 echo [info] Python: %PYEXE%
 "%PYEXE%" -V >nul 2>&1 || (echo ❌ Geen werkende Python gevonden.& pause & exit /b 1)
-
-rem ================================================
-rem [S0] Signing vooraf configureren
-rem ================================================
-set "DO_SIGN=N"
-set /p DO_SIGN=Wil je binaries signen? [J/N]: 
-if /I "%DO_SIGN%"=="J" (
-  call :FIND_SIGNTOOL
-  if not defined SIGNTOOL_EXE (
-    echo ⚠️ signtool.exe niet gevonden. Signing wordt overgeslagen.
-    set "DO_SIGN=N"
-  ) else (
-    echo [sign] signtool gevonden: %SIGNTOOL_EXE%
-    if defined SIGN_SUBJECT (
-      echo [sign] Certificaatfilter: %SIGN_SUBJECT%
-    ) else (
-      echo [sign] Certificaatselectie: automatisch via /a
-    )
-  )
-) else (
-  set "DO_SIGN=N"
-)
 
 rem ================================================
 rem [0] Versie verhogen via bump_version.py
@@ -107,8 +76,6 @@ rem ---- Afgeleide paden ----
 set "BUILD_FOLDER=%PROJECT_NAME%_%NEW_VERSION%"
 set "ABS_BUILD_FOLDER=%CD%\%DST_FOLDER%\%BUILD_FOLDER%"
 set "INITIAL_EXE=%DST_FOLDER%\%PROJECT_NAME%\%PROJECT_NAME%.exe"
-set "FINAL_APP_EXE=%DST_FOLDER%\%BUILD_FOLDER%\%PROJECT_NAME%.exe"
-set "SETUP_EXE=%DST_FOLDER%\%PROJECT_NAME%_setup_%NEW_VERSION%.exe"
 
 rem ================================================
 rem [2] Opschonen
@@ -148,19 +115,6 @@ if not exist "%INITIAL_EXE%" (
 echo ✅ Build geslaagd.
 
 rem ================================================
-rem [4b] EXE signen (voor rename)
-rem ================================================
-if /I "%DO_SIGN%"=="J" (
-  echo [4b] 🔏 Applicatie signen...
-  call :SIGN_FILE "%INITIAL_EXE%"
-  if errorlevel 1 (
-    echo ❌ Signing van applicatie mislukt.
-    pause
-    exit /b 1
-  )
-)
-
-rem ================================================
 rem [5] Map hernoemen naar versienummer
 rem ================================================
 echo [5] 🔁 Map hernoemen naar %BUILD_FOLDER%...
@@ -172,7 +126,7 @@ if errorlevel 1 (
   if errorlevel 8 (echo ❌ Fallback kopie mislukt.& pause & exit /b 1)
   if exist "%DST_FOLDER%\%PROJECT_NAME%" rmdir /S /Q "%DST_FOLDER%\%PROJECT_NAME%"
 )
-if not exist "%FINAL_APP_EXE%" (
+if not exist "%DST_FOLDER%\%BUILD_FOLDER%\%PROJECT_NAME%.exe" (
   echo ❌ %PROJECT_NAME%.exe ontbreekt na hernoemen.& pause & exit /b 1
 )
 
@@ -208,29 +162,7 @@ if errorlevel 1 (
   echo ❌ Inno Setup compile mislukt. Controleer %ISS_FILE%.
   goto SHOW_OUTPUT
 )
-
-if exist "%SETUP_EXE%" (
-  echo ✅ Installer aangemaakt: %SETUP_EXE%
-) else (
-  echo ⚠️ Installer compile gaf geen fout, maar bestand niet gevonden: %SETUP_EXE%
-)
-
-rem ================================================
-rem [8] Installer signen
-rem ================================================
-if /I "%DO_SIGN%"=="J" (
-  if exist "%SETUP_EXE%" (
-    echo [8] 🔏 Installer signen...
-    call :SIGN_FILE "%SETUP_EXE%"
-    if errorlevel 1 (
-      echo ❌ Signing van installer mislukt.
-      pause
-      exit /b 1
-    )
-  ) else (
-    echo ⚠️ Installer niet gevonden, signing overgeslagen.
-  )
-)
+echo ✅ Installer aangemaakt: %DST_FOLDER%\%PROJECT_NAME%_setup_%NEW_VERSION%.exe
 
 :SHOW_OUTPUT
 echo.
@@ -238,63 +170,9 @@ echo ═════════════════════════
 echo  ✅ Build voltooid — versie %NEW_VERSION%
 echo ════════════════════════════════════════
 echo  📂 App-map:   %DST_FOLDER%\%BUILD_FOLDER%
-echo  💡 Testen:    %FINAL_APP_EXE%
-echo  🧩 Installer: %SETUP_EXE%
-echo  🔏 Signing:   %DO_SIGN%
+echo  💡 Testen:    %DST_FOLDER%\%BUILD_FOLDER%\%PROJECT_NAME%.exe
+echo  🧩 Installer: %DST_FOLDER%\%PROJECT_NAME%_setup_%NEW_VERSION%.exe
 echo ════════════════════════════════════════
 echo.
 pause
 endlocal
-exit /b 0
-
-
-:FIND_SIGNTOOL
-set "SIGNTOOL_EXE="
-
-if exist "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" (
-  set "SIGNTOOL_EXE=C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
-  goto :eof
-)
-if exist "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\signtool.exe" (
-  set "SIGNTOOL_EXE=C:\Program Files (x86)\Windows Kits\10\App Certification Kit\signtool.exe"
-  goto :eof
-)
-if exist "C:\Program Files\Windows Kits\10\bin\x64\signtool.exe" (
-  set "SIGNTOOL_EXE=C:\Program Files\Windows Kits\10\bin\x64\signtool.exe"
-  goto :eof
-)
-
-for /f "delims=" %%S in ('where signtool.exe 2^>nul') do (
-  set "SIGNTOOL_EXE=%%S"
-  goto :eof
-)
-goto :eof
-
-
-:SIGN_FILE
-set "FILE_TO_SIGN=%~1"
-if not exist "%FILE_TO_SIGN%" (
-  echo ❌ Bestand niet gevonden voor signing: %FILE_TO_SIGN%
-  exit /b 1
-)
-
-if not defined SIGNTOOL_EXE (
-  echo ❌ signtool.exe is niet geconfigureerd.
-  exit /b 1
-)
-
-echo [sign] Bestand: %FILE_TO_SIGN%
-
-if defined SIGN_SUBJECT (
-  "%SIGNTOOL_EXE%" sign /fd SHA256 /td SHA256 /tr "%TIMESTAMP_URL%" /n "%SIGN_SUBJECT%" "%FILE_TO_SIGN%"
-) else (
-  "%SIGNTOOL_EXE%" sign /fd SHA256 /td SHA256 /tr "%TIMESTAMP_URL%" /a "%FILE_TO_SIGN%"
-)
-
-if errorlevel 1 (
-  echo ❌ signtool sign mislukt voor: %FILE_TO_SIGN%
-  exit /b 1
-)
-
-echo ✅ Gesigned: %FILE_TO_SIGN%
-exit /b 0

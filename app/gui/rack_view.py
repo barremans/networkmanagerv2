@@ -2,13 +2,21 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.9.2
+# Version: 1.15.0
 # Author:  Barremans
 # Changes: 1.4.0 — bezettingsindicator in titelregel (percentage + kleurenbalk)
 #          1.5.0 — refresh() hergebruikt bestaande layout via _populate()
 #          1.9.0 — revert naar v1.3.0 event handling (QFrame + mousePressEvent)
 #          1.9.1 — fix: set_connect_mode kleurt alleen VRIJE poorten rood
 #                  verbonden poorten (port-connected) blijven oranje zichtbaar
+#          1.9.2 — Qt6 fix: event.position().toPoint() + QMenu(self)
+#          1.10.0 — Rack nummering: top_down (1 boven) of bottom_up (1 onder)
+#          1.11.0 — Poorten per rij instelbaar per device (ports_per_row)
+#          1.12.0 — SFP poorten: aparte sectie rechts van copper poorten
+#          1.13.1 — Fix: SFP telt als extra poorten (niet aftrekken van front_ports)
+#          1.14.0 — Fix: refresh() gebruikt setParent(None) ipv deleteLater()
+#          1.15.0 — device_double_clicked signal + dubbelklik op _DeviceRow
+#                   zodat widgets direct verwijderd worden + update() na _populate()
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -28,6 +36,7 @@ _MAX_PORTS_ROW = 12
 
 _ACT_EDIT   = "edit"
 _ACT_DELETE = "delete"
+_ACT_PORTS  = "ports"
 
 _OCC_WARN     = 0.75
 _OCC_CRITICAL = 0.90
@@ -97,6 +106,7 @@ class RackView(QWidget):
     port_selected_for_connect = Signal(str)             # port_id
     device_context_menu       = Signal(str, str)        # device_id, actie ("edit"|"delete")
     port_context_menu         = Signal(str, object)     # port_id, global QPoint
+    device_double_clicked     = Signal(str)              # device_id
 
     def __init__(self, rack, room, site, data, parent=None):
         super().__init__(parent)
@@ -112,6 +122,17 @@ class RackView(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         self._populate(outer)
+
+    # ------------------------------------------------------------------
+    # Nummering helper — 1.10.0
+    # ------------------------------------------------------------------
+
+    def _display_unit_number(self, u: int) -> str:
+        numbering = self._rack.get("numbering", "top_down")
+        if numbering == "bottom_up":
+            total = self._rack.get("total_units", 1)
+            return str(total - u + 1)
+        return str(u)
 
     # ------------------------------------------------------------------
     # Inhoud opbouwen
@@ -137,12 +158,22 @@ class RackView(QWidget):
             f"({used/total*100:.0f}%)" if total else t('rack_occupancy_tooltip')
         )
 
+        numbering = self._rack.get("numbering", "top_down")
+        num_lbl_title = QLabel(
+            f"↓ 1…{self._rack['total_units']}" if numbering == "top_down"
+            else f"↑ 1…{self._rack['total_units']}"
+        )
+        num_lbl_title.setObjectName("secondary")
+        num_lbl_title.setStyleSheet("font-size: 11px;")
+
         units_lbl = QLabel(f"{self._rack['total_units']}U")
         units_lbl.setObjectName("secondary")
         units_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         tl.addWidget(title_lbl)
         tl.addStretch()
+        tl.addWidget(num_lbl_title)
+        tl.addSpacing(8)
         tl.addWidget(occ_bar)
         tl.addSpacing(12)
         tl.addWidget(units_lbl)
@@ -204,7 +235,7 @@ class RackView(QWidget):
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        num_lbl = QLabel(str(u_num))
+        num_lbl = QLabel(self._display_unit_number(u_num))
         num_lbl.setObjectName("unit_number")
         num_lbl.setFixedWidth(_UNIT_NUM_W)
         num_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -228,7 +259,7 @@ class RackView(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(4)
 
-        num_lbl = QLabel(str(u_num))
+        num_lbl = QLabel(self._display_unit_number(u_num))
         num_lbl.setObjectName("unit_number")
         num_lbl.setFixedWidth(_UNIT_NUM_W)
         num_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -237,9 +268,27 @@ class RackView(QWidget):
         front_ports = [p for p in ports if p["side"] == "front"]
         back_ports  = [p for p in ports if p["side"] == "back"]
 
+        ppr       = device.get("ports_per_row", _MAX_PORTS_ROW)
+        sfp_count = device.get("sfp_ports", 0)
+
         if heeft_front:
-            layout.addWidget(self._build_port_block(
-                front_ports, "front", device["front_ports"], connected_ports))
+            total_front = device["front_ports"]
+            if sfp_count > 0:
+                copper_ports = [p for p in front_ports if p["number"] <= total_front]
+                sfp_ports_l  = [p for p in front_ports if p["number"] > total_front]
+                copper_block = self._build_port_block(
+                    copper_ports, "front", total_front, connected_ports, ppr)
+                sfp_block = self._build_sfp_block(
+                    sfp_ports_l, sfp_count, total_front, connected_ports)
+                layout.addWidget(copper_block)
+                sep = QFrame()
+                sep.setFixedWidth(6)
+                sep.setStyleSheet("background: transparent;")
+                layout.addWidget(sep)
+                layout.addWidget(sfp_block)
+            else:
+                layout.addWidget(self._build_port_block(
+                    front_ports, "front", total_front, connected_ports, ppr))
 
         lw = QWidget()
         ll = QVBoxLayout(lw)
@@ -258,7 +307,7 @@ class RackView(QWidget):
 
         if heeft_back:
             layout.addWidget(self._build_port_block(
-                back_ports, "back", device["back_ports"], connected_ports))
+                back_ports, "back", device["back_ports"], connected_ports, ppr))
 
         return row
 
@@ -268,10 +317,14 @@ class RackView(QWidget):
 
     def _show_device_context_menu(self, device_id: str, global_pos):
         menu = QMenu(self)
+        act_ports  = menu.addAction(t("ctx_ports_device"))
+        menu.addSeparator()
         act_edit   = menu.addAction(t("ctx_edit_device"))
         act_delete = menu.addAction(t("ctx_delete_device"))
         chosen = menu.exec(global_pos)
-        if chosen == act_edit:
+        if chosen == act_ports:
+            self.device_context_menu.emit(device_id, _ACT_PORTS)
+        elif chosen == act_edit:
             self.device_context_menu.emit(device_id, _ACT_EDIT)
         elif chosen == act_delete:
             self.device_context_menu.emit(device_id, _ACT_DELETE)
@@ -280,7 +333,7 @@ class RackView(QWidget):
     # Poort blok
     # ------------------------------------------------------------------
 
-    def _build_port_block(self, ports, side, total, connected_ports):
+    def _build_port_block(self, ports, side, total, connected_ports, ports_per_row: int = _MAX_PORTS_ROW):
         container = QWidget()
         container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         grid = QVBoxLayout(container)
@@ -290,8 +343,8 @@ class RackView(QWidget):
 
         port_by_num  = {p["number"]: p for p in ports}
         port_numbers = list(range(1, total + 1))
-        rows = [port_numbers[i:i + _MAX_PORTS_ROW]
-                for i in range(0, len(port_numbers), _MAX_PORTS_ROW)]
+        rows = [port_numbers[i:i + ports_per_row]
+                for i in range(0, len(port_numbers), ports_per_row)]
 
         for row_nums in rows:
             row_w = QWidget()
@@ -325,6 +378,54 @@ class RackView(QWidget):
             row_l.addStretch()
             grid.addWidget(row_w)
 
+        return container
+
+    def _build_sfp_block(self, sfp_ports, sfp_count, copper_offset, connected_ports):
+        """SFP poorten: groter, geen label (enkel tooltip), zelfde hoogte als copper rij."""
+        _SFP_SIZE = 18
+
+        container = QWidget()
+        container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        hl = QHBoxLayout(container)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(0)
+
+        sep_lbl = QLabel("SFP")
+        sep_lbl.setStyleSheet("font-size: 8px; color: #7ecfff; padding: 0 2px;")
+        sep_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        hl.addWidget(sep_lbl)
+
+        port_by_num = {p["number"]: p for p in sfp_ports}
+        ports_row = QWidget()
+        ports_hl  = QHBoxLayout(ports_row)
+        ports_hl.setContentsMargins(0, 0, 0, 0)
+        ports_hl.setSpacing(_PORT_GAP)
+        ports_hl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        for i in range(1, sfp_count + 1):
+            actual_num = copper_offset + i
+            port    = port_by_num.get(actual_num)
+            port_id = port["id"] if port else None
+            obj_name = (
+                "port-connected" if port_id and port_id in connected_ports
+                else "port-sfp"
+            )
+            btn = QFrame()
+            btn.setObjectName(obj_name)
+            btn.setFixedSize(_SFP_SIZE, _SFP_SIZE)
+            btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+            if port_id:
+                self._port_widgets[port_id] = btn
+                port_name = port.get("name", f"SFP {i}")
+                icon = "🔗" if port_id in connected_ports else "o"
+                btn.setToolTip(f"{port_name}  (SFP uplink)  {icon}")
+                self._attach_port_click(btn, port_id,
+                                        port.get("device_id", ""), "front")
+            ports_hl.addWidget(btn)
+
+        ports_hl.addStretch()
+        hl.addWidget(ports_row)
         return container
 
     # ------------------------------------------------------------------
@@ -372,7 +473,19 @@ class RackView(QWidget):
                     if (c["from_type"] == "port" and c["from_id"] == port_id) or
                        (c["to_type"]   == "port" and c["to_id"]   == port_id)
                 )
-                obj = "port-connected" if connected else f"port-{p['side']}"
+                is_sfp = False
+                dev = next((d for d in self._data.get("devices", [])
+                            if d["id"] == p.get("device_id")), None)
+                if dev and dev.get("sfp_ports", 0) > 0:
+                    front = dev.get("front_ports", 0)
+                    if p.get("side") == "front" and p.get("number", 0) > front:
+                        is_sfp = True
+                if connected:
+                    obj = "port-connected"
+                elif is_sfp:
+                    obj = "port-sfp"
+                else:
+                    obj = f"port-{p['side']}"
                 widget.setObjectName(obj)
                 _refresh_style(widget)
                 return
@@ -386,32 +499,38 @@ class RackView(QWidget):
         self._selected_port = None
 
         if active:
-            # Herstel eerst alle poorten naar hun correcte stijl
             for pid, w in self._port_widgets.items():
                 self._restore_port_style(pid, w)
-            # Kleur dan alleen de VRIJE poorten rood
-            # Verbonden poorten (port-connected) blijven oranje — niet aanklikbaar
             for pid, w in self._port_widgets.items():
                 current = w.objectName()
                 if current not in ("port-connected", "port-selected"):
                     w.setObjectName("port-connect-mode")
                     _refresh_style(w)
         else:
-            # Verbindingsmodus uit — herstel alle poorten naar correcte stijl
             for pid, w in self._port_widgets.items():
                 self._restore_port_style(pid, w)
 
     def refresh(self, data):
-        """Herlaad rack inhoud zonder nieuwe QVBoxLayout aan te maken."""
+        """Herlaad rack inhoud — verwijdert bestaande widgets direct via setParent(None)."""
         self._data = data
-        layout = self.layout()
-        while layout.count():
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
         self._port_widgets.clear()
         self._selected_port = None
+
+        layout = self.layout()
+
+        # setParent(None) verwijdert de widget direct (niet uitgesteld zoals deleteLater)
+        # zodat _populate() een lege layout aantreft
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+
         self._populate(layout)
+
+        # Forceer hertekening van de volledige RackView
+        self.updateGeometry()
+        self.update()
 
     def highlight_trace(self, port_ids: list):
         for pid, widget in self._port_widgets.items():
@@ -428,15 +547,10 @@ class RackView(QWidget):
 
 
 # ---------------------------------------------------------------------------
-# _DeviceRow — identiek aan v1.3.0
+# _DeviceRow
 # ---------------------------------------------------------------------------
 
 class _DeviceRow(QFrame):
-    """
-    Device rij widget met eigen mousePressEvent override.
-    Rechtermuisklik op elk onderdeel van de rij wordt hier correct opgevangen.
-    Linkermuisklik via super() — port QFrame widgets hebben eigen override.
-    """
     device_right_clicked = Signal(str, object)
 
     def __init__(self, device_id: str, parent=None):
@@ -452,3 +566,15 @@ class _DeviceRow(QFrame):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Bubble omhoog naar RackView om signal te emitteren
+            rack_view = self.parent()
+            while rack_view and not hasattr(rack_view, "device_double_clicked"):
+                rack_view = rack_view.parent()
+            if rack_view:
+                rack_view.device_double_clicked.emit(self._device_id)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)

@@ -2,8 +2,14 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.0.0
+# Version: 1.5.0
 # Author:  Barremans
+# Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
+#                  ipv import van hardcoded _DEVICE_TYPES uit device_dialog
+#          1.2.0 — Fix: U-positie omzetting voor bottom_up nummering
+#          1.3.0 — Poorten per rij keuze voor alle device types
+#          1.4.0 — SFP poorten veld
+#          1.5.0 — S/N en MAC velden toegevoegd (pariteit met device_dialog)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -13,33 +19,47 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from app.helpers.i18n import t
-from app.gui.dialogs.device_dialog import DEVICE_PORT_DEFAULTS, _DEVICE_TYPES
+from app.helpers.settings_storage import load_device_types
+from app.gui.dialogs.device_dialog import DEVICE_PORT_DEFAULTS
 
 
 class PlaceDeviceDialog(QDialog):
     """
     Combineert device aanmaken + U-positie kiezen in één venster.
-
-    Toont een visuele U-kaart van de rack zodat de gebruiker
-    een vrij slot kan kiezen.
-
-    Resultaat via get_result():
-      {
-        "device": { ...device velden... },
-        "slot": { "u_start": int, "height": int }
-      }
+    Device types worden geladen uit settings_storage — volledig configureerbaar.
     """
 
     def __init__(self, parent=None, rack: dict = None, data: dict = None):
         super().__init__(parent)
-        self._rack   = rack or {}
-        self._data   = data or {}
-        self._result = None
+        self._rack         = rack or {}
+        self._data         = data or {}
+        self._result       = None
+        self._device_types = self._load_types()
 
         self.setWindowTitle(f"{t('label_device')} — {rack.get('name', '')} toevoegen")
         self.setMinimumWidth(480)
         self.setModal(True)
         self._build()
+
+    def _load_types(self) -> list:
+        try:
+            return load_device_types()
+        except Exception:
+            return []
+
+    def _display_to_internal(self, display_u: int) -> int:
+        numbering = self._rack.get("numbering", "top_down")
+        if numbering == "bottom_up":
+            total_u = self._rack.get("total_units", 12)
+            return total_u - display_u + 1
+        return display_u
+
+    def _internal_to_display(self, internal_u: int) -> int:
+        numbering = self._rack.get("numbering", "top_down")
+        if numbering == "bottom_up":
+            total_u = self._rack.get("total_units", 12)
+            return total_u - internal_u + 1
+        return internal_u
 
     # ------------------------------------------------------------------
     # Opbouw
@@ -49,38 +69,58 @@ class PlaceDeviceDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        # ── Device velden ────────────────────────────────────────────
         grp_dev = QGroupBox(t("label_device"))
         form    = QFormLayout(grp_dev)
         form.setSpacing(6)
 
         self._name = QLineEdit()
+
+        # DDL gevuld vanuit settings_storage
         self._ddl_type = QComboBox()
-        for dt in _DEVICE_TYPES:
-            self._ddl_type.addItem(t(f"device_{dt}"), dt)
+        lang = "nl"
+        for dt in self._device_types:
+            label = dt.get(f"label_{lang}", dt.get("label_nl", dt["key"]))
+            self._ddl_type.addItem(label, dt["key"])
         self._ddl_type.currentIndexChanged.connect(self._on_type_changed)
 
         self._front_ports = QSpinBox()
         self._front_ports.setRange(0, 96)
         self._back_ports  = QSpinBox()
         self._back_ports.setRange(0, 96)
+
+        self._ports_per_row = QComboBox()
+        self._ports_per_row.addItem("12  (standaard)", 12)
+        self._ports_per_row.addItem("24  (1 rij)",     24)
+        self._ports_per_row.addItem("6",                6)
+        self._ports_per_row.addItem("8",                8)
+        self._ports_per_row.addItem("16",              16)
+
+        self._sfp_ports = QSpinBox()
+        self._sfp_ports.setRange(0, 32)
+        self._sfp_ports.setToolTip("Aantal SFP uplink poorten (laatste X front poorten)")
+
         self._brand  = QLineEdit()
         self._model  = QLineEdit()
         self._ip     = QLineEdit()
+        self._mac    = QLineEdit()
+        self._serial = QLineEdit()
         self._notes  = QTextEdit()
         self._notes.setFixedHeight(48)
 
-        form.addRow(t("label_name")        + " *:", self._name)
-        form.addRow(t("label_type")        + " *:", self._ddl_type)
-        form.addRow(t("label_front_ports") + ":",   self._front_ports)
-        form.addRow(t("label_back_ports")  + ":",   self._back_ports)
-        form.addRow(t("label_brand")       + ":",   self._brand)
-        form.addRow(t("label_model")       + ":",   self._model)
-        form.addRow(t("label_ip")          + ":",   self._ip)
-        form.addRow(t("label_notes")       + ":",   self._notes)
+        form.addRow(t("label_name")          + " *:", self._name)
+        form.addRow(t("label_type")          + " *:", self._ddl_type)
+        form.addRow(t("label_front_ports")   + ":",   self._front_ports)
+        form.addRow(t("label_back_ports")    + ":",   self._back_ports)
+        form.addRow(t("label_sfp_ports")     + ":",   self._sfp_ports)
+        form.addRow(t("label_ports_per_row") + ":",   self._ports_per_row)
+        form.addRow(t("label_brand")         + ":",   self._brand)
+        form.addRow(t("label_model")         + ":",   self._model)
+        form.addRow(t("label_ip")            + ":",   self._ip)
+        form.addRow(t("label_mac")           + ":",   self._mac)
+        form.addRow(t("label_serial")        + ":",   self._serial)
+        form.addRow(t("label_notes")         + ":",   self._notes)
         layout.addWidget(grp_dev)
 
-        # ── Rack plaatsing ───────────────────────────────────────────
         grp_slot = QGroupBox(f"{t('label_rack')} — {self._rack.get('name', '')}")
         slot_form = QFormLayout(grp_slot)
         slot_form.setSpacing(6)
@@ -95,7 +135,6 @@ class PlaceDeviceDialog(QDialog):
         self._height.setRange(1, total_u)
         self._height.setValue(1)
 
-        # Bezette U-posities tonen
         occupied = self._occupied_units()
         if occupied:
             occ_str = ", ".join(str(u) for u in sorted(occupied))
@@ -107,7 +146,6 @@ class PlaceDeviceDialog(QDialog):
         slot_form.addRow(t("label_units") + ":", self._height)
         layout.addWidget(grp_slot)
 
-        # ── Knoppen ──────────────────────────────────────────────────
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_save   = QPushButton(t("btn_save"))
@@ -118,7 +156,6 @@ class PlaceDeviceDialog(QDialog):
         btn_layout.addWidget(btn_save)
         layout.addLayout(btn_layout)
 
-        # Standaard poortwaarden instellen
         self._on_type_changed()
 
     # ------------------------------------------------------------------
@@ -127,9 +164,25 @@ class PlaceDeviceDialog(QDialog):
 
     def _on_type_changed(self):
         dev_type = self._ddl_type.currentData()
-        defaults = DEVICE_PORT_DEFAULTS.get(dev_type, {"front": 0, "back": 0})
-        self._front_ports.setValue(defaults["front"])
-        self._back_ports.setValue(defaults["back"])
+        front, back, sfp = 0, 0, 0
+        for dt in self._device_types:
+            if dt["key"] == dev_type:
+                front = dt.get("front_ports", 0)
+                back  = dt.get("back_ports",  0)
+                sfp   = dt.get("sfp_ports",   0)
+                break
+        else:
+            defaults = DEVICE_PORT_DEFAULTS.get(dev_type, {"front": 0, "back": 0})
+            front = defaults["front"]
+            back  = defaults["back"]
+        self._front_ports.setValue(front)
+        self._back_ports.setValue(back)
+        self._sfp_ports.setValue(sfp)
+        total = max(front, back)
+        default_ppr = 24 if total > 12 else 12
+        idx = self._ports_per_row.findData(default_ppr)
+        if idx >= 0:
+            self._ports_per_row.setCurrentIndex(idx)
 
     # ------------------------------------------------------------------
     # Opslaan
@@ -142,18 +195,27 @@ class PlaceDeviceDialog(QDialog):
                                 t("label_name") + " is verplicht.")
             return
 
-        u_start = self._u_start.value()
-        height  = self._height.value()
-        total_u = self._rack.get("total_units", 12)
+        display_u = self._u_start.value()
+        height    = self._height.value()
+        total_u   = self._rack.get("total_units", 12)
+        numbering = self._rack.get("numbering", "top_down")
 
-        # Past het device in de rack?
-        if u_start + height - 1 > total_u:
+        u_start = self._display_to_internal(display_u)
+
+        if numbering == "bottom_up":
+            u_top = u_start - height + 1
+        else:
+            u_top = u_start
+
+        if u_top < 1 or u_start + height - 1 > total_u:
             QMessageBox.warning(self, t("label_device"),
                                 f"Device past niet in rack "
-                                f"(U{u_start}+{height}U > {total_u}U).")
+                                f"(U{display_u}+{height}U > {total_u}U).")
             return
 
-        # Conflict check
+        if numbering == "bottom_up":
+            u_start = u_top
+
         occupied = self._occupied_units()
         needed   = set(range(u_start, u_start + height))
         conflict = needed & occupied
@@ -165,43 +227,34 @@ class PlaceDeviceDialog(QDialog):
 
         self._result = {
             "device": {
-                "id":          "",   # wordt ingevuld door main_window
-                "name":        name,
-                "type":        self._ddl_type.currentData(),
-                "front_ports": self._front_ports.value(),
-                "back_ports":  self._back_ports.value(),
-                "brand":       self._brand.text().strip(),
-                "model":       self._model.text().strip(),
-                "ip":          self._ip.text().strip(),
-                "mac":         "",
-                "serial":      "",
-                "notes":       self._notes.toPlainText().strip(),
+                "id":            "",
+                "name":          name,
+                "type":          self._ddl_type.currentData(),
+                "front_ports":   self._front_ports.value(),
+                "back_ports":    self._back_ports.value(),
+                "brand":         self._brand.text().strip(),
+                "model":         self._model.text().strip(),
+                "ip":            self._ip.text().strip(),
+                "mac":           self._mac.text().strip(),
+                "serial":        self._serial.text().strip(),
+                "notes":         self._notes.toPlainText().strip(),
+                "ports_per_row": self._ports_per_row.currentData(),
+                "sfp_ports":     self._sfp_ports.value(),
             },
             "slot": {
-                "id":       "",   # wordt ingevuld door main_window
-                "u_start":  u_start,
-                "height":   height,
+                "id":      "",
+                "u_start": u_start,
+                "height":  height,
             }
         }
         self.accept()
 
-    # ------------------------------------------------------------------
-    # Resultaat
-    # ------------------------------------------------------------------
-
     def get_result(self) -> dict | None:
         return self._result
 
-    # ------------------------------------------------------------------
-    # Hulpfuncties
-    # ------------------------------------------------------------------
-
     def _occupied_units(self) -> set:
-        """Geeft set van bezette U-posities in dit rack."""
         occupied = set()
-        dev_map  = {d["id"]: d for d in self._data.get("devices", [])}
         for slot in self._rack.get("slots", []):
-            dev    = dev_map.get(slot.get("device_id", ""))
             height = slot.get("height", 1)
             u      = slot.get("u_start", 1)
             for i in range(height):
@@ -209,10 +262,15 @@ class PlaceDeviceDialog(QDialog):
         return occupied
 
     def _next_free_u(self) -> int:
-        """Geeft de eerste vrije U-positie terug."""
-        occupied = self._occupied_units()
-        total_u  = self._rack.get("total_units", 12)
-        for u in range(1, total_u + 1):
-            if u not in occupied:
-                return u
+        occupied  = self._occupied_units()
+        total_u   = self._rack.get("total_units", 12)
+        numbering = self._rack.get("numbering", "top_down")
+        if numbering == "bottom_up":
+            for u in range(total_u, 0, -1):
+                if u not in occupied:
+                    return self._internal_to_display(u)
+        else:
+            for u in range(1, total_u + 1):
+                if u not in occupied:
+                    return u
         return 1

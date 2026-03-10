@@ -3,11 +3,7 @@
 ; Applicatie: Networkmap Creator
 ; Auteur: Barremans / CGK
 ;
-; Gebruik:
-;   ISCC.exe /DMyAppVersion=1.2.3 /DMySourceDir="..\dist\Networkmap_Creator_1.2.3" installer\networkmap_setup.iss
-;
-; Optioneel met signing via compiler define:
-;   ISCC.exe /DMyAppVersion=1.2.3 /DMySourceDir="..\dist\Networkmap_Creator_1.2.3" /DSignCmd="signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /a $f" installer\networkmap_setup.iss
+; Gebruik: ISCC.exe /DMyAppVersion=1.2.3 /DMySourceDir="..\dist\Networkmap_Creator_1.2.3" installer\networkmap_setup.iss
 
 #ifndef MyAppVersion
   #define MyAppVersion "1.0.0"
@@ -39,17 +35,8 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64
-ArchitecturesAllowed=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 DirExistsWarning=no
-ChangesAssociations=no
-DisableDirPage=no
-DisableReadyMemo=no
-
-#ifdef SignCmd
-SignTool={#SignCmd}
-SignedUninstaller=yes
-#endif
 
 [Languages]
 Name: "dutch"; MessagesFile: "compiler:Languages\Dutch.isl"

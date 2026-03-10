@@ -2,11 +2,12 @@
 # Networkmap_Creator
 # File:    app/main.py
 # Role:    Entry point — QApplication, QSS laden, taal instellen, MainWindow
-# Version: 1.2.2
+# Version: 1.2.3
 # Author:  Barremans
 # Changes: D   — update check bij opstarten via UpdateChecker
 #          D.1 — update_available_with_url signaal
 #          D.2 — download-knop actief via DownloadDialog
+#          1.2.3 — versie dynamisch uit version.py (fix statusbalk vs Over)
 # =============================================================================
 
 import sys
@@ -30,6 +31,12 @@ from app.gui.main_window import MainWindow
 from app.services.logger import log_info, log_warning, log_error
 from app.services.update_checker import UpdateChecker, GITHUB_RELEASES_URL
 from app.services.update_downloader import DownloadDialog
+
+try:
+    from app import version as _ver
+    _APP_VERSION = _ver.__version__
+except Exception:
+    _APP_VERSION = "1.0.0"
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +125,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Networkmap Creator")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion(_APP_VERSION)   # ← dynamisch uit version.py
     app.setOrganizationName("Barremans")
 
     _init_language()

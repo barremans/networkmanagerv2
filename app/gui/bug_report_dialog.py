@@ -2,13 +2,17 @@
 # Networkmap_Creator
 # File:    app/gui/bug_report_dialog.py
 # Role:    Bug / Feature melden naar GitHub Issues en Pull Requests
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
+# Changes: 1.1.0 — GitHub token uit app/config/github_config.py (niet hardcoded)
 # =============================================================================
 
 import uuid
 import base64
 from datetime import datetime
+
+import os
+import sys
 
 import requests
 
@@ -22,12 +26,45 @@ from PySide6.QtCore import Qt
 from app.helpers.i18n import t
 
 # ---------------------------------------------------------------------------
-# GitHub configuratie — pas aan in app/config/github_config.py
+# GitHub configuratie — geladen uit app/config/github_config.py
+# Kopieer app/config/github_config.example.py naar github_config.py
 # ---------------------------------------------------------------------------
-_GITHUB_TOKEN  = "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"
-_GITHUB_OWNER  = "barremans"
-_GITHUB_REPO   = "networkmanagerv2"
-_GITHUB_BRANCH = "main"
+try:
+    from app.config.github_config import (
+        GITHUB_TOKEN  as _GITHUB_TOKEN,
+        GITHUB_OWNER  as _GITHUB_OWNER,
+        GITHUB_REPO   as _GITHUB_REPO,
+        GITHUB_BRANCH as _GITHUB_BRANCH,
+    )
+except ImportError:
+    _GITHUB_TOKEN  = ""
+    _GITHUB_OWNER  = ""
+    _GITHUB_REPO   = ""
+    _GITHUB_BRANCH = "main"
+
+
+def _get_verify() -> str | bool:
+    """
+    Geeft het pad naar cacert.pem terug.
+    In een PyInstaller .exe zit certifi gebundeld in _MEIPASS.
+    In development wordt het systeem-certifi gebruikt.
+    """
+    if getattr(sys, "frozen", False):
+        # PyInstaller exe — certifi zit in de tijdelijke map
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        pem  = os.path.join(base, "certifi", "cacert.pem")
+        if os.path.exists(pem):
+            return pem
+        # Fallback: naast de exe zelf
+        pem2 = os.path.join(os.path.dirname(sys.executable), "certifi", "cacert.pem")
+        if os.path.exists(pem2):
+            return pem2
+    # Development — gebruik certifi normaal
+    try:
+        import certifi
+        return certifi.where()
+    except ImportError:
+        return True   # vertrouw op het OS
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +110,7 @@ class _GitHubClient:
     def _create_issue(self, title: str, body: str, label: str) -> str:
         url  = f"{self._api}/issues"
         data = {"title": title, "body": body, "labels": [label]}
-        res  = requests.post(url, json=data, headers=self._hdrs, timeout=15)
+        res  = requests.post(url, json=data, headers=self._hdrs, timeout=15, verify=_get_verify())
         res.raise_for_status()
         return res.json().get("html_url", "Issue aangemaakt (geen URL ontvangen).")
 
@@ -102,7 +139,7 @@ class _GitHubClient:
             "content": encoded,
             "branch":  branch_name,
         }
-        res = requests.put(file_url, json=file_data, headers=self._hdrs, timeout=15)
+        res = requests.put(file_url, json=file_data, headers=self._hdrs, timeout=15, verify=_get_verify())
         res.raise_for_status()
 
         # Pull Request aanmaken
@@ -113,26 +150,26 @@ class _GitHubClient:
             "head":  branch_name,
             "base":  _GITHUB_BRANCH,
         }
-        pr_res = requests.post(pr_url, json=pr_data, headers=self._hdrs, timeout=15)
+        pr_res = requests.post(pr_url, json=pr_data, headers=self._hdrs, timeout=15, verify=_get_verify())
         pr_res.raise_for_status()
         pr_number = pr_res.json()["number"]
 
         # Label toevoegen
         lbl_url = f"{self._api}/issues/{pr_number}/labels"
-        requests.post(lbl_url, json={"labels": [label]}, headers=self._hdrs, timeout=10)
+        requests.post(lbl_url, json={"labels": [label]}, headers=self._hdrs, timeout=10, verify=_get_verify())
 
         return pr_res.json().get("html_url", "Pull Request aangemaakt (geen URL ontvangen).")
 
     def _get_head_sha(self) -> str:
         url = f"{self._api}/git/ref/heads/{_GITHUB_BRANCH}"
-        res = requests.get(url, headers=self._hdrs, timeout=10)
+        res = requests.get(url, headers=self._hdrs, timeout=10, verify=_get_verify())
         res.raise_for_status()
         return res.json()["object"]["sha"]
 
     def _create_branch(self, branch_name: str, sha: str):
         url  = f"{self._api}/git/refs"
         data = {"ref": f"refs/heads/{branch_name}", "sha": sha}
-        res  = requests.post(url, json=data, headers=self._hdrs, timeout=10)
+        res  = requests.post(url, json=data, headers=self._hdrs, timeout=10, verify=_get_verify())
         res.raise_for_status()
 
 

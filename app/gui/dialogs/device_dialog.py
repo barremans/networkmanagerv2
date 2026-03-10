@@ -2,8 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/device_dialog.py
 # Role:    Device aanmaken, bewerken en dupliceren
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
+# Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
+#                  ipv hardcoded lijst
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -12,34 +14,56 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QLabel
 )
 from app.helpers.i18n import t
+from app.helpers.settings_storage import load_device_types, get_device_type_defaults
 
-# Standaard poortaantallen per device type (handboek sectie 7)
+# Standaard poortaantallen per device type — fallback als type niet in settings staat
 DEVICE_PORT_DEFAULTS = {
-    "switch":     {"front": 24, "back": 0},
-    "patchpanel": {"front": 24, "back": 24},
-    "server":     {"front": 2,  "back": 0},
-    "firewall":   {"front": 4,  "back": 0},
-    "modem":      {"front": 4,  "back": 0},
-    "ups":        {"front": 0,  "back": 0},
+    "switch":       {"front": 24, "back": 0},
+    "patch_panel":  {"front": 24, "back": 24},
+    "patchpanel":   {"front": 24, "back": 24},
+    "server":       {"front": 2,  "back": 0},
+    "firewall":     {"front": 4,  "back": 0},
+    "router":       {"front": 4,  "back": 0},
+    "modem":        {"front": 4,  "back": 0},
+    "kvm":          {"front": 8,  "back": 0},
+    "ups":          {"front": 0,  "back": 0},
+    "pdu":          {"front": 0,  "back": 0},
+    "media_conv":   {"front": 2,  "back": 0},
+    "other":        {"front": 0,  "back": 0},
 }
 
-_DEVICE_TYPES = [
-    "switch", "patchpanel", "server", "firewall", "modem", "ups"
-]
+
+def _load_device_type_list():
+    """
+    Laad device types uit settings_storage.
+    Elke entry: {"key": str, "label_nl": str, "label_en": str,
+                 "front_ports": int, "back_ports": int}
+    """
+    try:
+        return load_device_types()
+    except Exception:
+        # Fallback bij import problemen
+        return [
+            {"key": k, "label_nl": k, "label_en": k,
+             "front_ports": DEVICE_PORT_DEFAULTS.get(k, {}).get("front", 0),
+             "back_ports":  DEVICE_PORT_DEFAULTS.get(k, {}).get("back",  0)}
+            for k in DEVICE_PORT_DEFAULTS
+        ]
 
 
 class DeviceDialog(QDialog):
     """
     Device aanmaken of bewerken.
     Type kiezen via DDL → FRONT/BACK automatisch ingevuld.
-    Gebruiker kan FRONT/BACK altijd manueel aanpassen.
+    Types geladen uit settings_storage — volledig configureerbaar.
     """
 
     def __init__(self, parent=None, device: dict = None, duplicate: bool = False):
         super().__init__(parent)
-        self._device    = device or {}
-        self._duplicate = duplicate
-        self._result    = None
+        self._device       = device or {}
+        self._duplicate    = duplicate
+        self._result       = None
+        self._device_types = _load_device_type_list()
 
         title = t("label_device")
         if duplicate:
@@ -57,30 +81,43 @@ class DeviceDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(8)
 
-        # Naam
         self._name = QLineEdit()
         form.addRow(t("label_name") + " *:", self._name)
 
-        # Type DDL
+        # Type DDL — gevuld vanuit settings_storage
         self._ddl_type = QComboBox()
-        for dt in _DEVICE_TYPES:
-            self._ddl_type.addItem(t(f"device_{dt}"), dt)
+        lang = t("_lang") if t("_lang") in ("nl", "en") else "nl"
+        for dt in self._device_types:
+            label = dt.get(f"label_{lang}", dt.get("label_nl", dt["key"]))
+            self._ddl_type.addItem(label, dt["key"])
         self._ddl_type.currentIndexChanged.connect(self._on_type_changed)
         form.addRow(t("label_type") + " *:", self._ddl_type)
 
-        # FRONT poorten
         self._front_ports = QSpinBox()
         self._front_ports.setRange(0, 96)
         form.addRow(t("label_front_ports") + ":", self._front_ports)
 
-        # BACK poorten
         self._back_ports = QSpinBox()
         self._back_ports.setRange(0, 96)
         form.addRow(t("label_back_ports") + ":", self._back_ports)
 
-        form.addRow(QLabel(""))   # lege rij als separator
+        # Poorten per rij — 1.2.0
+        self._ports_per_row = QComboBox()
+        self._ports_per_row.addItem("12  (standaard)", 12)
+        self._ports_per_row.addItem("24  (1 rij)",     24)
+        self._ports_per_row.addItem("6",                6)
+        self._ports_per_row.addItem("8",                8)
+        self._ports_per_row.addItem("16",              16)
+        form.addRow(t("label_ports_per_row") + ":", self._ports_per_row)
 
-        # Optionele velden
+        # SFP poorten — 1.3.0
+        self._sfp_ports = QSpinBox()
+        self._sfp_ports.setRange(0, 32)
+        self._sfp_ports.setToolTip("Aantal SFP uplink poorten (laatste X front poorten)")
+        form.addRow(t("label_sfp_ports") + ":", self._sfp_ports)
+
+        form.addRow(QLabel(""))
+
         self._brand  = QLineEdit()
         self._model  = QLineEdit()
         self._ip     = QLineEdit()
@@ -98,7 +135,6 @@ class DeviceDialog(QDialog):
 
         layout.addLayout(form)
 
-        # Knoppen
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_save   = QPushButton(t("btn_save"))
@@ -109,24 +145,31 @@ class DeviceDialog(QDialog):
         btn_layout.addWidget(btn_save)
         layout.addLayout(btn_layout)
 
-        # Standaard waarden voor eerste type instellen
         self._on_type_changed()
 
     def _on_type_changed(self):
-        """Vult FRONT/BACK automatisch in op basis van gekozen type."""
+        """Vult FRONT/BACK in op basis van settings of fallback defaults."""
         dev_type = self._ddl_type.currentData()
+        # Zoek eerst in de geladen types
+        for dt in self._device_types:
+            if dt["key"] == dev_type:
+                self._front_ports.setValue(dt.get("front_ports", 0))
+                self._back_ports.setValue(dt.get("back_ports",  0))
+                self._sfp_ports.setValue(dt.get("sfp_ports", 0))
+                return
+        # Fallback op hardcoded defaults
         defaults = DEVICE_PORT_DEFAULTS.get(dev_type, {"front": 0, "back": 0})
         self._front_ports.setValue(defaults["front"])
         self._back_ports.setValue(defaults["back"])
+        self._sfp_ports.setValue(0)
 
     def _populate(self):
-        """Vult formulier in met bestaande device data."""
         name = self._device.get("name", "")
         if self._duplicate:
             name += " (kopie)"
         self._name.setText(name)
 
-        dev_type = self._device.get("type", "switch")
+        dev_type = self._device.get("type", "")
         idx = self._ddl_type.findData(dev_type)
         if idx >= 0:
             self._ddl_type.blockSignals(True)
@@ -135,10 +178,14 @@ class DeviceDialog(QDialog):
 
         self._front_ports.setValue(self._device.get("front_ports", 0))
         self._back_ports.setValue(self._device.get("back_ports", 0))
+        self._sfp_ports.setValue(self._device.get("sfp_ports", 0))
+        ppr = self._device.get("ports_per_row", 12)
+        idx = self._ports_per_row.findData(ppr)
+        if idx >= 0:
+            self._ports_per_row.setCurrentIndex(idx)
         self._brand.setText(self._device.get("brand", ""))
         self._model.setText(self._device.get("model", ""))
 
-        # Bij dupliceren: IP, MAC en serial leeg laten (unieke velden)
         if not self._duplicate:
             self._ip.setText(self._device.get("ip", ""))
             self._mac.setText(self._device.get("mac", ""))
@@ -163,7 +210,9 @@ class DeviceDialog(QDialog):
             "ip":          self._ip.text().strip(),
             "mac":         self._mac.text().strip(),
             "serial":      self._serial.text().strip(),
-            "notes":       self._notes.toPlainText().strip(),
+            "notes":         self._notes.toPlainText().strip(),
+            "ports_per_row": self._ports_per_row.currentData(),
+            "sfp_ports":     self._sfp_ports.value(),
         }
         self.accept()
 
