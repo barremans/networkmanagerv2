@@ -7,7 +7,7 @@
 
 
 ## B Features
-- Vlan kunnen ingeven en zo indirect naar wandpunt (dus ook zichtbaar zijn bij tracing)
+
 
 
 ### C Bijsturing
@@ -20,6 +20,13 @@
   -- import bestand, open laatst gebruikte folder
   -- export afbeelding, open laatst gebruikte folder
   -- raport word, open laatst gebruikte folder
+
+- standaard read only, via settings openzetten zodat aanpassingen mogelijk zijn 
+  -- edit mode duidelijk zichtbaar in de applicatie (modus: "read" "R/W")
+
+
+- alles uppercase ingave en weergave
+  -- retroactief maken
 
 - afbeelding export
   -- niet duidelijk, te lange afbeelding van het rack.  
@@ -38,4 +45,9 @@
     - Optie: setting in build/config
 
 ---
+
+-- direct uitlezen.
+
+
+
 
