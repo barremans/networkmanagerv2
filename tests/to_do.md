@@ -6,20 +6,16 @@
 ### Bug
 
 
+
 ## B Features
 
 
 
 ### C Bijsturing
-- Menubar
-  -- [menubar_inexport]  , dit is visueelniet correct, naam moet im-export of betere benaming.
+
 - Export word document.
   -- uitbreiden met toestel info (detail)
-- exporteeren
-  -- export bestand, open laatst gebruikte folder
-  -- import bestand, open laatst gebruikte folder
-  -- export afbeelding, open laatst gebruikte folder
-  -- raport word, open laatst gebruikte folder
+
 
 - standaard read only, via settings openzetten zodat aanpassingen mogelijk zijn 
   -- edit mode duidelijk zichtbaar in de applicatie (modus: "read" "R/W")

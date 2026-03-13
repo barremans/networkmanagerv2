@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.30.0
+# Version: 1.31.2
 # Author:  Barremans
 # Changes: F1 — ESC annuleert verbindingsmodus
 #               Klik op lege poort wist vorige trace + highlight
@@ -22,6 +22,10 @@
 #          1.28.0 — Versie dynamisch uit version.py (fix statusbalk vs Over)
 #          1.29.0 — Dubbelklik device → info popup; PortDialog; VLAN rapport zijpaneel
 #          1.30.0 — VLAN beheer knop + automatische propagatie na opslaan poort/wandpunt
+#          1.31.0 — Settings menu in menubar (Instellingen + VLAN beheer)
+#          1.31.2 — Rapporteren volgorde aangepast; Im/Export namen + divider
+#                   VLAN rapport onder Rapporteren; linkerpaneel knoppen verwijderd
+#                   Instellingen uit toolbar; Im/Export shortcuts opgeschoond
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -34,6 +38,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush
 
 from app.helpers import settings_storage
+from app.helpers.settings_storage import get_last_folder, set_last_folder
 from app.helpers.i18n import t
 from app.gui.rack_view import RackView, _rack_occupancy, _occupancy_color
 from app.gui.wall_outlet_view import WallOutletView
@@ -144,25 +149,29 @@ class MainWindow(QMainWindow):
         # ── In/Ex-port menu ──────────────────────────────────────────
         self._menu_inex = mb.addMenu(t("menubar_inexport"))
 
-        act_import = self._menu_inex.addAction(t("menu_import"))
-        act_import.setShortcut("Ctrl+O")
+        act_import = self._menu_inex.addAction("Importeren Data")
         act_import.triggered.connect(self._on_import)
 
-        act_export = self._menu_inex.addAction(t("menu_export"))
+        act_export = self._menu_inex.addAction("Exporteren Data")
         act_export.triggered.connect(self._on_export)
 
         self._menu_inex.addSeparator()
 
         act_export_image = self._menu_inex.addAction(t("menu_export_image"))
-        act_export_image.setShortcut("Ctrl+Shift+E")
         act_export_image.triggered.connect(self._on_export_image)
-
-        act_export_report = self._menu_inex.addAction(t("menu_export_report"))
-        act_export_report.setShortcut("Ctrl+Shift+R")
-        act_export_report.triggered.connect(self._on_export_report)
 
         # ── Rapporteren menu ─────────────────────────────────────────
         self._menu_report = mb.addMenu(t("menubar_report"))
+
+        act_word_report = self._menu_report.addAction(t("menu_export_report"))
+        act_word_report.triggered.connect(self._on_export_report)
+
+        self._menu_report.addSeparator()
+
+        act_vlan_report_mb = self._menu_report.addAction("🔷  VLAN rapport")
+        act_vlan_report_mb.triggered.connect(self._on_vlan_report)
+
+        self._menu_report.addSeparator()
 
         act_bug = self._menu_report.addAction(t("menu_report_bug"))
         act_bug.triggered.connect(self._on_report_bug)
@@ -170,10 +179,19 @@ class MainWindow(QMainWindow):
         act_feature = self._menu_report.addAction(t("menu_report_feature"))
         act_feature.triggered.connect(self._on_report_feature)
 
-        self._menu_report.addSeparator()
-
         act_cases = self._menu_report.addAction(t("menu_report_cases"))
         act_cases.triggered.connect(self._on_show_cases)
+
+        # ── Settings menu ────────────────────────────────────────────
+        self._menu_settings_mb = mb.addMenu("Settings")
+
+        act_settings_mb = self._menu_settings_mb.addAction(t("menu_settings"))
+        act_settings_mb.triggered.connect(self._on_settings)
+
+        self._menu_settings_mb.addSeparator()
+
+        act_vlan_mgr_mb = self._menu_settings_mb.addAction("⚙  VLAN beheer")
+        act_vlan_mgr_mb.triggered.connect(self._on_vlan_manager)
 
         # ── Help menu ────────────────────────────────────────────────
         self._menu_help = mb.addMenu(t("menubar_help"))
@@ -242,7 +260,6 @@ class MainWindow(QMainWindow):
         self._act_settings  = QAction(t("menu_settings"),  self)
         self._act_settings.setEnabled(True)
         self._act_settings.triggered.connect(self._on_settings)
-        tb.addAction(self._act_settings)
 
         # QActions voor In/Ex-port — alleen in menu, niet in toolbar
         self._act_import    = QAction(t("menu_import"),    self)
@@ -305,21 +322,7 @@ class MainWindow(QMainWindow):
         self._tree.customContextMenuRequested.connect(self._on_tree_context_menu)
         left_layout.addWidget(self._tree)
 
-        self._btn_new_tree = QPushButton("＋  " + t("menu_new"))
-        self._btn_new_tree.setEnabled(True)
-        self._btn_new_tree.setFixedHeight(32)
-        self._btn_new_tree.clicked.connect(self._on_new)
-        left_layout.addWidget(self._btn_new_tree)
 
-        self._btn_vlan_report = QPushButton("🔷  VLAN rapport")
-        self._btn_vlan_report.setFixedHeight(32)
-        self._btn_vlan_report.clicked.connect(self._on_vlan_report)
-        left_layout.addWidget(self._btn_vlan_report)
-
-        self._btn_vlan_mgr = QPushButton("⚙  VLAN beheer")
-        self._btn_vlan_mgr.setFixedHeight(32)
-        self._btn_vlan_mgr.clicked.connect(self._on_vlan_manager)
-        left_layout.addWidget(self._btn_vlan_mgr)
 
         # Midden frame
         self._mid_frame = QFrame()
@@ -1923,7 +1926,11 @@ class MainWindow(QMainWindow):
 
     def _on_export(self):
         from PySide6.QtWidgets import QFileDialog
+        import os
         suggested = import_export_service.suggested_filename()
+        last = get_last_folder("export_json")
+        if last:
+            suggested = os.path.join(last, os.path.basename(suggested))
         filepath, _ = QFileDialog.getSaveFileName(
             self, t("menu_export"), suggested,
             "JSON bestanden (*.json)"
@@ -1933,6 +1940,7 @@ class MainWindow(QMainWindow):
         try:
             ok = import_export_service.export_to_file(self._data, filepath)
             if ok:
+                set_last_folder("export_json", os.path.dirname(filepath))
                 log_info(f"Export naar: {filepath}")
                 self.set_status(f"✓  {t('msg_exported_to')} {filepath}")
             else:
@@ -1955,7 +1963,7 @@ class MainWindow(QMainWindow):
 
         from PySide6.QtWidgets import QFileDialog
         import os
-        start_dir = self._export_folder()
+        start_dir = get_last_folder("export_image") or self._export_folder()
         if start_dir:
             suggested = os.path.join(start_dir, os.path.basename(suggested))
         filepath, _ = QFileDialog.getSaveFileName(
@@ -1967,6 +1975,7 @@ class MainWindow(QMainWindow):
 
         ok, err = export_fn(filepath)
         if ok:
+            set_last_folder("export_image", os.path.dirname(filepath))
             log_info(f"Afbeelding geëxporteerd: {filepath}")
             self.set_status(f"✓  {t('msg_image_exported')}: {filepath}")
             import os; os.startfile(filepath)
@@ -2009,7 +2018,7 @@ class MainWindow(QMainWindow):
         suggested = f"networkmap_rapport_{datum}.docx"
 
         import os
-        start_dir = self._export_folder()
+        start_dir = get_last_folder("export_report") or self._export_folder()
         if start_dir:
             suggested = os.path.join(start_dir, suggested)
         filepath, _ = QFileDialog.getSaveFileName(
@@ -2021,6 +2030,7 @@ class MainWindow(QMainWindow):
 
         ok, err = report_generator.render_report_docx(self._data, filepath)
         if ok:
+            set_last_folder("export_report", os.path.dirname(filepath))
             log_info(f"Rapport geëxporteerd: {filepath}")
             self.set_status(f"✓  {t('msg_report_exported')}: {filepath}")
             import os; os.startfile(filepath)
@@ -2066,12 +2076,15 @@ class MainWindow(QMainWindow):
 
     def _on_import(self):
         from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog
+        import os
+        last = get_last_folder("import_json")
         filepath, _ = QFileDialog.getOpenFileName(
-            self, t("menu_import"), "",
+            self, t("menu_import"), last,
             "JSON bestanden (*.json)"
         )
         if not filepath:
             return
+        set_last_folder("import_json", os.path.dirname(filepath))
 
         modus, ok = QInputDialog.getItem(
             self, t("menu_import"),
@@ -2388,6 +2401,7 @@ class MainWindow(QMainWindow):
         self._menu_file.setTitle(t("menubar_file"))
         self._menu_inex.setTitle(t("menubar_inexport"))
         self._menu_report.setTitle(t("menubar_report"))
+        self._menu_settings_mb.setTitle("Settings")
         self._menu_help.setTitle(t("menubar_help"))
         self._act_new.setText(t("menu_new"))
         self._act_edit.setText(t("menu_edit"))

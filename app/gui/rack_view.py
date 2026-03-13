@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.15.0
+# Version: 1.17.0
 # Author:  Barremans
 # Changes: 1.4.0 — bezettingsindicator in titelregel (percentage + kleurenbalk)
 #          1.5.0 — refresh() hergebruikt bestaande layout via _populate()
@@ -17,6 +17,10 @@
 #          1.14.0 — Fix: refresh() gebruikt setParent(None) ipv deleteLater()
 #          1.15.0 — device_double_clicked signal + dubbelklik op _DeviceRow
 #                   zodat widgets direct verwijderd worden + update() na _populate()
+#          1.16.0 — Visuele fix: poortblokken tegen naambord aan (geen stretch tussen
+#                   voor/achter), naam gecentreerd in resterende ruimte
+#          1.17.0 — Switch nummering: oneven boven, even onder (echte switch layout)
+#                   alleen actief bij device type "switch" met 2+ rijen
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -259,6 +263,7 @@ class RackView(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(4)
 
+        # Unitnummer
         num_lbl = QLabel(self._display_unit_number(u_num))
         num_lbl.setObjectName("unit_number")
         num_lbl.setFixedWidth(_UNIT_NUM_W)
@@ -271,13 +276,14 @@ class RackView(QWidget):
         ppr       = device.get("ports_per_row", _MAX_PORTS_ROW)
         sfp_count = device.get("sfp_ports", 0)
 
+        # VOOR-poorten — direct naast unitnummer, geen stretch ervoor
         if heeft_front:
             total_front = device["front_ports"]
             if sfp_count > 0:
                 copper_ports = [p for p in front_ports if p["number"] <= total_front]
                 sfp_ports_l  = [p for p in front_ports if p["number"] > total_front]
                 copper_block = self._build_port_block(
-                    copper_ports, "front", total_front, connected_ports, ppr)
+                    copper_ports, "front", total_front, connected_ports, ppr, dev_type)
                 sfp_block = self._build_sfp_block(
                     sfp_ports_l, sfp_count, total_front, connected_ports)
                 layout.addWidget(copper_block)
@@ -288,8 +294,9 @@ class RackView(QWidget):
                 layout.addWidget(sfp_block)
             else:
                 layout.addWidget(self._build_port_block(
-                    front_ports, "front", total_front, connected_ports, ppr))
+                    front_ports, "front", total_front, connected_ports, ppr, dev_type))
 
+        # Naam gecentreerd in de resterende ruimte
         lw = QWidget()
         ll = QVBoxLayout(lw)
         ll.setContentsMargins(4, 0, 4, 0)
@@ -305,9 +312,10 @@ class RackView(QWidget):
         ll.addWidget(type_lbl)
         layout.addWidget(lw, stretch=1)
 
+        # ACHTER-poorten — direct naast naambord rechts, geen stretch erna
         if heeft_back:
             layout.addWidget(self._build_port_block(
-                back_ports, "back", device["back_ports"], connected_ports, ppr))
+                back_ports, "back", device["back_ports"], connected_ports, ppr, dev_type))
 
         return row
 
@@ -333,7 +341,7 @@ class RackView(QWidget):
     # Poort blok
     # ------------------------------------------------------------------
 
-    def _build_port_block(self, ports, side, total, connected_ports, ports_per_row: int = _MAX_PORTS_ROW):
+    def _build_port_block(self, ports, side, total, connected_ports, ports_per_row: int = _MAX_PORTS_ROW, dev_type: str = ""):
         container = QWidget()
         container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         grid = QVBoxLayout(container)
@@ -343,8 +351,18 @@ class RackView(QWidget):
 
         port_by_num  = {p["number"]: p for p in ports}
         port_numbers = list(range(1, total + 1))
-        rows = [port_numbers[i:i + ports_per_row]
-                for i in range(0, len(port_numbers), ports_per_row)]
+
+        # Switches met 2+ rijen: oneven boven, even onder (echte switch nummering)
+        if dev_type == "switch" and total > ports_per_row:
+            odd_nums  = [n for n in port_numbers if n % 2 == 1]
+            even_nums = [n for n in port_numbers if n % 2 == 0]
+            rows = []
+            for i in range(0, max(len(odd_nums), len(even_nums)), ports_per_row):
+                rows.append(odd_nums[i:i + ports_per_row])
+                rows.append(even_nums[i:i + ports_per_row])
+        else:
+            rows = [port_numbers[i:i + ports_per_row]
+                    for i in range(0, len(port_numbers), ports_per_row)]
 
         for row_nums in rows:
             row_w = QWidget()
@@ -518,8 +536,6 @@ class RackView(QWidget):
 
         layout = self.layout()
 
-        # setParent(None) verwijdert de widget direct (niet uitgesteld zoals deleteLater)
-        # zodat _populate() een lege layout aantreft
         while layout.count():
             item = layout.takeAt(0)
             w = item.widget()
@@ -528,7 +544,6 @@ class RackView(QWidget):
 
         self._populate(layout)
 
-        # Forceer hertekening van de volledige RackView
         self.updateGeometry()
         self.update()
 
@@ -569,7 +584,6 @@ class _DeviceRow(QFrame):
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            # Bubble omhoog naar RackView om signal te emitteren
             rack_view = self.parent()
             while rack_view and not hasattr(rack_view, "device_double_clicked"):
                 rack_view = rack_view.parent()

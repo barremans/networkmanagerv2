@@ -83,7 +83,7 @@ _SETTINGS_FILE = os.path.join(_DATA_DIR, "settings.json")
 _NETWORK_FILE  = os.path.join(_DATA_DIR, "network_data.json")
 
 # Verplichte sleutels voor validatie
-_REQUIRED_SETTINGS_KEYS = ["app_version", "language", "backup", "ui"]
+_REQUIRED_SETTINGS_KEYS = ["app_version", "language", "backup", "ui", "last_folders"]
 _REQUIRED_NETWORK_KEYS  = ["version", "sites", "devices", "ports", "endpoints", "connections"]
 
 # Ingebouwde eindapparaat-types
@@ -141,6 +141,13 @@ _DEFAULT_SETTINGS = {
         "theme": "dark",
         "rack_unit_height": 30,
         "rack_unit_width": 400
+    },
+    "last_folders": {
+        "export_json":   "",
+        "import_json":   "",
+        "export_image":  "",
+        "export_pdf":    "",
+        "export_report": "",
     },
     "last_opened_site": "",
     "endpoint_types": _DEFAULT_ENDPOINT_TYPES,
@@ -390,6 +397,26 @@ def save_network_data(data: dict) -> bool:
     path = get_network_data_path()
     return _save_json(path, data)
 
+
+
+
+# ---------------------------------------------------------------------------
+# Laatste gebruikte mappen per export type
+# ---------------------------------------------------------------------------
+
+def get_last_folder(key: str) -> str:
+    """Geeft de laatste gebruikte map terug voor het gegeven export type."""
+    settings = load_settings()
+    return settings.get("last_folders", {}).get(key, "")
+
+
+def set_last_folder(key: str, path: str) -> None:
+    """Slaat de laatste gebruikte map op voor het gegeven export type."""
+    settings = load_settings()
+    if "last_folders" not in settings:
+        settings["last_folders"] = {}
+    settings["last_folders"][key] = path
+    save_settings(settings)
 
 def validate_network_data(data: dict) -> tuple[bool, str]:
     if not isinstance(data, dict):

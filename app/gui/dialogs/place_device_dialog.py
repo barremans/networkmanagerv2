@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.5.0
+# Version: 1.7.0
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv import van hardcoded _DEVICE_TYPES uit device_dialog
@@ -10,6 +10,9 @@
 #          1.3.0 — Poorten per rij keuze voor alle device types
 #          1.4.0 — SFP poorten veld
 #          1.5.0 — S/N en MAC velden toegevoegd (pariteit met device_dialog)
+#          1.6.0 — Fix: grenzenvalidatie bij bottom_up nummering
+#                  (u_start > total_u ipv u_start + height - 1 > total_u)
+#          1.7.0 — Extra ports_per_row opties: 3 en 4
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -75,7 +78,6 @@ class PlaceDeviceDialog(QDialog):
 
         self._name = QLineEdit()
 
-        # DDL gevuld vanuit settings_storage
         self._ddl_type = QComboBox()
         lang = "nl"
         for dt in self._device_types:
@@ -88,9 +90,12 @@ class PlaceDeviceDialog(QDialog):
         self._back_ports  = QSpinBox()
         self._back_ports.setRange(0, 96)
 
+        # Poorten per rij — uitgebreid met 3 en 4
         self._ports_per_row = QComboBox()
         self._ports_per_row.addItem("12  (standaard)", 12)
         self._ports_per_row.addItem("24  (1 rij)",     24)
+        self._ports_per_row.addItem("3",                3)
+        self._ports_per_row.addItem("4",                4)
         self._ports_per_row.addItem("6",                6)
         self._ports_per_row.addItem("8",                8)
         self._ports_per_row.addItem("16",              16)
@@ -207,7 +212,7 @@ class PlaceDeviceDialog(QDialog):
         else:
             u_top = u_start
 
-        if u_top < 1 or u_start + height - 1 > total_u:
+        if u_top < 1 or u_start > total_u:
             QMessageBox.warning(self, t("label_device"),
                                 f"Device past niet in rack "
                                 f"(U{display_u}+{height}U > {total_u}U).")

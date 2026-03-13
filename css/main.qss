@@ -310,6 +310,64 @@ QListWidget::item:hover {
 }
 
 
+
+
+/* ============================================================
+   MENUBAR & MENU
+   ============================================================ */
+
+QMenuBar {
+    background-color: #1A1A2A;
+    color: #E0E0F0;
+    border-bottom: 1px solid #3A3A4E;
+    padding: 2px 0px;
+    font-size: 9pt;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    padding: 4px 10px;
+    border-radius: 3px;
+}
+
+QMenuBar::item:selected {
+    background-color: #3A5A8A;
+    color: #FFFFFF;
+}
+
+QMenuBar::item:pressed {
+    background-color: #2A4A7A;
+}
+
+QMenu {
+    background-color: #252535;
+    color: #E0E0F0;
+    border: 1px solid #4A4A6A;
+    border-radius: 4px;
+    padding: 4px 0px;
+    font-size: 9pt;
+}
+
+QMenu::item {
+    padding: 5px 28px 5px 16px;
+    border-radius: 2px;
+}
+
+QMenu::item:selected {
+    background-color: #3A5A8A;
+    color: #FFFFFF;
+}
+
+QMenu::item:disabled {
+    color: #606070;
+}
+
+QMenu::separator {
+    height: 2px;
+    background-color: #E0E0F0;
+    margin: 4px 8px;
+}
+
 /* ============================================================
    TOOLTIP
    ============================================================ */

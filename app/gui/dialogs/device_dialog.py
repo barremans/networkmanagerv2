@@ -2,16 +2,18 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/device_dialog.py
 # Role:    Device aanmaken, bewerken en dupliceren
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv hardcoded lijst
+#          1.2.0 — Positie (U-start) en hoogte aanpasbaar bij bewerken
+#                  Extra ports_per_row opties: 3, 4
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QSpinBox, QComboBox, QTextEdit,
-    QPushButton, QMessageBox, QLabel
+    QPushButton, QMessageBox, QLabel, QGroupBox
 )
 from app.helpers.i18n import t
 from app.helpers.settings_storage import load_device_types, get_device_type_defaults
@@ -34,15 +36,9 @@ DEVICE_PORT_DEFAULTS = {
 
 
 def _load_device_type_list():
-    """
-    Laad device types uit settings_storage.
-    Elke entry: {"key": str, "label_nl": str, "label_en": str,
-                 "front_ports": int, "back_ports": int}
-    """
     try:
         return load_device_types()
     except Exception:
-        # Fallback bij import problemen
         return [
             {"key": k, "label_nl": k, "label_en": k,
              "front_ports": DEVICE_PORT_DEFAULTS.get(k, {}).get("front", 0),
@@ -54,14 +50,18 @@ def _load_device_type_list():
 class DeviceDialog(QDialog):
     """
     Device aanmaken of bewerken.
-    Type kiezen via DDL → FRONT/BACK automatisch ingevuld.
-    Types geladen uit settings_storage — volledig configureerbaar.
+    Bij bewerken ook U-positie en hoogte aanpasbaar.
     """
 
-    def __init__(self, parent=None, device: dict = None, duplicate: bool = False):
+    def __init__(self, parent=None, device: dict = None, duplicate: bool = False,
+                 rack: dict = None):
+        """
+        rack: optioneel — als meegegeven worden U-positie en hoogte getoond.
+        """
         super().__init__(parent)
         self._device       = device or {}
         self._duplicate    = duplicate
+        self._rack         = rack or {}
         self._result       = None
         self._device_types = _load_device_type_list()
 
@@ -78,13 +78,15 @@ class DeviceDialog(QDialog):
     def _build(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        form = QFormLayout()
+
+        # ── Device sectie ─────────────────────────────────────────────
+        grp_dev = QGroupBox(t("label_device"))
+        form = QFormLayout(grp_dev)
         form.setSpacing(8)
 
         self._name = QLineEdit()
         form.addRow(t("label_name") + " *:", self._name)
 
-        # Type DDL — gevuld vanuit settings_storage
         self._ddl_type = QComboBox()
         lang = t("_lang") if t("_lang") in ("nl", "en") else "nl"
         for dt in self._device_types:
@@ -101,16 +103,17 @@ class DeviceDialog(QDialog):
         self._back_ports.setRange(0, 96)
         form.addRow(t("label_back_ports") + ":", self._back_ports)
 
-        # Poorten per rij — 1.2.0
+        # Poorten per rij — opties uitgebreid met 3 en 4
         self._ports_per_row = QComboBox()
         self._ports_per_row.addItem("12  (standaard)", 12)
         self._ports_per_row.addItem("24  (1 rij)",     24)
+        self._ports_per_row.addItem("3",                3)
+        self._ports_per_row.addItem("4",                4)
         self._ports_per_row.addItem("6",                6)
         self._ports_per_row.addItem("8",                8)
         self._ports_per_row.addItem("16",              16)
         form.addRow(t("label_ports_per_row") + ":", self._ports_per_row)
 
-        # SFP poorten — 1.3.0
         self._sfp_ports = QSpinBox()
         self._sfp_ports.setRange(0, 32)
         self._sfp_ports.setToolTip("Aantal SFP uplink poorten (laatste X front poorten)")
@@ -132,9 +135,32 @@ class DeviceDialog(QDialog):
         form.addRow(t("label_mac")    + ":", self._mac)
         form.addRow(t("label_serial") + ":", self._serial)
         form.addRow(t("label_notes")  + ":", self._notes)
+        layout.addWidget(grp_dev)
 
-        layout.addLayout(form)
+        # ── Rack positie sectie — alleen bij bewerken met rack context ─
+        self._grp_slot = None
+        self._u_start  = None
+        self._height   = None
 
+        if self._rack and self._device:
+            total_u = self._rack.get("total_units", 42)
+            self._grp_slot = QGroupBox(
+                f"{t('label_rack')} — {self._rack.get('name', '')}"
+            )
+            slot_form = QFormLayout(self._grp_slot)
+            slot_form.setSpacing(8)
+
+            self._u_start = QSpinBox()
+            self._u_start.setRange(1, total_u)
+
+            self._height = QSpinBox()
+            self._height.setRange(1, total_u)
+
+            slot_form.addRow(t("label_u_start") + ":", self._u_start)
+            slot_form.addRow(t("label_units")   + ":", self._height)
+            layout.addWidget(self._grp_slot)
+
+        # ── Knoppen ───────────────────────────────────────────────────
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_save   = QPushButton(t("btn_save"))
@@ -148,16 +174,13 @@ class DeviceDialog(QDialog):
         self._on_type_changed()
 
     def _on_type_changed(self):
-        """Vult FRONT/BACK in op basis van settings of fallback defaults."""
         dev_type = self._ddl_type.currentData()
-        # Zoek eerst in de geladen types
         for dt in self._device_types:
             if dt["key"] == dev_type:
                 self._front_ports.setValue(dt.get("front_ports", 0))
                 self._back_ports.setValue(dt.get("back_ports",  0))
                 self._sfp_ports.setValue(dt.get("sfp_ports", 0))
                 return
-        # Fallback op hardcoded defaults
         defaults = DEVICE_PORT_DEFAULTS.get(dev_type, {"front": 0, "back": 0})
         self._front_ports.setValue(defaults["front"])
         self._back_ports.setValue(defaults["back"])
@@ -179,10 +202,12 @@ class DeviceDialog(QDialog):
         self._front_ports.setValue(self._device.get("front_ports", 0))
         self._back_ports.setValue(self._device.get("back_ports", 0))
         self._sfp_ports.setValue(self._device.get("sfp_ports", 0))
+
         ppr = self._device.get("ports_per_row", 12)
         idx = self._ports_per_row.findData(ppr)
         if idx >= 0:
             self._ports_per_row.setCurrentIndex(idx)
+
         self._brand.setText(self._device.get("brand", ""))
         self._model.setText(self._device.get("model", ""))
 
@@ -192,6 +217,30 @@ class DeviceDialog(QDialog):
             self._serial.setText(self._device.get("serial", ""))
 
         self._notes.setPlainText(self._device.get("notes", ""))
+
+        # U-positie + hoogte invullen vanuit slot
+        if self._u_start and self._height and self._rack:
+            slot = self._find_slot()
+            if slot:
+                u_raw  = slot.get("u_start", 1)
+                height = slot.get("height", 1)
+                # Omzetten naar display waarde
+                numbering = self._rack.get("numbering", "top_down")
+                total_u   = self._rack.get("total_units", 42)
+                if numbering == "bottom_up":
+                    display_u = total_u - u_raw + 1
+                else:
+                    display_u = u_raw
+                self._u_start.setValue(display_u)
+                self._height.setValue(height)
+
+    def _find_slot(self) -> dict | None:
+        """Zoek het slot van dit device in de rack."""
+        dev_id = self._device.get("id", "")
+        for slot in self._rack.get("slots", []):
+            if slot.get("device_id") == dev_id:
+                return slot
+        return None
 
     def _on_save(self):
         name = self._name.text().strip()
@@ -214,6 +263,36 @@ class DeviceDialog(QDialog):
             "ports_per_row": self._ports_per_row.currentData(),
             "sfp_ports":     self._sfp_ports.value(),
         }
+
+        # Slot update bij bewerken
+        if self._u_start and self._height and self._rack:
+            display_u = self._u_start.value()
+            height    = self._height.value()
+            total_u   = self._rack.get("total_units", 42)
+            numbering = self._rack.get("numbering", "top_down")
+
+            if numbering == "bottom_up":
+                u_internal = total_u - display_u + 1
+                u_top      = u_internal - height + 1
+                if u_top < 1 or u_internal > total_u:
+                    QMessageBox.warning(self, t("label_device"),
+                                        f"Device past niet in rack "
+                                        f"(U{display_u}+{height}U > {total_u}U).")
+                    return
+                u_start = u_top
+            else:
+                u_start = display_u
+                if u_start + height - 1 > total_u:
+                    QMessageBox.warning(self, t("label_device"),
+                                        f"Device past niet in rack "
+                                        f"(U{display_u}+{height}U > {total_u}U).")
+                    return
+
+            self._result["_slot_update"] = {
+                "u_start": u_start,
+                "height":  height,
+            }
+
         self.accept()
 
     def get_result(self) -> dict | None:

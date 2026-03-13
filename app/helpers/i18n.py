@@ -39,6 +39,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
         # Menubar — H1
         "menubar_file":             "Bestand",
+        "menubar_inexport":         "Im/Export",
         "menubar_help":             "Help",
         "menubar_quit":             "Afsluiten",
 
@@ -517,6 +518,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
         # Menubar — H1
         "menubar_file":             "File",
+        "menubar_inexport":         "Im/Export",
         "menubar_help":             "Help",
         "menubar_quit":             "Quit",
 
