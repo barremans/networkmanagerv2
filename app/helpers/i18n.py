@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.7.0
+# Version: 1.8.0
 # Author:  Barremans
 # Changes: F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
@@ -12,6 +12,7 @@
 #          G3 — menu_export_report, msg_report_exported, msg_report_export_failed
 #          H1 — menubar_*, help_*
 #          D  — update_check_url, update_available_*, update_goto_github, update_later
+#          1.8.0 — settings_tab_outlet_locations, settings_loc_* (wandpunt locaties)
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -492,6 +493,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "vlan_manager_title":       "VLAN beheer",
         "vlan_conflict_title":      "VLAN conflict",
         "vlan_propagate_confirm":   "Propageer naar hele trace?",
+
+        # --- Wandpunt locaties (settings) — 1.7.0
+        "settings_tab_outlet_locations": "🌐  Wandpunt locaties",
+        "settings_loc_hint":             "Beheer de lijst van locaties voor wandpunten. Deze opties verschijnen in het wandpunt-dialoogvenster.",
+        "settings_loc_restore":          "Standaard herstellen",
+        "settings_loc_restore_confirm":  "Alle eigen locaties verwijderen en standaardlijst herstellen?",
+        "settings_loc_new_title":        "Nieuwe locatie",
+        "settings_loc_edit_title":       "Locatie bewerken",
  
     },
 
@@ -971,6 +980,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "vlan_manager_title":       "VLAN management",
         "vlan_conflict_title":      "VLAN conflict",
         "vlan_propagate_confirm":   "Propagate to entire trace?",
+
+        # --- Wall outlet locations (settings) — 1.7.0
+        "settings_tab_outlet_locations": "🌐  Outlet Locations",
+        "settings_loc_hint":             "Manage the list of locations for wall outlets. These options appear in the wall outlet dialog.",
+        "settings_loc_restore":          "Restore Defaults",
+        "settings_loc_restore_confirm":  "Delete all custom locations and restore the default list?",
+        "settings_loc_new_title":        "New Location",
+        "settings_loc_edit_title":       "Edit Location",
 
     },
 }

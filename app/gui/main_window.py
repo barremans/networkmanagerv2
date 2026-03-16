@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.31.2
+# Version: 1.32.1
 # Author:  Barremans
 # Changes: F1 — ESC annuleert verbindingsmodus
 #               Klik op lege poort wist vorige trace + highlight
@@ -26,6 +26,8 @@
 #          1.31.2 — Rapporteren volgorde aangepast; Im/Export namen + divider
 #                   VLAN rapport onder Rapporteren; linkerpaneel knoppen verwijderd
 #                   Instellingen uit toolbar; Im/Export shortcuts opgeschoond
+#          1.32.0 — Uppercase weergave: site/room/rack/device/wandpunt namen in boom
+#          1.32.1 — outlet_edit_requested gekoppeld in room- en site-modus wandpuntview
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -428,7 +430,7 @@ class MainWindow(QMainWindow):
         sites = self._data.get("sites", [])
 
         for idx, site in enumerate(sites):
-            site_item = QTreeWidgetItem([f"📍  {site['name']}"])
+            site_item = QTreeWidgetItem([f"📍  {site['name'].upper()}"])
             site_item.setData(_COL, Qt.ItemDataRole.UserRole, {
                 "type": _TYPE_SITE,
                 "id":   site["id"],
@@ -436,7 +438,7 @@ class MainWindow(QMainWindow):
             site_item.setToolTip(_COL, site.get("location", ""))
 
             for room in site.get("rooms", []):
-                room_item = QTreeWidgetItem([f"🚪  {room['name']}"])
+                room_item = QTreeWidgetItem([f"🚪  {room['name'].upper()}"])
                 room_item.setData(_COL, Qt.ItemDataRole.UserRole, {
                     "type":    _TYPE_ROOM,
                     "id":      room["id"],
@@ -448,7 +450,7 @@ class MainWindow(QMainWindow):
                     used, total = _rack_occupancy(rack)
                     pct   = (used / total * 100) if total else 0
                     color = _occupancy_color(used, total)
-                    rack_item = QTreeWidgetItem([f"🗄  {rack['name']}"])
+                    rack_item = QTreeWidgetItem([f"🗄  {rack['name'].upper()}"])
                     rack_item.setData(_COL, Qt.ItemDataRole.UserRole, {
                         "type":    _TYPE_RACK,
                         "id":      rack["id"],
@@ -472,7 +474,7 @@ class MainWindow(QMainWindow):
                     "site_id": site["id"],
                 })
                 for wo in outlets:
-                    wo_item = QTreeWidgetItem([f"   {wo.get('name', wo['id'])}"])
+                    wo_item = QTreeWidgetItem([f"   {wo.get('name', wo['id']).upper()}"])
                     wo_item.setData(_COL, Qt.ItemDataRole.UserRole, {
                         "type":    _TYPE_OUTLET,
                         "id":      wo["id"],
@@ -678,6 +680,19 @@ class MainWindow(QMainWindow):
             self._populate_tree()
             self.set_status(f"✓  {t('label_wall_outlet')} '{wo['name']}' bijgewerkt.")
 
+    def _on_outlet_edit_requested(self, outlet_id: str):
+        """Rechtsklik 'Bewerken' vanuit WallOutletView kaartje."""
+        # Zoek het wandpunt en de bijhorende ruimte op in de data
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo["id"] == outlet_id:
+                        self._edit_wall_outlet({
+                            "id":      outlet_id,
+                            "room_id": room["id"],
+                        })
+                        return
+
     def _delete_wall_outlet(self, data: dict):
         """Wandpunt verwijderen via context menu."""
         from PySide6.QtWidgets import QMessageBox
@@ -824,6 +839,7 @@ class MainWindow(QMainWindow):
         outlet_view = WallOutletView(room, site, self._data,
                                      mode="room", parent=self._mid_frame)
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
+        outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -837,6 +853,7 @@ class MainWindow(QMainWindow):
         outlet_view = WallOutletView(site, None, self._data,
                                      mode="site", parent=self._mid_frame)
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
+        outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 

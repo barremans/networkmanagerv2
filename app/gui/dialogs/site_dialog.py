@@ -2,8 +2,9 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/site_dialog.py
 # Role:    Site aanmaken en bewerken
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
+# Changes: 1.1.0 — Uppercase invoer: naam en locatie automatisch naar hoofdletters
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QTextEdit, QPushButton, QMessageBox
 )
 from app.helpers.i18n import t
+from app.gui.dialogs.device_dialog import _bind_uppercase
 
 
 class SiteDialog(QDialog):
@@ -34,6 +36,9 @@ class SiteDialog(QDialog):
         self._location = QLineEdit()
         self._notes    = QTextEdit()
         self._notes.setFixedHeight(60)
+
+        for field in (self._name, self._location):
+            _bind_uppercase(field)
 
         form.addRow(t("label_name")     + " *:", self._name)
         form.addRow(t("label_location") + ":",   self._location)

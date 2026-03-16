@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.17.0
+# Version: 1.18.0
 # Author:  Barremans
 # Changes: 1.4.0 — bezettingsindicator in titelregel (percentage + kleurenbalk)
 #          1.5.0 — refresh() hergebruikt bestaande layout via _populate()
@@ -13,6 +13,7 @@
 #          1.10.0 — Rack nummering: top_down (1 boven) of bottom_up (1 onder)
 #          1.11.0 — Poorten per rij instelbaar per device (ports_per_row)
 #          1.12.0 — SFP poorten: aparte sectie rechts van copper poorten
+#          1.18.0 — Uppercase weergave: device- en racknamen in hoofdletters
 #          1.13.1 — Fix: SFP telt als extra poorten (niet aftrekken van front_ports)
 #          1.14.0 — Fix: refresh() gebruikt setParent(None) ipv deleteLater()
 #          1.15.0 — device_double_clicked signal + dubbelklik op _DeviceRow
@@ -151,7 +152,7 @@ class RackView(QWidget):
         tl.setContentsMargins(8, 4, 8, 4)
 
         title_lbl = QLabel(
-            f"{self._rack['name']}  —  {self._room['name']}  —  {self._site['name']}"
+            f"{self._rack['name'].upper()}  —  {self._room['name'].upper()}  —  {self._site['name'].upper()}"
         )
         title_lbl.setObjectName("rack_title")
 
@@ -302,7 +303,7 @@ class RackView(QWidget):
         ll.setContentsMargins(4, 0, 4, 0)
         ll.setSpacing(0)
         ll.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        name_lbl = QLabel(device.get("name", ""))
+        name_lbl = QLabel(device.get("name", "").upper())
         name_lbl.setObjectName("device-label")
         name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         type_lbl = QLabel(t(f"device_{dev_type}"))

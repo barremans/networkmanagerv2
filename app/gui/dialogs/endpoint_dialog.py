@@ -2,8 +2,9 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/endpoint_dialog.py
 # Role:    Endpoint aanmaken en bewerken
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
+# Changes: 1.3.0 — S/N (serienummer) veld toegevoegd
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -43,20 +44,22 @@ class EndpointDialog(QDialog):
             label = et.get(f"label_{lang}", et.get("label_nl", key))
             self._ddl_type.addItem(label, key)
 
-        self._ip    = QLineEdit()
-        self._mac   = QLineEdit()
-        self._brand = QLineEdit()
-        self._model = QLineEdit()
-        self._notes = QTextEdit()
+        self._ip     = QLineEdit()
+        self._mac    = QLineEdit()
+        self._serial = QLineEdit()
+        self._brand  = QLineEdit()
+        self._model  = QLineEdit()
+        self._notes  = QTextEdit()
         self._notes.setFixedHeight(60)
 
-        form.addRow(t("label_name")  + " *:", self._name)
-        form.addRow(t("label_type")  + ":",   self._ddl_type)
-        form.addRow(t("label_ip")    + ":",   self._ip)
-        form.addRow(t("label_mac")   + ":",   self._mac)
-        form.addRow(t("label_brand") + ":",   self._brand)
-        form.addRow(t("label_model") + ":",   self._model)
-        form.addRow(t("label_notes") + ":",   self._notes)
+        form.addRow(t("label_name")   + " *:", self._name)
+        form.addRow(t("label_type")   + ":",   self._ddl_type)
+        form.addRow(t("label_ip")     + ":",   self._ip)
+        form.addRow(t("label_mac")    + ":",   self._mac)
+        form.addRow(t("label_serial") + ":",   self._serial)
+        form.addRow(t("label_brand")  + ":",   self._brand)
+        form.addRow(t("label_model")  + ":",   self._model)
+        form.addRow(t("label_notes")  + ":",   self._notes)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
@@ -78,6 +81,7 @@ class EndpointDialog(QDialog):
             self._ddl_type.setCurrentIndex(idx)
         self._ip.setText(self._endpoint.get("ip", ""))
         self._mac.setText(self._endpoint.get("mac", ""))
+        self._serial.setText(self._endpoint.get("serial", ""))
         self._brand.setText(self._endpoint.get("brand", ""))
         self._model.setText(self._endpoint.get("model", ""))
         self._notes.setPlainText(self._endpoint.get("notes", ""))
@@ -91,9 +95,10 @@ class EndpointDialog(QDialog):
             "id":    self._endpoint.get("id", ""),
             "name":  name,
             "type":  self._ddl_type.currentData() or "",
-            "ip":    self._ip.text().strip(),
-            "mac":   self._mac.text().strip(),
-            "brand": self._brand.text().strip(),
+            "ip":     self._ip.text().strip(),
+            "mac":    self._mac.text().strip(),
+            "serial": self._serial.text().strip(),
+            "brand":  self._brand.text().strip(),
             "model": self._model.text().strip(),
             "notes": self._notes.toPlainText().strip(),
         }

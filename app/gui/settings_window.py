@@ -3,12 +3,13 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
 # Changes: F2 — Tabblad "Device types" met CRUD + standaard FRONT/BACK
 #          F3 — Sectie "Databron" in Algemeen tabblad
 #          H1d — Standaard exportmap in Weergave tabblad
 #          D  — Update check URL veld in Algemeen tabblad
+#          1.7.0 — Tabblad "Wandpunt locaties" met CRUD (configureerbare lijst)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -28,19 +29,21 @@ from app.services import backup_service
 class SettingsWindow(QDialog):
     """
     Instellingen venster met tabbladen:
-      - Algemeen      : taal + databron (F3) + update check URL (D)
-      - Backup        : netwerkpad, history, max backups
-      - Weergave      : rack unit hoogte + standaard exportmap (H1d)
-      - Eindapparaten : types beheren
-      - Device types  : types beheren incl. standaard FRONT/BACK (F2)
+      - Algemeen          : taal + databron (F3) + update check URL (D)
+      - Backup            : netwerkpad, history, max backups
+      - Weergave          : rack unit hoogte + standaard exportmap (H1d)
+      - Eindapparaten     : types beheren
+      - Device types      : types beheren incl. standaard FRONT/BACK (F2)
+      - Wandpunt locaties : locatie keuzelijst beheren
     """
     language_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._settings  = settings_storage.load_settings()
-        self._ep_types  = list(settings_storage.load_endpoint_types())
-        self._dev_types = list(settings_storage.load_device_types())
+        self._settings      = settings_storage.load_settings()
+        self._ep_types      = list(settings_storage.load_endpoint_types())
+        self._dev_types     = list(settings_storage.load_device_types())
+        self._loc_types     = list(settings_storage.load_outlet_locations())
         self.setWindowTitle(t("menu_settings"))
         self.setMinimumWidth(500)
         self.setMinimumHeight(460)
@@ -62,6 +65,7 @@ class SettingsWindow(QDialog):
         tabs.addTab(self._build_display_tab(),    t("settings_tab_display"))
         tabs.addTab(self._build_endpoint_tab(),   t("settings_tab_endpoints"))
         tabs.addTab(self._build_devicetype_tab(), t("settings_tab_device_types"))
+        tabs.addTab(self._build_locations_tab(),  t("settings_tab_outlet_locations"))
         layout.addWidget(tabs)
 
         btn_row = QHBoxLayout()
@@ -412,6 +416,10 @@ class SettingsWindow(QDialog):
         self._refresh_dt_list()
         self._on_dt_row_changed(-1)
 
+        # Wandpunt locaties
+        self._refresh_loc_list()
+        self._on_loc_row_changed(-1)
+
     def _update_ds_status_label(self):
         label, is_net = settings_storage.get_network_data_source_label()
         if is_net:
@@ -700,6 +708,146 @@ class SettingsWindow(QDialog):
                                 f"⚠  {t('msg_backup_fail')}\n{err}")
 
     # ------------------------------------------------------------------
+    # Tabblad: Wandpunt locaties — 1.7.0
+    # ------------------------------------------------------------------
+
+    def _build_locations_tab(self) -> QWidget:
+        tab    = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        hint = QLabel(t("settings_loc_hint"))
+        hint.setObjectName("secondary")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        list_row = QHBoxLayout()
+        self._loc_list = QListWidget()
+        self._loc_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._loc_list.currentRowChanged.connect(self._on_loc_row_changed)
+        list_row.addWidget(self._loc_list, stretch=1)
+
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(4)
+        btn_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._btn_loc_add  = QPushButton("＋  " + t("btn_add"))
+        self._btn_loc_edit = QPushButton("✏  " + t("ctx_edit"))
+        self._btn_loc_del  = QPushButton("🗑  " + t("ctx_delete"))
+        self._btn_loc_up   = QPushButton("▲")
+        self._btn_loc_down = QPushButton("▼")
+        for btn in (self._btn_loc_add, self._btn_loc_edit, self._btn_loc_del,
+                    self._btn_loc_up, self._btn_loc_down):
+            btn.setMinimumWidth(110)
+            btn_col.addWidget(btn)
+        self._btn_loc_add.clicked.connect(self._on_loc_add)
+        self._btn_loc_edit.clicked.connect(self._on_loc_edit)
+        self._btn_loc_del.clicked.connect(self._on_loc_delete)
+        self._btn_loc_up.clicked.connect(self._on_loc_move_up)
+        self._btn_loc_down.clicked.connect(self._on_loc_move_down)
+        list_row.addLayout(btn_col)
+        layout.addLayout(list_row)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(sep)
+
+        restore_row = QHBoxLayout()
+        restore_row.addStretch()
+        self._btn_loc_restore = QPushButton("↺  " + t("settings_loc_restore"))
+        self._btn_loc_restore.clicked.connect(self._on_loc_restore)
+        restore_row.addWidget(self._btn_loc_restore)
+        layout.addLayout(restore_row)
+        return tab
+
+    def _refresh_loc_list(self, select_idx: int = -1):
+        lang = self._ddl_lang.currentData() or "nl"
+        self._loc_list.clear()
+        for loc in self._loc_types:
+            label = loc.get(f"label_{lang}", loc.get("label_nl", loc.get("key", "?")))
+            item  = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, loc)
+            self._loc_list.addItem(item)
+        if select_idx >= 0 and select_idx < self._loc_list.count():
+            self._loc_list.setCurrentRow(select_idx)
+        self._on_loc_row_changed(self._loc_list.currentRow())
+
+    def _on_loc_row_changed(self, row: int):
+        has = row >= 0
+        self._btn_loc_edit.setEnabled(has)
+        self._btn_loc_del.setEnabled(has)
+        self._btn_loc_up.setEnabled(has and row > 0)
+        self._btn_loc_down.setEnabled(has and row < self._loc_list.count() - 1)
+
+    def _on_loc_add(self):
+        dlg = _LocationTypeDialog(parent=self)
+        if dlg.exec():
+            loc = dlg.get_result()
+            if loc:
+                keys = {l.get("key", "") for l in self._loc_types}
+                if loc["key"] in keys:
+                    QMessageBox.warning(self, t("settings_tab_outlet_locations"),
+                                        t("settings_ep_key_exists"))
+                    return
+                self._loc_types.append(loc)
+                self._refresh_loc_list(len(self._loc_types) - 1)
+
+    def _on_loc_edit(self):
+        row = self._loc_list.currentRow()
+        if row < 0:
+            return
+        dlg = _LocationTypeDialog(parent=self, loc_type=self._loc_types[row])
+        if dlg.exec():
+            result = dlg.get_result()
+            if result:
+                self._loc_types[row] = result
+                self._refresh_loc_list(row)
+
+    def _on_loc_delete(self):
+        row = self._loc_list.currentRow()
+        if row < 0:
+            return
+        loc   = self._loc_types[row]
+        name  = loc.get("label_nl", loc.get("key", "?"))
+        reply = QMessageBox.question(
+            self, t("menu_delete"),
+            f"{t('msg_confirm_delete')}\n\n{name}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._loc_types.pop(row)
+        self._refresh_loc_list(max(0, row - 1))
+
+    def _on_loc_move_up(self):
+        row = self._loc_list.currentRow()
+        if row <= 0:
+            return
+        self._loc_types[row], self._loc_types[row - 1] = \
+            self._loc_types[row - 1], self._loc_types[row]
+        self._refresh_loc_list(row - 1)
+
+    def _on_loc_move_down(self):
+        row = self._loc_list.currentRow()
+        if row < 0 or row >= len(self._loc_types) - 1:
+            return
+        self._loc_types[row], self._loc_types[row + 1] = \
+            self._loc_types[row + 1], self._loc_types[row]
+        self._refresh_loc_list(row + 1)
+
+    def _on_loc_restore(self):
+        reply = QMessageBox.question(
+            self, t("settings_tab_outlet_locations"),
+            t("settings_loc_restore_confirm"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from app.helpers.settings_storage import _DEFAULT_OUTLET_LOCATIONS
+        self._loc_types = list(_DEFAULT_OUTLET_LOCATIONS)
+        self._refresh_loc_list(0)
+
+    # ------------------------------------------------------------------
     # Opslaan
     # ------------------------------------------------------------------
 
@@ -744,6 +892,7 @@ class SettingsWindow(QDialog):
         })
         settings_storage.save_endpoint_types(self._ep_types)
         settings_storage.save_device_types(self._dev_types)
+        settings_storage.save_outlet_locations(self._loc_types)
 
         if lang_changed:
             i18n.set_language(new_lang)
@@ -916,6 +1065,82 @@ class _DeviceTypeDialog(QDialog):
             "front_ports": self._front_ports.value(),
             "back_ports":  self._back_ports.value(),
         }
+        self.accept()
+
+    def get_result(self) -> dict | None:
+        return self._result
+
+# ---------------------------------------------------------------------------
+# Hulp-dialog: wandpunt locatie type — 1.7.0
+# ---------------------------------------------------------------------------
+
+class _LocationTypeDialog(QDialog):
+    def __init__(self, parent=None, loc_type: dict = None):
+        super().__init__(parent)
+        self._loc_type = loc_type
+        self._result   = None
+        self.setWindowTitle(
+            t("settings_loc_edit_title") if loc_type else t("settings_loc_new_title")
+        )
+        self.setMinimumWidth(340)
+        self.setModal(True)
+        self._build()
+        if self._loc_type:
+            self._populate()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        form   = QFormLayout()
+        form.setSpacing(8)
+        self._key      = QLineEdit()
+        self._key.setPlaceholderText("bijv. serverruimte")
+        self._label_nl = QLineEdit()
+        self._label_en = QLineEdit()
+        is_new = self._loc_type is None
+        self._key.setEnabled(is_new)
+        if not is_new:
+            self._key.setToolTip(t("settings_ep_key_locked"))
+        form.addRow(t("settings_ep_key")      + ":", self._key)
+        form.addRow(t("settings_ep_label_nl") + ":", self._label_nl)
+        form.addRow(t("settings_ep_label_en") + ":", self._label_en)
+        hint = QLabel(t("settings_ep_key_hint"))
+        hint.setObjectName("secondary")
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+        layout.addLayout(form)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton(t("btn_cancel"))
+        btn_save   = QPushButton(t("btn_save"))
+        btn_save.setDefault(True)
+        btn_cancel.clicked.connect(self.reject)
+        btn_save.clicked.connect(self._on_save)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_save)
+        layout.addLayout(btn_row)
+
+    def _populate(self):
+        self._key.setText(self._loc_type.get("key", ""))
+        self._label_nl.setText(self._loc_type.get("label_nl", ""))
+        self._label_en.setText(self._loc_type.get("label_en", ""))
+
+    def _on_save(self):
+        import re
+        key    = self._key.text().strip().lower().replace(" ", "_")
+        lbl_nl = self._label_nl.text().strip()
+        lbl_en = self._label_en.text().strip()
+        if not key:
+            QMessageBox.warning(self, "", t("settings_ep_key") + " " + t("err_field_required"))
+            return
+        if not re.match(r'^[a-z0-9_]+$', key):
+            QMessageBox.warning(self, "", t("settings_ep_key_invalid"))
+            return
+        if not lbl_nl:
+            QMessageBox.warning(self, "", t("settings_ep_label_nl") + " " + t("err_field_required"))
+            return
+        if not lbl_en:
+            lbl_en = lbl_nl
+        self._result = {"key": key, "label_nl": lbl_nl, "label_en": lbl_en}
         self.accept()
 
     def get_result(self) -> dict | None:

@@ -2,12 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/device_dialog.py
 # Role:    Device aanmaken, bewerken en dupliceren
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv hardcoded lijst
 #          1.2.0 — Positie (U-start) en hoogte aanpasbaar bij bewerken
 #                  Extra ports_per_row opties: 3, 4
+#          1.3.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -45,6 +46,18 @@ def _load_device_type_list():
              "back_ports":  DEVICE_PORT_DEFAULTS.get(k, {}).get("back",  0)}
             for k in DEVICE_PORT_DEFAULTS
         ]
+
+
+def _bind_uppercase(line_edit):
+    """Koppelt automatische uppercase conversie aan een QLineEdit."""
+    def _to_upper(text):
+        if text != text.upper():
+            cursor = line_edit.cursorPosition()
+            line_edit.blockSignals(True)
+            line_edit.setText(text.upper())
+            line_edit.blockSignals(False)
+            line_edit.setCursorPosition(cursor)
+    line_edit.textChanged.connect(_to_upper)
 
 
 class DeviceDialog(QDialog):
@@ -86,6 +99,7 @@ class DeviceDialog(QDialog):
 
         self._name = QLineEdit()
         form.addRow(t("label_name") + " *:", self._name)
+        _bind_uppercase(self._name)
 
         self._ddl_type = QComboBox()
         lang = t("_lang") if t("_lang") in ("nl", "en") else "nl"
@@ -128,6 +142,10 @@ class DeviceDialog(QDialog):
         self._serial = QLineEdit()
         self._notes  = QTextEdit()
         self._notes.setFixedHeight(60)
+
+        for field in (self._brand, self._model,
+                      self._ip, self._mac, self._serial):
+            _bind_uppercase(field)
 
         form.addRow(t("label_brand")  + ":", self._brand)
         form.addRow(t("label_model")  + ":", self._model)

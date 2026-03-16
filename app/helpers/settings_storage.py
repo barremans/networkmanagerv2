@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.5.0
+# Version: 1.7.0
 # Author:  Barremans
 # Changes: F2 — Device types configureerbaar via settings.json
 #               _DEFAULT_DEVICE_TYPES, load/save/get_device_type_*
@@ -16,6 +16,8 @@
 #          1.6.0 — Vaste data map: C:\Networkmap_Creator\data\
 #                  Data staat altijd op dezelfde plek, onafhankelijk van
 #                  installatielocatie. Geen dataverlies bij herinstallatie.
+#          1.7.0 — Wandpunt locatie types configureerbaar via settings.json
+#                  _DEFAULT_OUTLET_LOCATIONS, load/save_outlet_locations
 # =============================================================================
 
 import json
@@ -126,6 +128,22 @@ _DEFAULT_DEVICE_TYPES = [
      "front_ports": 0,  "back_ports": 0},
 ]
 
+# Ingebouwde wandpunt locatie types — configureerbaar
+_DEFAULT_OUTLET_LOCATIONS = [
+    {"key": "links",       "label_nl": "Links",        "label_en": "Left"},
+    {"key": "rechts",      "label_nl": "Rechts",       "label_en": "Right"},
+    {"key": "voor",        "label_nl": "Voor",         "label_en": "Front"},
+    {"key": "achter",      "label_nl": "Achter",       "label_en": "Rear"},
+    {"key": "boven",       "label_nl": "Boven",        "label_en": "Top"},
+    {"key": "onder",       "label_nl": "Onder",        "label_en": "Bottom"},
+    {"key": "hoek",        "label_nl": "Hoek",         "label_en": "Corner"},
+    {"key": "plafond",     "label_nl": "Plafond",      "label_en": "Ceiling"},
+    {"key": "vloer",       "label_nl": "Vloer",        "label_en": "Floor"},
+    {"key": "bureau",      "label_nl": "Bureau",       "label_en": "Desk"},
+    {"key": "kast",        "label_nl": "Kast",         "label_en": "Cabinet"},
+    {"key": "other",       "label_nl": "Ander",        "label_en": "Other"},
+]
+
 # Fallback defaults bij ontbrekend of corrupt settings.json
 _DEFAULT_SETTINGS = {
     "app_version": "1.0",
@@ -152,6 +170,7 @@ _DEFAULT_SETTINGS = {
     "last_opened_site": "",
     "endpoint_types": _DEFAULT_ENDPOINT_TYPES,
     "device_types":   _DEFAULT_DEVICE_TYPES,
+    "outlet_locations": _DEFAULT_OUTLET_LOCATIONS,
     # F3 — netwerkdata locatie
     "network_data": {
         "use_network_path": False,
@@ -398,6 +417,29 @@ def save_network_data(data: dict) -> bool:
     return _save_json(path, data)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Wandpunt locatie types (configureerbaar)
+# ---------------------------------------------------------------------------
+
+def load_outlet_locations() -> list:
+    settings = load_settings()
+    locs = settings.get("outlet_locations")
+    if not isinstance(locs, list) or len(locs) == 0:
+        return list(_DEFAULT_OUTLET_LOCATIONS)
+    return locs
+
+
+def save_outlet_locations(locations: list) -> bool:
+    return save_setting("outlet_locations", locations)
+
+
+def get_outlet_location_label(key: str, lang: str = "nl") -> str:
+    for loc in load_outlet_locations():
+        if loc.get("key") == key:
+            return loc.get(f"label_{lang}", loc.get("label_nl", key))
+    return key
 
 
 # ---------------------------------------------------------------------------

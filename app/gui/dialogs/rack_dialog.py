@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/rack_dialog.py
 # Role:    Rack aanmaken en bewerken
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
 # Changes: 1.1.0 — Keuze nummering: 1 bovenaan of 1 onderaan (professioneel)
+#          1.2.0 — Uppercase invoer: naam automatisch naar hoofdletters
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QComboBox
 )
 from app.helpers.i18n import t
+from app.gui.dialogs.device_dialog import _bind_uppercase
 
 
 class RackDialog(QDialog):
@@ -34,6 +36,7 @@ class RackDialog(QDialog):
         form.setSpacing(8)
 
         self._name  = QLineEdit()
+        _bind_uppercase(self._name)
 
         self._units = QSpinBox()
         self._units.setRange(1, 48)

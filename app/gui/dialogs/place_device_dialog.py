@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.7.0
+# Version: 1.8.0
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv import van hardcoded _DEVICE_TYPES uit device_dialog
@@ -13,6 +13,7 @@
 #          1.6.0 — Fix: grenzenvalidatie bij bottom_up nummering
 #                  (u_start > total_u ipv u_start + height - 1 > total_u)
 #          1.7.0 — Extra ports_per_row opties: 3 en 4
+#          1.8.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from app.helpers.i18n import t
 from app.helpers.settings_storage import load_device_types
-from app.gui.dialogs.device_dialog import DEVICE_PORT_DEFAULTS
+from app.gui.dialogs.device_dialog import DEVICE_PORT_DEFAULTS, _bind_uppercase
 
 
 class PlaceDeviceDialog(QDialog):
@@ -111,6 +112,10 @@ class PlaceDeviceDialog(QDialog):
         self._serial = QLineEdit()
         self._notes  = QTextEdit()
         self._notes.setFixedHeight(48)
+
+        for field in (self._name, self._brand, self._model,
+                      self._ip, self._mac, self._serial):
+            _bind_uppercase(field)
 
         form.addRow(t("label_name")          + " *:", self._name)
         form.addRow(t("label_type")          + " *:", self._ddl_type)

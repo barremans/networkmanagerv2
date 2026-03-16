@@ -2,8 +2,9 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/room_dialog.py
 # Role:    Ruimte aanmaken en bewerken
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
+# Changes: 1.1.0 — Uppercase invoer: naam en verdieping automatisch naar hoofdletters
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QTextEdit, QPushButton, QMessageBox
 )
 from app.helpers.i18n import t
+from app.gui.dialogs.device_dialog import _bind_uppercase
 
 
 class RoomDialog(QDialog):
@@ -35,6 +37,9 @@ class RoomDialog(QDialog):
         self._floor = QLineEdit()
         self._notes = QTextEdit()
         self._notes.setFixedHeight(60)
+
+        for field in (self._name, self._floor):
+            _bind_uppercase(field)
 
         form.addRow(t("label_name")  + " *:", self._name)
         form.addRow(t("label_floor") + ":",   self._floor)

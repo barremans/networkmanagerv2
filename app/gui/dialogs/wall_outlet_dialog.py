@@ -2,10 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
 # Changes: 1.3.0 — duplicaat-check: naam uniek per ruimte verplichten
 #          1.4.0 — VLAN veld: DDL uit vlan_config
+#          1.5.0 — Uppercase invoer: naam en locatie automatisch naar hoofdletters
+#          1.6.0 — Locatie gewijzigd van vrij tekstveld naar configureerbare keuzelijst
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -15,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 from app.helpers.i18n import t
 from app.services.vlan_service import load_vlans
+from app.gui.dialogs.device_dialog import _bind_uppercase
+from app.helpers.settings_storage import load_outlet_locations
 
 
 def _build_vlan_ddl(current_vlan=None) -> QComboBox:
@@ -68,7 +72,17 @@ class WallOutletDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(8)
         self._name     = QLineEdit()
-        self._location = QLineEdit()
+        _bind_uppercase(self._name)
+
+        # Locatie — keuzelijst uit settings (configureerbaar)
+        self._ddl_location = QComboBox()
+        self._ddl_location.addItem("— " + t("label_location") + " —", "")
+        for loc in load_outlet_locations():
+            from app.helpers.i18n import get_language
+            lang  = get_language()
+            label = loc.get(f"label_{lang}", loc.get("label_nl", loc["key"]))
+            self._ddl_location.addItem(label, loc["key"])
+
         self._notes    = QTextEdit()
         self._notes.setFixedHeight(56)
 
@@ -76,7 +90,7 @@ class WallOutletDialog(QDialog):
         self._ddl_vlan = _build_vlan_ddl()
 
         form.addRow(t("label_name")     + " *:", self._name)
-        form.addRow(t("label_location") + ":",   self._location)
+        form.addRow(t("label_location") + ":",   self._ddl_location)
         form.addRow("VLAN:",                     self._ddl_vlan)
         form.addRow(t("label_notes")    + ":",   self._notes)
         layout.addLayout(form)
@@ -218,7 +232,12 @@ class WallOutletDialog(QDialog):
 
     def _populate(self):
         self._name.setText(self._outlet.get("name", ""))
-        self._location.setText(self._outlet.get("location_description", ""))
+
+        # Locatie DDL instellen
+        loc_key = self._outlet.get("location_description", "")
+        idx = self._ddl_location.findData(loc_key)
+        if idx >= 0:
+            self._ddl_location.setCurrentIndex(idx)
         self._notes.setPlainText(self._outlet.get("notes", ""))
 
         # VLAN
@@ -268,7 +287,7 @@ class WallOutletDialog(QDialog):
             "id":                   self._outlet.get("id", ""),
             "room_id":              self._room_id or self._outlet.get("room_id", ""),
             "name":                 name,
-            "location_description": self._location.text().strip(),
+            "location_description": self._ddl_location.currentData() or "",
             "endpoint_id":          self._ddl_ep.currentData() or "",
             "notes":                self._notes.toPlainText().strip(),
         }

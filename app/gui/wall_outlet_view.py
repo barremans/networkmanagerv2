@@ -2,13 +2,16 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
+# Changes: 1.2.0 — Dubbelklik op kaartje toont detail popup (alle velden + eindapparaat)
+#                  Rechtsklik op kaartje toont contextmenu met 'Bewerken'
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QScrollArea,
-    QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy
+    QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy,
+    QDialog, QMenu, QFormLayout, QTextBrowser
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
@@ -36,6 +39,7 @@ class WallOutletView(QWidget):
     """
 
     outlet_clicked = Signal(str)
+    outlet_edit_requested = Signal(str)   # rechtsklik / dubbelklik → bewerken
 
     # ------------------------------------------------------------------
     # Constructor — room- of site-modus
@@ -211,11 +215,16 @@ class WallOutletView(QWidget):
         trace_lbl.setWordWrap(True)
         layout.addWidget(trace_lbl)
 
-        # Klik event
+        # Klik events
         outlet_id = outlet["id"]
         self._outlet_widgets[outlet_id] = card
+
         card.mousePressEvent = lambda e, oid=outlet_id, c=card: \
-            self._on_outlet_clicked(oid, c)
+            self._on_outlet_clicked(oid, c, e)
+        card.mouseDoubleClickEvent = lambda e, oid=outlet_id, o=outlet: \
+            self._on_outlet_double_clicked(oid, o)
+        card.contextMenuEvent = lambda e, oid=outlet_id: \
+            self._on_outlet_context_menu(oid, e)
 
         return card
 
@@ -256,7 +265,7 @@ class WallOutletView(QWidget):
     # Klik handler
     # ------------------------------------------------------------------
 
-    def _on_outlet_clicked(self, outlet_id: str, card: QFrame):
+    def _on_outlet_clicked(self, outlet_id: str, card: QFrame, event=None):
         if self._selected_id and self._selected_id in self._outlet_widgets:
             prev = self._outlet_widgets[self._selected_id]
             prev.setObjectName("wall-outlet")
@@ -265,6 +274,21 @@ class WallOutletView(QWidget):
         card.setObjectName("wall-outlet-selected")
         card.setStyle(card.style())
         self.outlet_clicked.emit(outlet_id)
+
+    def _on_outlet_double_clicked(self, outlet_id: str, outlet: dict):
+        """Dubbelklik — toon detail popup met alle wandpunt + eindapparaat info."""
+        ep_map  = {e["id"]: e for e in self._data.get("endpoints", [])}
+        ep      = ep_map.get(outlet.get("endpoint_id", ""))
+        dlg     = _OutletDetailDialog(outlet, ep, self._data, parent=self)
+        dlg.exec()
+
+    def _on_outlet_context_menu(self, outlet_id: str, event):
+        """Rechtsklik — contextmenu met Bewerken optie."""
+        menu = QMenu(self)
+        act_edit = menu.addAction("✏  " + "Bewerken")
+        action   = menu.exec(QCursor.pos())
+        if action == act_edit:
+            self.outlet_edit_requested.emit(outlet_id)
 
     # ------------------------------------------------------------------
     # Data verversen
@@ -280,3 +304,112 @@ class WallOutletView(QWidget):
         self._outlet_widgets.clear()
         self._selected_id = None
         self._build()
+
+# ---------------------------------------------------------------------------
+# Detail popup — dubbelklik op wandpunt kaartje
+# ---------------------------------------------------------------------------
+
+class _OutletDetailDialog(QDialog):
+    """
+    Toont alle velden van een wandpunt + gekoppeld eindapparaat in een
+    read-only popup. Verschijnt bij dubbelklik op een wandpunt kaartje.
+    """
+
+    def __init__(self, outlet: dict, endpoint, data: dict, parent=None):
+        super().__init__(parent)
+        self._outlet   = outlet
+        self._endpoint = endpoint
+        self._data     = data
+        self.setWindowTitle(f"📍  {outlet.get('name', '')}")
+        self.setMinimumWidth(400)
+        self.setModal(True)
+        self._build()
+
+    def _build(self):
+        from PySide6.QtWidgets import QPushButton, QGroupBox, QHBoxLayout
+        from app.helpers.i18n import t
+        from app.helpers.settings_storage import (
+            load_outlet_locations, get_outlet_location_label
+        )
+        from app.helpers.i18n import get_language
+        from app.services import tracing
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # ── Wandpunt info ──────────────────────────────────────────────
+        grp_outlet = QGroupBox(t("label_wall_outlet"))
+        form_outlet = QFormLayout(grp_outlet)
+        form_outlet.setSpacing(6)
+
+        lang     = get_language()
+        loc_key  = self._outlet.get("location_description", "")
+        loc_lbl  = get_outlet_location_label(loc_key, lang) if loc_key else "—"
+
+        vlan_val = self._outlet.get("vlan")
+        if vlan_val is not None:
+            from app.services.vlan_service import load_vlans
+            vlan_str = f"VLAN {vlan_val}"
+            for v in load_vlans():
+                if v.get("id") == int(vlan_val):
+                    vlan_str += f"  —  {v['name']}" if v.get("name") else ""
+                    break
+        else:
+            vlan_str = "—"
+
+        notes = self._outlet.get("notes", "") or "—"
+
+        form_outlet.addRow(t("label_name")     + ":", QLabel(self._outlet.get("name", "—")))
+        form_outlet.addRow(t("label_location") + ":", QLabel(loc_lbl))
+        form_outlet.addRow("VLAN:",                   QLabel(vlan_str))
+        form_outlet.addRow(t("label_notes")    + ":", QLabel(notes))
+        layout.addWidget(grp_outlet)
+
+        # ── Eindapparaat info ──────────────────────────────────────────
+        grp_ep = QGroupBox(t("label_endpoint"))
+        form_ep = QFormLayout(grp_ep)
+        form_ep.setSpacing(6)
+
+        if self._endpoint:
+            from app.helpers.settings_storage import get_endpoint_type_label
+            ep_type_lbl = get_endpoint_type_label(
+                self._endpoint.get("type", ""), lang
+            )
+            for lbl, key in [
+                (t("label_name"),   "name"),
+                (t("label_type"),   None),
+                (t("label_ip"),     "ip"),
+                (t("label_mac"),    "mac"),
+                (t("label_serial"), "serial"),
+                (t("label_brand"),  "brand"),
+                (t("label_model"),  "model"),
+                (t("label_notes"),  "notes"),
+            ]:
+                if key is None:
+                    val = ep_type_lbl
+                else:
+                    val = self._endpoint.get(key, "") or "—"
+                form_ep.addRow(lbl + ":", QLabel(val))
+        else:
+            form_ep.addRow("", QLabel("— " + t("tree_no_endpoint") + " —"))
+
+        layout.addWidget(grp_ep)
+
+        # ── Trace samenvatting ─────────────────────────────────────────
+        trace = tracing.trace_from_wall_outlet(self._data, self._outlet["id"])
+        if trace:
+            grp_trace = QGroupBox("Trace")
+            trace_layout = QVBoxLayout(grp_trace)
+            for step in trace:
+                lbl = step.get("label", "")
+                if lbl:
+                    trace_layout.addWidget(QLabel(f"  →  {lbl}"))
+            layout.addWidget(grp_trace)
+
+        # ── Sluitknop ──────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_close = QPushButton(t("btn_cancel"))
+        btn_close.clicked.connect(self.accept)
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
