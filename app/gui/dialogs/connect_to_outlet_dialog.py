@@ -2,8 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_to_outlet_dialog.py
 # Role:    Poort ↔ Wandpunt verbinding aanmaken
-# Version: 1.0.0
+# Version: 1.2.0
 # Author:  Barremans
+# Changes: 1.0.0 — Initiële versie
+#          1.1.0 — Ruimtestap verwijderd, alle wandpunten van site direct zichtbaar
+#          1.2.0 — Fix: locatie key vertaald via get_outlet_location_label()
+#                  ipv raw key tonen (bv. containerd_a → Container D (A))
 # =============================================================================
 #
 # Gebruik: rechtermuisklik op een patchpanel-poort → "Verbinden met wandpunt"
@@ -19,6 +23,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from app.helpers.i18n import t
+from app.helpers.settings_storage import get_outlet_location_label
+from app.helpers.i18n import get_language
 
 _CABLE_TYPES = [
     ("utp_cat5e",  "cable_utp_cat5e"),
@@ -65,28 +71,28 @@ class ConnectToOutletDialog(QDialog):
         port_form.addRow("", port_lbl)
         layout.addWidget(grp_port)
 
-        # ── Wandpunt kiezen (cascade) ────────────────────────────────
+        # ── Wandpunt kiezen ──────────────────────────────────────────
         grp_outlet = QGroupBox(t("label_wall_outlet"))
         outlet_form = QFormLayout(grp_outlet)
         outlet_form.setSpacing(8)
 
         self._ddl_site   = QComboBox()
-        self._ddl_room   = QComboBox()
         self._ddl_outlet = QComboBox()
 
-        self._ddl_room.setEnabled(False)
         self._ddl_outlet.setEnabled(False)
 
         # Vul sites
         self._ddl_site.addItem(f"— {t('label_site')} —", "")
         for site in self._data.get("sites", []):
-            self._ddl_site.addItem(site["name"], site["id"])
+            # Alleen sites tonen die wandpunten hebben
+            all_outlets = [wo for r in site.get("rooms", [])
+                           for wo in r.get("wall_outlets", [])]
+            if all_outlets:
+                self._ddl_site.addItem(site["name"], site["id"])
 
         self._ddl_site.currentIndexChanged.connect(self._on_site_changed)
-        self._ddl_room.currentIndexChanged.connect(self._on_room_changed)
 
         outlet_form.addRow(t("label_site")        + ":", self._ddl_site)
-        outlet_form.addRow(t("label_room")        + ":", self._ddl_room)
         outlet_form.addRow(t("label_wall_outlet") + ":", self._ddl_outlet)
         layout.addWidget(grp_outlet)
 
@@ -131,9 +137,7 @@ class ConnectToOutletDialog(QDialog):
 
     def _on_site_changed(self):
         site_id = self._ddl_site.currentData()
-        self._ddl_room.clear()
         self._ddl_outlet.clear()
-        self._ddl_room.setEnabled(False)
         self._ddl_outlet.setEnabled(False)
 
         if not site_id:
@@ -142,23 +146,7 @@ class ConnectToOutletDialog(QDialog):
         if not site:
             return
 
-        self._ddl_room.addItem(f"— {t('label_room')} —", "")
-        for room in site.get("rooms", []):
-            # Alleen ruimtes met wandpunten tonen
-            if room.get("wall_outlets"):
-                n = len(room["wall_outlets"])
-                self._ddl_room.addItem(f"{room['name']}  ({n})", room["id"])
-        self._ddl_room.setEnabled(True)
-
-    def _on_room_changed(self):
-        room_id = self._ddl_room.currentData()
-        self._ddl_outlet.clear()
-        self._ddl_outlet.setEnabled(False)
-
-        if not room_id:
-            return
-
-        # Wandpunten die al verbonden zijn ophalen
+        # Wandpunten die al verbonden zijn
         connected_outlets = set()
         for conn in self._data.get("connections", []):
             if conn.get("from_type") == "wall_outlet":
@@ -166,24 +154,29 @@ class ConnectToOutletDialog(QDialog):
             if conn.get("to_type") == "wall_outlet":
                 connected_outlets.add(conn["to_id"])
 
-        room = next(
-            (r for s in self._data["sites"] for r in s.get("rooms", [])
-             if r["id"] == room_id), None
-        )
-        if not room:
-            return
-
         self._ddl_outlet.addItem(f"— {t('label_wall_outlet')} —", "")
-        for wo in room.get("wall_outlets", []):
-            if wo["id"] in connected_outlets:
-                # Al verbonden — tonen maar markeren als bezet
-                self._ddl_outlet.addItem(
-                    f"⚠  {wo['name']}  ({t('err_port_in_use')})", wo["id"]
-                )
-            else:
-                loc = wo.get("location_description", "")
-                label = f"{wo['name']}  —  {loc}" if loc else wo["name"]
-                self._ddl_outlet.addItem(label, wo["id"])
+
+        # Alle ruimtes van de site, elk met hun wandpunten
+        for room in site.get("rooms", []):
+            outlets = room.get("wall_outlets", [])
+            if not outlets:
+                continue
+            for wo in sorted(outlets, key=lambda w: w.get("name", "")):
+                loc_key = wo.get("location_description", "")
+                loc_label = get_outlet_location_label(loc_key, get_language()) if loc_key else ""
+                # Label: Ruimte — Wandpuntnaam — Locatie (vertaald)
+                name_parts = [room["name"], wo["name"]]
+                if loc_label:
+                    name_parts.append(loc_label)
+                label = "  —  ".join(name_parts)
+
+                if wo["id"] in connected_outlets:
+                    self._ddl_outlet.addItem(
+                        f"⚠  {label}  ({t('err_port_in_use')})", wo["id"]
+                    )
+                else:
+                    self._ddl_outlet.addItem(label, wo["id"])
+
         self._ddl_outlet.setEnabled(True)
 
     # ------------------------------------------------------------------

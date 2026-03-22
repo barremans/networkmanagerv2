@@ -2,16 +2,21 @@
    Networkmap_Creator
    File:    css/main.qss
    Role:    Volledige QSS styling — alle kleuren, device types, kabelkleuren
-   Version: 1.2.0
+   Version: 1.5.0
    Author:  Barremans
    Changes: 1.1.0 — poort kleuren vervangen door Wong 2011 kleurenblind-vriendelijk palette
-                    onderscheidbaar voor rood-groen kleurenblinden (deuteranopie/protanopie)
-                    port-front        #0072B2  donkerblauw   — vrije front poort
-                    port-back         #E69F00  oranje/amber  — vrije back poort
-                    port-connected    #F0E442  geel          — heeft verbinding
-                    port-connect-mode #56B4E9  lichtblauw    — vrij + klikbaar
-                    port-selected     #FFFFFF  wit           — geselecteerd als poort A
-                    port-trace        #CC79A7  roze/lila     — actieve trace
+            1.3.0 — Hover effect device rij + ontbrekende device types
+            1.4.0 — Hover device rij: witte outline, port-back rond, port-connected-back
+            1.5.0 — Nieuw poort kleurenschema: blauw vs geel (geen oranje meer)
+                    port-front        #0072B2  donkerblauw  vrije VOOR poort  (vierkant)
+                    port-back         #56B4E9  lichtblauw   vrije ACHTER poort (rond)
+                    port-connected    #F0E442  geel         verbonden VOOR poort (vierkant)
+                    port-connected-back #F0E442 geel        verbonden ACHTER poort (rond)
+                    port-connect-mode #56B4E9  lichtblauw   klikbaar in verbindingsmodus
+                    port-selected     #FFFFFF  wit          geselecteerd als poort A
+                    port-trace        #CC79A7  roze/lila    actieve trace
+                    Oranje (#E69F00) volledig verwijderd — niet onderscheidbaar van geel
+                    voor tritanopie / blauw-geel kleurblindheid
    ============================================================================= */
 
 
@@ -406,6 +411,8 @@ QLabel#rack_unit_label_empty {
 
 /* ============================================================
    DEVICES — kleur per type via objectName
+   Hover: witte/lichte outline als primaire visuele cue
+   (kleurblind-toegankelijk: shape/brightness ipv enkel kleur)
    ============================================================ */
 
 QFrame[objectName="device-switch"] {
@@ -413,21 +420,21 @@ QFrame[objectName="device-switch"] {
     border: 1px solid #2A6AAA;
     border-radius: 2px;
 }
-
 QFrame[objectName="device-switch"]:hover {
-    background-color: #245D90;
-    border-color: #4A9EE0;
+    background-color: #2A6090;
+    border: 2px solid #C0D8FF;
 }
 
-QFrame[objectName="device-patchpanel"] {
+QFrame[objectName="device-patchpanel"],
+QFrame[objectName="device-patch_panel"] {
     background-color: #4A4A5A;
     border: 1px solid #6A6A7A;
     border-radius: 2px;
 }
-
-QFrame[objectName="device-patchpanel"]:hover {
-    background-color: #5A5A6A;
-    border-color: #9A9AAA;
+QFrame[objectName="device-patchpanel"]:hover,
+QFrame[objectName="device-patch_panel"]:hover {
+    background-color: #5C5C6E;
+    border: 2px solid #D0D0E0;
 }
 
 QFrame[objectName="device-server"] {
@@ -435,10 +442,9 @@ QFrame[objectName="device-server"] {
     border: 1px solid #2A8A4A;
     border-radius: 2px;
 }
-
 QFrame[objectName="device-server"]:hover {
     background-color: #267A42;
-    border-color: #4ACE70;
+    border: 2px solid #B0F0C0;
 }
 
 QFrame[objectName="device-firewall"] {
@@ -446,10 +452,9 @@ QFrame[objectName="device-firewall"] {
     border: 1px solid #AA2A2A;
     border-radius: 2px;
 }
-
 QFrame[objectName="device-firewall"]:hover {
-    background-color: #8A2424;
-    border-color: #E04A4A;
+    background-color: #9A2828;
+    border: 2px solid #FFB0B0;
 }
 
 QFrame[objectName="device-modem"] {
@@ -457,10 +462,9 @@ QFrame[objectName="device-modem"] {
     border: 1px solid #AA6A2A;
     border-radius: 2px;
 }
-
 QFrame[objectName="device-modem"]:hover {
-    background-color: #8A5424;
-    border-color: #E09A4A;
+    background-color: #925828;
+    border: 2px solid #FFD090;
 }
 
 QFrame[objectName="device-ups"] {
@@ -468,10 +472,70 @@ QFrame[objectName="device-ups"] {
     border: 1px solid #5A5A5A;
     border-radius: 2px;
 }
-
 QFrame[objectName="device-ups"]:hover {
-    background-color: #444444;
-    border-color: #808080;
+    background-color: #4A4A4A;
+    border: 2px solid #D0D0D0;
+}
+
+QFrame[objectName="device-router"] {
+    background-color: #1E5C7B;
+    border: 1px solid #2A7AAA;
+    border-radius: 2px;
+}
+QFrame[objectName="device-router"]:hover {
+    background-color: #286A8E;
+    border: 2px solid #A0D8FF;
+}
+
+QFrame[objectName="device-kvm"] {
+    background-color: #4A3A6B;
+    border: 1px solid #6A5A9A;
+    border-radius: 2px;
+}
+QFrame[objectName="device-kvm"]:hover {
+    background-color: #5A4A7E;
+    border: 2px solid #C8B8FF;
+}
+
+QFrame[objectName="device-pdu"] {
+    background-color: #3A4A2A;
+    border: 1px solid #5A7A3A;
+    border-radius: 2px;
+}
+QFrame[objectName="device-pdu"]:hover {
+    background-color: #4A5E36;
+    border: 2px solid #C0E890;
+}
+
+QFrame[objectName="device-media_conv"] {
+    background-color: #2A5A5A;
+    border: 1px solid #3A8A8A;
+    border-radius: 2px;
+}
+QFrame[objectName="device-media_conv"]:hover {
+    background-color: #366E6E;
+    border: 2px solid #A0E8E8;
+}
+
+QFrame[objectName="device-other"] {
+    background-color: #3A3A4A;
+    border: 1px solid #5A5A6A;
+    border-radius: 2px;
+}
+QFrame[objectName="device-other"]:hover {
+    background-color: #484858;
+    border: 2px solid #C0C0D8;
+}
+
+/* Kabelgoot */
+QFrame[objectName="device-device_cable_management"] {
+    background-color: #2A3A2A;
+    border: 1px solid #405A40;
+    border-radius: 2px;
+}
+QFrame[objectName="device-device_cable_management"]:hover {
+    background-color: #364836;
+    border: 2px solid #A0D0A0;
 }
 
 QLabel[objectName="device-label"] {
@@ -491,55 +555,54 @@ QLabel[objectName="device-sublabel"] {
 
 
 /* ============================================================
-   POORTEN — Wong 2011 kleurenblind-vriendelijk palette
+   POORTEN — kleurblind-toegankelijk palette
    ──────────────────────────────────────────────────────────
-   Normaal (geen verbindingsmodus):
-     port-front        donkerblauw  #0072B2  vrije front poort
-     port-back         amber        #E69F00  vrije back poort
-     port-connected    geel         #F0E442  poort heeft verbinding
-     port-selected     wit          #FFFFFF  geselecteerde poort
+   Twee dimensies, elk onafhankelijk leesbaar:
 
-   Verbindingsmodus actief:
-     port-connect-mode lichtblauw   #56B4E9  vrij — klik om te verbinden
-     port-connected    geel         #F0E442  al in gebruik — niet klikbaar
-     port-selected     wit          #FFFFFF  poort A gekozen — klik poort B
+   KLEUR  blauw = vrij     geel = verbonden
+   SHAPE  vierkant = voor  rond = achter
 
-   Trace:
-     port-trace        roze/lila    #CC79A7  poort in actieve trace
-
-   Donkerblauw / lichtblauw / geel / wit / roze zijn allemaal
-   onderscheidbaar voor deuteranopie én protanopie.
+   Combinaties:
+     port-front           donkerblauw  #0072B2  vrij + voor   (vierkant)
+     port-back            lichtblauw   #56B4E9  vrij + achter (rond)
+     port-connected       geel         #F0E442  verbonden + voor   (vierkant)
+     port-connected-back  geel         #F0E442  verbonden + achter (rond)
+     port-connect-mode    lichtblauw   #56B4E9  klikbaar in verbindingsmodus
+     port-selected        wit          #FFFFFF  geselecteerd als poort A
+     port-trace           roze/lila    #CC79A7  actieve trace
    ============================================================ */
 
-/* Vrije front poort — donkerblauw */
+/* Vrije voorpoort — donkerblauw, VIERKANT */
 QFrame[objectName="port-front"] {
     background-color: #0072B2;
+    border: 1px solid #005A8E;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
     min-height: 14px;
     max-height: 14px;
 }
-
 QFrame[objectName="port-front"]:hover {
-    background-color: #56B4E9;
+    background-color: #1A90D0;
+    border: 2px solid #FFFFFF;
 }
 
-/* Vrije back poort — amber/oranje */
+/* Vrije achterpoort — lichtblauw, ROND */
 QFrame[objectName="port-back"] {
-    background-color: #E69F00;
-    border-radius: 2px;
+    background-color: #56B4E9;
+    border: 1px solid #3A90C8;
+    border-radius: 7px;
     min-width: 14px;
     max-width: 14px;
     min-height: 14px;
     max-height: 14px;
 }
-
 QFrame[objectName="port-back"]:hover {
-    background-color: #F5C842;
+    background-color: #80CCFF;
+    border: 2px solid #FFFFFF;
 }
 
-/* Verbonden poort — geel, donkere rand voor zichtbaarheid op donkere achtergrond */
+/* Verbonden voorpoort — geel, VIERKANT */
 QFrame[objectName="port-connected"] {
     background-color: #F0E442;
     border: 1px solid #A09820;
@@ -549,30 +612,45 @@ QFrame[objectName="port-connected"] {
     min-height: 14px;
     max-height: 14px;
 }
-
 QFrame[objectName="port-connected"]:hover {
     background-color: #F8F060;
-    border-color: #C0B828;
+    border: 2px solid #FFFFFF;
 }
 
-/* Verbindingsmodus — vrije klikbare poort — lichtblauw (hemelsblauw) */
+/* Verbonden achterpoort — geel, ROND + dikke rand voor extra onderscheid */
+QFrame[objectName="port-connected-back"] {
+    background-color: #F0E442;
+    border: 2px solid #A09820;
+    border-radius: 7px;
+    min-width: 14px;
+    max-width: 14px;
+    min-height: 14px;
+    max-height: 14px;
+}
+QFrame[objectName="port-connected-back"]:hover {
+    background-color: #F8F060;
+    border: 2px solid #FFFFFF;
+}
+
+/* Verbindingsmodus — lichtblauw, VIERKANT, klikbaar */
 QFrame[objectName="port-connect-mode"] {
     background-color: #56B4E9;
+    border: 1px solid #3A90C8;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
     min-height: 14px;
     max-height: 14px;
 }
-
 QFrame[objectName="port-connect-mode"]:hover {
     background-color: #80CCFF;
+    border: 2px solid #FFFFFF;
 }
 
-/* Geselecteerde poort (poort A) — wit met lichtblauwe rand */
+/* Geselecteerde poort (poort A) — wit, border stabiel op 1px */
 QFrame[objectName="port-selected"] {
     background-color: #FFFFFF;
-    border: 2px solid #56B4E9;
+    border: 1px solid #56B4E9;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
@@ -580,25 +658,35 @@ QFrame[objectName="port-selected"] {
     max-height: 14px;
 }
 
-/* Trace poort — roze/lila, verschilt van alle andere kleuren */
+/* Trace poort — roze/lila */
 QFrame[objectName="port-trace"] {
     background-color: #CC79A7;
-    border-radius: 2px;
     border: 1px solid #AA5585;
+    border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
     min-height: 14px;
     max-height: 14px;
 }
-
 QFrame[objectName="port-trace"]:hover {
     background-color: #DD99BB;
+    border: 2px solid #FFFFFF;
 }
 
-
-/* ============================================================
-   WALL OUTLET & ENDPOINT
-   ============================================================ */
+/* SFP uplink poort — cyaan/groen, 18px */
+QFrame[objectName="port-sfp"] {
+    background-color: #009E73;
+    border: 1px solid #007A58;
+    border-radius: 3px;
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 18px;
+    max-height: 18px;
+}
+QFrame[objectName="port-sfp"]:hover {
+    background-color: #00C48A;
+    border: 2px solid #FFFFFF;
+}
 
 QFrame[objectName="wall-outlet"] {
     background-color: #5A3A7B;
@@ -709,7 +797,7 @@ QPushButton[objectName="btn_rack_nav"]:pressed {
     background-color: #1A2A4A;
 }
 
-/* SFP uplink poort — cyaan/groen, 18px */
+/* SFP uplink poort — cyaan/groen, 18px, VIERKANT met afgeronde hoeken */
 QFrame[objectName="port-sfp"] {
     background-color: #009E73;
     border: 1px solid #007A58;
@@ -719,8 +807,7 @@ QFrame[objectName="port-sfp"] {
     min-height: 18px;
     max-height: 18px;
 }
-
 QFrame[objectName="port-sfp"]:hover {
     background-color: #00C48A;
-    border-color: #009E73;
+    border: 2px solid #FFFFFF;
 }

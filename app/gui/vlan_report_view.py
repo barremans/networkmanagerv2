@@ -2,10 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/vlan_report_view.py
 # Role:    Zijpaneel VLAN rapport — alle poorten per VLAN, over sites/racks
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #          1.1.0 — VLAN namen uit vlan_config tonen via vlan_service
+#          1.2.0 — IP adres en subnetmasker tonen in VLAN header indien ingevuld
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -155,9 +156,21 @@ class VlanReportView(QWidget):
         _vcolor = _vdef.get("color", "#4a9eda") if _vdef else "#4a9eda"
         vlan_title.setObjectName("rack_title")
         vlan_title.setStyleSheet(f"color: {_vcolor};")
+
+        # IP / subnet tonen indien ingevuld
+        _vip     = _vdef.get("ip", "")     if _vdef else ""
+        _vsubnet = _vdef.get("subnet", "") if _vdef else ""
+        ip_parts = [x for x in [_vip, _vsubnet] if x]
+        ip_lbl   = QLabel("  /  ".join(ip_parts)) if ip_parts else None
+        if ip_lbl:
+            ip_lbl.setObjectName("secondary")
+
         count_lbl = QLabel(f"{len(vlan_ports)} poort{'en' if len(vlan_ports) != 1 else ''}")
         count_lbl.setObjectName("secondary")
         vlan_hl.addWidget(vlan_title)
+        if ip_lbl:
+            vlan_hl.addSpacing(12)
+            vlan_hl.addWidget(ip_lbl)
         vlan_hl.addStretch()
         vlan_hl.addWidget(count_lbl)
         self._content_layout.addWidget(vlan_frame)

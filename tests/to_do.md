@@ -17,15 +17,10 @@
   - Indien lokaal nieuwer is dan netwerk: netwerk updaten.
   - Indien netwerk nieuwer is dan lokaal: lokaal updaten.
 
-- **Uitlijning van verbindingen op switches klopt niet**
-  - Bij het maken van een verbinding op een switch wordt de poort visueel verbreed.
-  - Daardoor verschuift de lijn t.o.v. andere lijnen.
-  - Dit is vooral een probleem bij devices met meerdere lijnen.
-
 - **VLAN-overzicht in export niet correct**
   - Het veld **“Via poort”** is leeg, terwijl er wel een koppeling is met bijvoorbeeld `Patchpanel A port 20`.
 
-- **Tracing-volgorde bij rack tracing is omgekeerd**
+- **Tracing-volgorde bij rack tracing is omgekeerd voor achterzijde patchpanelwandpunten**
   - Huidige weergave:
     - `Patchpanel A - Port 20 (Back) => A20 (VLAN 100) => Airtame Xperience`
   - Gewenste weergave:
@@ -73,14 +68,11 @@
 ## 3. Visuele verbeteringen
 
 - Devices in een rack een **kleur** kunnen geven.
-- Device laten **oplichten bij hover**.
-  - Dit maakt het duidelijker wanneer verbindingen worden gelegd.
 
 - Mogelijk extra **ruimte tussen devices in een rack** voorzien.
   - Rekening houden met de hoogte van het device.
 
-- I18n.py bijsturen
-  - benaming niet kompleet, Kabelgoot staat er [device_cable_management]
+- device niet standaardkleur, niet duidelijk zoals standaardkleur (afbeeelding)
 
 - **Afbeelding export**
   - De huidige rack-afbeelding is te lang en onvoldoende duidelijk.
@@ -128,4 +120,4 @@
 
 ## 6. Overig
 
-- Direct uitlezen.
+- Direct uitlezen uit een CSV.

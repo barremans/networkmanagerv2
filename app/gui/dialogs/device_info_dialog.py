@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/device_info_dialog.py
 # Role:    Readonly device info popup — dubbelklik op device in rack_view
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
+#          1.1.0 — Subnetmasker toegevoegd aan info popup (na IP adres)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -77,26 +78,29 @@ class DeviceInfoDialog(QDialog):
         type_label = t(f"device_{dev_type}") if dev_type else "—"
 
         rows = [
-            (t("label_name"),         _val(self._device.get("name"))),
-            (t("label_type"),         type_label),
-            (t("label_brand"),        _val(self._device.get("brand"))),
-            (t("label_model"),        _val(self._device.get("model"))),
-            (t("label_ip"),           _val(self._device.get("ip"))),
-            (t("label_mac"),          _val(self._device.get("mac"))),
-            (t("label_serial"),       _val(self._device.get("serial"))),
-            (t("label_front_ports"),  _val(self._device.get("front_ports"))),
-            (t("label_back_ports"),   _val(self._device.get("back_ports"))),
+            (t("label_name"),         _val(self._device.get("name")),         True),
+            (t("label_type"),         type_label,                              True),
+            (t("label_brand"),        _val(self._device.get("brand")),         False),
+            (t("label_model"),        _val(self._device.get("model")),         False),
+            (t("label_ip"),           _val(self._device.get("ip")),            False),
+            (t("label_subnet"),       _val(self._device.get("subnet")),        False),
+            (t("label_mac"),          _val(self._device.get("mac")),           False),
+            (t("label_serial"),       _val(self._device.get("serial")),        False),
+            (t("label_front_ports"),  _val(self._device.get("front_ports")),   True),
+            (t("label_back_ports"),   _val(self._device.get("back_ports")),    True),
         ]
 
         sfp = self._device.get("sfp_ports", 0)
         if sfp:
-            rows.append((t("label_sfp_ports"), str(sfp)))
+            rows.append((t("label_sfp_ports"), str(sfp), True))
 
         notes = self._device.get("notes", "").strip()
         if notes:
-            rows.append((t("label_notes"), notes))
+            rows.append((t("label_notes"), notes, True))
 
-        for label, value in rows:
+        for label, value, always_show in rows:
+            if not always_show and value == "—":
+                continue   # verberg lege optionele velden
             lbl = QLabel(label + ":")
             lbl.setObjectName("secondary")
             val_lbl = QLabel(value)

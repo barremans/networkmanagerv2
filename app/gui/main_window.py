@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.32.1
+# Version: 1.32.3
 # Author:  Barremans
 # Changes: F1 — ESC annuleert verbindingsmodus
 #               Klik op lege poort wist vorige trace + highlight
@@ -18,7 +18,12 @@
 #          1.27.0 — Rapporteren menu (bug report + GitHub cases)
 #                   Refresh fix: boom hertekent na toevoegen device
 #                   Import/Export verplaatst van Bestand → In/Ex-port
+#          1.32.2 — Fix PortDialog: nieuwe poorten (id="") worden nu aangemaakt
+#                   in self._data via _gen_id("p") ipv stilzwijgend genegeerd
+#                   VLAN propagatie werkt ook correct voor nieuw aangemaakte poorten
 #                   Toolbar opgeschoond: import/export knoppen verwijderd
+#          1.32.3 — Fix: locatie key vertaald via get_outlet_location_label()
+#                   in boom tooltip (was raw key, bv. containerd_a)
 #          1.28.0 — Versie dynamisch uit version.py (fix statusbalk vs Over)
 #          1.29.0 — Dubbelklik device → info popup; PortDialog; VLAN rapport zijpaneel
 #          1.30.0 — VLAN beheer knop + automatische propagatie na opslaan poort/wandpunt
@@ -481,7 +486,11 @@ class MainWindow(QMainWindow):
                         "room_id": room["id"],
                         "site_id": site["id"],
                     })
-                    wo_item.setToolTip(_COL, wo.get("location_description", ""))
+                    loc_key   = wo.get("location_description", "")
+                    loc_label = settings_storage.get_outlet_location_label(
+                        loc_key, self._settings.get("language", "nl")
+                    ) if loc_key else ""
+                    wo_item.setToolTip(_COL, loc_label)
                     outlets_item.addChild(wo_item)
                 room_item.addChild(outlets_item)
                 site_item.addChild(room_item)
@@ -777,12 +786,26 @@ class MainWindow(QMainWindow):
                 updated  = dlg.get_result()
                 port_map = {p["id"]: p for p in self._data.get("ports", [])}
                 for up in updated:
-                    if up["id"] in port_map:
-                        port_map[up["id"]].update(up)
+                    if up.get("id"):
+                        # Bestaande poort — gewoon updaten
+                        if up["id"] in port_map:
+                            port_map[up["id"]].update(up)
+                    else:
+                        # Nieuwe poort (aangemaakt door port_dialog._ensure_all_ports)
+                        # — genereer id en voeg toe aan data
+                        new_port = dict(up)
+                        new_port["id"] = self._gen_id("p")
+                        self._data.setdefault("ports", []).append(new_port)
                 # Propageer VLAN voor elke poort die een VLAN heeft
                 for up in updated:
-                    if up.get("vlan"):
-                        self._propagate_vlan_after_save(up["id"], "port", up["vlan"])
+                    pid = up.get("id") or next(
+                        (p["id"] for p in self._data.get("ports", [])
+                         if p["device_id"] == up.get("device_id")
+                         and p["side"] == up.get("side")
+                         and p["number"] == up.get("number")), None
+                    )
+                    if pid and up.get("vlan"):
+                        self._propagate_vlan_after_save(pid, "port", up["vlan"])
                 self._save_and_backup()
                 if isinstance(self._current_view, __import__(
                         "app.gui.rack_view", fromlist=["RackView"]).RackView):

@@ -2,7 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.2.0
+# Version: 1.3.0
+# Author:  Barremans
+# Changes: 1.3.0 — Fix: locatie key vertaald via get_outlet_location_label()
+#                  op kaartje en tooltip (was raw key, bv. containerd_a)
 # Author:  Barremans
 # Changes: 1.2.0 — Dubbelklik op kaartje toont detail popup (alle velden + eindapparaat)
 #                  Rechtsklik op kaartje toont contextmenu met 'Bewerken'
@@ -16,7 +19,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 
-from app.helpers.i18n import t
+from app.helpers.i18n import t, get_language
+from app.helpers.settings_storage import get_outlet_location_label
 from app.services import tracing
 
 
@@ -181,7 +185,9 @@ class WallOutletView(QWidget):
         # Site-modus: iets breder voor ruimtenaam + trace
         card.setFixedSize(200 if room_name else 160, 120 if room_name else 90)
         card.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        card.setToolTip(outlet.get("location_description", ""))
+        card.setToolTip(get_outlet_location_label(
+            outlet.get("location_description", ""), get_language()
+        ))
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -199,7 +205,8 @@ class WallOutletView(QWidget):
             layout.addWidget(room_lbl)
 
         # Locatiebeschrijving
-        loc = outlet.get("location_description", "")
+        loc_key = outlet.get("location_description", "")
+        loc     = get_outlet_location_label(loc_key, get_language()) if loc_key else ""
         if loc:
             loc_lbl = QLabel(loc)
             loc_lbl.setObjectName("secondary")

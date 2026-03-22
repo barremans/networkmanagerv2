@@ -2,13 +2,14 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/device_dialog.py
 # Role:    Device aanmaken, bewerken en dupliceren
-# Version: 1.3.0
+# Version: 1.4.1
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv hardcoded lijst
 #          1.2.0 — Positie (U-start) en hoogte aanpasbaar bij bewerken
 #                  Extra ports_per_row opties: 3, 4
 #          1.3.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
+#          1.4.0 — Subnetmasker veld toegevoegd (direct na IP adres)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -138,6 +139,8 @@ class DeviceDialog(QDialog):
         self._brand  = QLineEdit()
         self._model  = QLineEdit()
         self._ip     = QLineEdit()
+        self._subnet = QLineEdit()
+        self._subnet.setPlaceholderText("bv. 255.255.255.0  of  /24")
         self._mac    = QLineEdit()
         self._serial = QLineEdit()
         self._notes  = QTextEdit()
@@ -150,6 +153,7 @@ class DeviceDialog(QDialog):
         form.addRow(t("label_brand")  + ":", self._brand)
         form.addRow(t("label_model")  + ":", self._model)
         form.addRow(t("label_ip")     + ":", self._ip)
+        form.addRow(t("label_subnet") + ":", self._subnet)
         form.addRow(t("label_mac")    + ":", self._mac)
         form.addRow(t("label_serial") + ":", self._serial)
         form.addRow(t("label_notes")  + ":", self._notes)
@@ -231,6 +235,7 @@ class DeviceDialog(QDialog):
 
         if not self._duplicate:
             self._ip.setText(self._device.get("ip", ""))
+            self._subnet.setText(self._device.get("subnet", ""))
             self._mac.setText(self._device.get("mac", ""))
             self._serial.setText(self._device.get("serial", ""))
 
@@ -275,6 +280,7 @@ class DeviceDialog(QDialog):
             "brand":       self._brand.text().strip(),
             "model":       self._model.text().strip(),
             "ip":          self._ip.text().strip(),
+            "subnet":      self._subnet.text().strip(),
             "mac":         self._mac.text().strip(),
             "serial":      self._serial.text().strip(),
             "notes":         self._notes.toPlainText().strip(),

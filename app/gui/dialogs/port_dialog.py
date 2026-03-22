@@ -2,11 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/port_dialog.py
 # Role:    Poorten beheren per device — naam + VLAN per poort
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie: poortnamen bewerken + VLAN toewijzen
 #          1.1.0 — VLAN DDL uit vlan_config ipv vrij tekstveld
 #                  Propagatie logica via vlan_service
+#          1.2.0 — Fix: dialoog toonde alleen reeds aangemaakte poorten
+#                  Ontbrekende poorten worden nu automatisch aangevuld
+#                  op basis van front_ports / back_ports / sfp_ports van het device
+#                  zodat altijd het volledige aantal poorten bewerkbaar is
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -49,12 +53,61 @@ class PortDialog(QDialog):
         self._ports  = [dict(p) for p in (ports or [])]
         self._rows   = {}   # port_id → {"name": QLineEdit, "vlan": QComboBox}
 
+        # Fix 1.2.0: vul ontbrekende poorten aan op basis van device configuratie.
+        # De data bevat alleen reeds aangemaakte poorten — als front_ports=13 maar
+        # er zijn slechts 10 port-objecten, worden de ontbrekende hier bijgemaakt
+        # als tijdelijke placeholders zodat de gebruiker ze kan benoemen.
+        self._ports = self._ensure_all_ports(self._ports)
+
         name = self._device.get("name", t("label_device"))
         self.setWindowTitle(f"⬡  {t('label_port')} — {name}")
         self.setMinimumWidth(540)
         self.setMinimumHeight(400)
         self.setModal(True)
         self._build()
+
+    def _ensure_all_ports(self, existing: list) -> list:
+        """
+        Garandeert dat er voor elke poort die het device zou moeten hebben
+        een port-object aanwezig is. Ontbrekende poorten krijgen een tijdelijk
+        id (leeg) zodat ze na opslaan aangemaakt worden door de aanroeper.
+        """
+        dev_id      = self._device.get("id", "")
+        front_total = self._device.get("front_ports", 0)
+        sfp_count   = self._device.get("sfp_ports", 0)
+        back_total  = self._device.get("back_ports", 0)
+
+        # Bouw lookup: (side, number) → port
+        lookup = {(p["side"], p["number"]): p for p in existing}
+        result = list(existing)
+
+        # Voorpoorten: 1..front_total (copper) + front_total+1..front_total+sfp_count (SFP)
+        for num in range(1, front_total + sfp_count + 1):
+            key = ("front", num)
+            if key not in lookup:
+                result.append({
+                    "id":        "",          # leeg → aanmaken bij opslaan
+                    "device_id": dev_id,
+                    "side":      "front",
+                    "number":    num,
+                    "name":      f"Port {num}",
+                    "vlan":      None,
+                })
+
+        # Achterpoorten: 1..back_total
+        for num in range(1, back_total + 1):
+            key = ("back", num)
+            if key not in lookup:
+                result.append({
+                    "id":        "",
+                    "device_id": dev_id,
+                    "side":      "back",
+                    "number":    num,
+                    "name":      f"Port {num}",
+                    "vlan":      None,
+                })
+
+        return result
 
     def _build(self):
         outer = QVBoxLayout(self)
@@ -172,7 +225,9 @@ class PortDialog(QDialog):
             )
             form.addRow(num_lbl, row_w)
 
-            self._rows[port["id"]] = {
+            # Gebruik port_id als key, of (side, number) voor nieuwe poorten
+            row_key = port["id"] if port.get("id") else (port["side"], port["number"])
+            self._rows[row_key] = {
                 "name": name_edit,
                 "vlan": vlan_ddl,
             }
@@ -180,7 +235,9 @@ class PortDialog(QDialog):
 
     def _on_save(self):
         for port in self._ports:
-            widgets = self._rows.get(port["id"])
+            # Zoek widgets via id (bestaande poort) of (side, number) (nieuwe poort)
+            row_key = port["id"] if port.get("id") else (port["side"], port["number"])
+            widgets = self._rows.get(row_key)
             if widgets:
                 port["name"] = widgets["name"].text().strip() or port["name"]
                 vlan_val     = widgets["vlan"].currentData()

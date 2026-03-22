@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.8.0
+# Version: 1.9.1
 # Author:  Barremans
 # Changes: F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
@@ -13,6 +13,9 @@
 #          H1 — menubar_*, help_*
 #          D  — update_check_url, update_available_*, update_goto_github, update_later
 #          1.8.0 — settings_tab_outlet_locations, settings_loc_* (wandpunt locaties)
+#          1.9.0 — t() fallback voor device_* keys: haalt label op uit settings_storage
+#                  als de key niet in TRANSLATIONS staat (custom device types)
+#                  Voorkomt [device_cable_management] weergave in rack_view
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -82,6 +85,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_brand":              "Merk",
         "label_model":              "Model",
         "label_ip":                 "IP adres",
+        "label_subnet":             "Subnetmasker",
         "label_mac":                "MAC adres",
         "label_serial":             "Serienummer",
         "label_notes":              "Notities",
@@ -127,6 +131,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "device_patchpanel":        "Patchpanel",
         "device_modem":             "Modem",
         "device_other":             "Ander",
+        "device_cable_management":  "Kabelgoot",
+        "device_distribution_plug": "Verdeelstekker",
+        "device_fiber":             "Fiber converter",
+        "device_nuc1":              "NUC / Mini-PC",
+        "device_sonos_server":      "Sonos server",
 
         # Endpoint type DDL
         "endpoint_pc":              "PC",
@@ -569,6 +578,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_brand":              "Brand",
         "label_model":              "Model",
         "label_ip":                 "IP Address",
+        "label_subnet":             "Subnet Mask",
         "label_mac":                "MAC Address",
         "label_serial":             "Serial Number",
         "label_notes":              "Notes",
@@ -614,6 +624,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "device_patchpanel":        "Patch Panel",
         "device_modem":             "Modem",
         "device_other":             "Other",
+        "device_cable_management":  "Cable Management",
+        "device_distribution_plug": "Distribution Plug",
+        "device_fiber":             "Fiber Converter",
+        "device_nuc1":              "NUC / Mini-PC",
+        "device_sonos_server":      "Sonos Server",
 
         # Endpoint type DDL
         "endpoint_pc":              "PC",
@@ -1019,7 +1034,12 @@ def t(key: str) -> str:
     """
     Geeft de vertaling terug voor de opgegeven sleutel in de actieve taal.
     Valt terug op NL als de sleutel niet bestaat in de actieve taal.
-    Geeft de sleutel zelf terug als hij nergens gevonden wordt.
+
+    Extra fallback voor 'device_*' sleutels:
+    Als de key niet in TRANSLATIONS staat (bv. een custom device type zoals
+    'device_cable_management'), wordt het label opgehaald uit settings_storage.
+    Zo worden custom device types altijd correct weergegeven zonder dat ze
+    handmatig in i18n.py toegevoegd moeten worden.
     """
     result = TRANSLATIONS[_active_language].get(key)
     if result is not None:
@@ -1027,4 +1047,20 @@ def t(key: str) -> str:
     result = TRANSLATIONS["nl"].get(key)
     if result is not None:
         return result
+
+    # Fallback voor custom device types: zoek label in settings_storage
+    if key.startswith("device_"):
+        dev_type_key = key[len("device_"):]  # bv. "cable_management"
+        try:
+            from app.helpers.settings_storage import load_device_types
+            lang_field = f"label_{_active_language}"
+            for dt in load_device_types():
+                if dt.get("key") == dev_type_key:
+                    label = dt.get(lang_field) or dt.get("label_nl") or dt.get("key", dev_type_key)
+                    return label
+        except Exception:
+            pass
+        # Laatste fallback: key zonder prefix, underscores als spaties, title case
+        return dev_type_key.replace("_", " ").title()
+
     return f"[{key}]"

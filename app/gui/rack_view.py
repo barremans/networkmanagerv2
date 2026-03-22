@@ -2,26 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.18.0
+# Version: 1.21.0
 # Author:  Barremans
-# Changes: 1.4.0 — bezettingsindicator in titelregel (percentage + kleurenbalk)
-#          1.5.0 — refresh() hergebruikt bestaande layout via _populate()
-#          1.9.0 — revert naar v1.3.0 event handling (QFrame + mousePressEvent)
-#          1.9.1 — fix: set_connect_mode kleurt alleen VRIJE poorten rood
-#                  verbonden poorten (port-connected) blijven oranje zichtbaar
-#          1.9.2 — Qt6 fix: event.position().toPoint() + QMenu(self)
-#          1.10.0 — Rack nummering: top_down (1 boven) of bottom_up (1 onder)
-#          1.11.0 — Poorten per rij instelbaar per device (ports_per_row)
-#          1.12.0 — SFP poorten: aparte sectie rechts van copper poorten
-#          1.18.0 — Uppercase weergave: device- en racknamen in hoofdletters
-#          1.13.1 — Fix: SFP telt als extra poorten (niet aftrekken van front_ports)
-#          1.14.0 — Fix: refresh() gebruikt setParent(None) ipv deleteLater()
-#          1.15.0 — device_double_clicked signal + dubbelklik op _DeviceRow
-#                   zodat widgets direct verwijderd worden + update() na _populate()
-#          1.16.0 — Visuele fix: poortblokken tegen naambord aan (geen stretch tussen
-#                   voor/achter), naam gecentreerd in resterende ruimte
-#          1.17.0 — Switch nummering: oneven boven, even onder (echte switch layout)
-#                   alleen actief bij device type "switch" met 2+ rijen
+# Changes: 1.19.0 — Uitlijning verbindingen, device kleur, ruimte tussen devices
+#          1.20.0 — Tooltip uitgebreid met device naam, port-connected-back shape
+#          1.21.0 — Fix: tooltip ook voor poorten zonder port_id (nog niet aangemaakt)
+#                   Poorten 11-13 van een 13-poorts router hadden geen hover info
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -45,6 +31,21 @@ _ACT_PORTS  = "ports"
 
 _OCC_WARN     = 0.75
 _OCC_CRITICAL = 0.90
+
+
+def _lighten_color(hex_color: str, amount: int = 30) -> str:
+    """Verhoogt RGB waarden met 'amount' (0-255), geclipped op 255."""
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return hex_color
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        r = min(255, r + amount)
+        g = min(255, g + amount)
+        b = min(255, b + amount)
+        return f"#{r:02X}{g:02X}{b:02X}"
+    except ValueError:
+        return hex_color
 
 
 def _refresh_style(widget: QWidget):
@@ -216,11 +217,17 @@ class RackView(QWidget):
                 height = slot.get("height", 1)
                 if device:
                     bl.addWidget(self._build_device_row(
-                        u, device, height,
+                        u, device, height, slot,
                         port_map.get(device["id"], []),
                         connected_ports
                     ))
                     u += height
+                    # margin_below: extra lege rijen na device (visuele scheiding)
+                    margin = slot.get("margin_below", 0)
+                    for _ in range(margin):
+                        if u <= total_u:
+                            bl.addWidget(self._build_empty_row(u))
+                            u += 1
                     continue
             bl.addWidget(self._build_empty_row(u))
             u += 1
@@ -250,7 +257,7 @@ class RackView(QWidget):
         layout.addWidget(spacer)
         return row
 
-    def _build_device_row(self, u_num, device, height, ports, connected_ports):
+    def _build_device_row(self, u_num, device, height, slot, ports, connected_ports):
         dev_type    = device.get("type", "unknown")
         heeft_front = device.get("front_ports", 0) > 0
         heeft_back  = device.get("back_ports",  0) > 0
@@ -259,6 +266,17 @@ class RackView(QWidget):
         row.setObjectName(f"device-{dev_type}")
         row.setFixedHeight(_UNIT_H * height)
         row.device_right_clicked.connect(self._show_device_context_menu)
+
+        # Aangepaste kleur per device via slot (3.1)
+        custom_color = slot.get("color", "")
+        if custom_color:
+            row.setStyleSheet(
+                f"QFrame {{ background-color: {custom_color}; "
+                f"border: 1px solid {_lighten_color(custom_color, 30)}; "
+                f"border-radius: 2px; }}"
+                f"QFrame:hover {{ background-color: {_lighten_color(custom_color, 20)}; "
+                f"border-color: {_lighten_color(custom_color, 60)}; }}"
+            )
 
         layout = QHBoxLayout(row)
         layout.setContentsMargins(4, 2, 4, 2)
@@ -274,8 +292,9 @@ class RackView(QWidget):
         front_ports = [p for p in ports if p["side"] == "front"]
         back_ports  = [p for p in ports if p["side"] == "back"]
 
-        ppr       = device.get("ports_per_row", _MAX_PORTS_ROW)
-        sfp_count = device.get("sfp_ports", 0)
+        ppr         = device.get("ports_per_row", _MAX_PORTS_ROW)
+        sfp_count   = device.get("sfp_ports", 0)
+        device_name = device.get("name", "").upper()
 
         # VOOR-poorten — direct naast unitnummer, geen stretch ervoor
         if heeft_front:
@@ -284,9 +303,9 @@ class RackView(QWidget):
                 copper_ports = [p for p in front_ports if p["number"] <= total_front]
                 sfp_ports_l  = [p for p in front_ports if p["number"] > total_front]
                 copper_block = self._build_port_block(
-                    copper_ports, "front", total_front, connected_ports, ppr, dev_type)
+                    copper_ports, "front", total_front, connected_ports, ppr, dev_type, device_name)
                 sfp_block = self._build_sfp_block(
-                    sfp_ports_l, sfp_count, total_front, connected_ports)
+                    sfp_ports_l, sfp_count, total_front, connected_ports, device_name)
                 layout.addWidget(copper_block)
                 sep = QFrame()
                 sep.setFixedWidth(6)
@@ -295,7 +314,7 @@ class RackView(QWidget):
                 layout.addWidget(sfp_block)
             else:
                 layout.addWidget(self._build_port_block(
-                    front_ports, "front", total_front, connected_ports, ppr, dev_type))
+                    front_ports, "front", total_front, connected_ports, ppr, dev_type, device_name))
 
         # Naam gecentreerd in de resterende ruimte
         lw = QWidget()
@@ -316,7 +335,7 @@ class RackView(QWidget):
         # ACHTER-poorten — direct naast naambord rechts, geen stretch erna
         if heeft_back:
             layout.addWidget(self._build_port_block(
-                back_ports, "back", device["back_ports"], connected_ports, ppr, dev_type))
+                back_ports, "back", device["back_ports"], connected_ports, ppr, dev_type, device_name))
 
         return row
 
@@ -342,7 +361,10 @@ class RackView(QWidget):
     # Poort blok
     # ------------------------------------------------------------------
 
-    def _build_port_block(self, ports, side, total, connected_ports, ports_per_row: int = _MAX_PORTS_ROW, dev_type: str = ""):
+    def _build_port_block(self, ports, side, total, connected_ports,
+                          ports_per_row: int = _MAX_PORTS_ROW,
+                          dev_type: str = "",
+                          device_name: str = ""):
         container = QWidget()
         container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         grid = QVBoxLayout(container)
@@ -365,6 +387,8 @@ class RackView(QWidget):
             rows = [port_numbers[i:i + ports_per_row]
                     for i in range(0, len(port_numbers), ports_per_row)]
 
+        side_label = t(f"label_{side}") if side in ("front", "back") else side
+
         for row_nums in rows:
             row_w = QWidget()
             row_l = QHBoxLayout(row_w)
@@ -374,10 +398,14 @@ class RackView(QWidget):
             for num in row_nums:
                 port    = port_by_num.get(num)
                 port_id = port["id"] if port else None
-                obj_name = (
-                    "port-connected" if port_id and port_id in connected_ports
-                    else f"port-{side}"
-                )
+                is_connected = port_id and port_id in connected_ports
+
+                # Achterpoort verbonden krijgt aparte objectName voor ronde shape
+                if is_connected:
+                    obj_name = "port-connected-back" if side == "back" else "port-connected"
+                else:
+                    obj_name = f"port-{side}"
+
                 btn = QFrame()
                 btn.setObjectName(obj_name)
                 btn.setFixedSize(_PORT_SIZE, _PORT_SIZE)
@@ -386,12 +414,21 @@ class RackView(QWidget):
                 if port_id:
                     self._port_widgets[port_id] = btn
                     port_name = port.get("name", f"Port {num}")
-                    btn.setToolTip(
-                        f"{port_name}  ({t('label_' + side)})  "
-                        f"{'🔗' if port_id in connected_ports else '○'}"
-                    )
+                    status    = "🔗 Verbonden" if is_connected else "○ Vrij"
+                    tip_parts = []
+                    if device_name:
+                        tip_parts.append(device_name)
+                    tip_parts.append(f"{port_name}  ({side_label})  {status}")
+                    btn.setToolTip("\n".join(tip_parts))
                     self._attach_port_click(btn, port_id,
                                             port.get("device_id", ""), side)
+                else:
+                    # Poort bestaat nog niet in data — toon informatieve tooltip
+                    tip_parts = []
+                    if device_name:
+                        tip_parts.append(device_name)
+                    tip_parts.append(f"Port {num}  ({side_label})  — niet aangemaakt")
+                    btn.setToolTip("\n".join(tip_parts))
                 row_l.addWidget(btn)
 
             row_l.addStretch()
@@ -399,7 +436,8 @@ class RackView(QWidget):
 
         return container
 
-    def _build_sfp_block(self, sfp_ports, sfp_count, copper_offset, connected_ports):
+    def _build_sfp_block(self, sfp_ports, sfp_count, copper_offset, connected_ports,
+                         device_name: str = ""):
         """SFP poorten: groter, geen label (enkel tooltip), zelfde hoogte als copper rij."""
         _SFP_SIZE = 18
 
@@ -422,13 +460,12 @@ class RackView(QWidget):
         ports_hl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         for i in range(1, sfp_count + 1):
-            actual_num = copper_offset + i
-            port    = port_by_num.get(actual_num)
-            port_id = port["id"] if port else None
-            obj_name = (
-                "port-connected" if port_id and port_id in connected_ports
-                else "port-sfp"
-            )
+            actual_num   = copper_offset + i
+            port         = port_by_num.get(actual_num)
+            port_id      = port["id"] if port else None
+            is_connected = port_id and port_id in connected_ports
+            obj_name     = "port-connected" if is_connected else "port-sfp"
+
             btn = QFrame()
             btn.setObjectName(obj_name)
             btn.setFixedSize(_SFP_SIZE, _SFP_SIZE)
@@ -437,8 +474,12 @@ class RackView(QWidget):
             if port_id:
                 self._port_widgets[port_id] = btn
                 port_name = port.get("name", f"SFP {i}")
-                icon = "🔗" if port_id in connected_ports else "o"
-                btn.setToolTip(f"{port_name}  (SFP uplink)  {icon}")
+                status    = "🔗 Verbonden" if is_connected else "○ Vrij"
+                tip_parts = []
+                if device_name:
+                    tip_parts.append(device_name)
+                tip_parts.append(f"{port_name}  (SFP uplink)  {status}")
+                btn.setToolTip("\n".join(tip_parts))
                 self._attach_port_click(btn, port_id,
                                         port.get("device_id", ""), "front")
             ports_hl.addWidget(btn)
@@ -499,12 +540,13 @@ class RackView(QWidget):
                     front = dev.get("front_ports", 0)
                     if p.get("side") == "front" and p.get("number", 0) > front:
                         is_sfp = True
+                side = p.get("side", "front")
                 if connected:
-                    obj = "port-connected"
+                    obj = "port-connected-back" if side == "back" else "port-connected"
                 elif is_sfp:
                     obj = "port-sfp"
                 else:
-                    obj = f"port-{p['side']}"
+                    obj = f"port-{side}"
                 widget.setObjectName(obj)
                 _refresh_style(widget)
                 return
@@ -522,7 +564,7 @@ class RackView(QWidget):
                 self._restore_port_style(pid, w)
             for pid, w in self._port_widgets.items():
                 current = w.objectName()
-                if current not in ("port-connected", "port-selected"):
+                if current not in ("port-connected", "port-connected-back", "port-selected"):
                     w.setObjectName("port-connect-mode")
                     _refresh_style(w)
         else:

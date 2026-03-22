@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.7.0
+# Version: 1.8.0
 # Author:  Barremans
 # Changes: F2 — Device types configureerbaar via settings.json
 #               _DEFAULT_DEVICE_TYPES, load/save/get_device_type_*
@@ -16,6 +16,8 @@
 #          1.6.0 — Vaste data map: C:\Networkmap_Creator\data\
 #                  Data staat altijd op dezelfde plek, onafhankelijk van
 #                  installatielocatie. Geen dataverlies bij herinstallatie.
+#          1.8.0 — Ontbrekende device types toegevoegd aan _DEFAULT_DEVICE_TYPES:
+#                  cable_management, distribution_plug, fiber, nuc1, sonos_server
 #          1.7.0 — Wandpunt locatie types configureerbaar via settings.json
 #                  _DEFAULT_OUTLET_LOCATIONS, load/save_outlet_locations
 # =============================================================================
@@ -126,6 +128,16 @@ _DEFAULT_DEVICE_TYPES = [
      "front_ports": 2,  "back_ports": 0},
     {"key": "other",        "label_nl": "Ander",            "label_en": "Other",
      "front_ports": 0,  "back_ports": 0},
+    {"key": "cable_management", "label_nl": "Kabelgoot",    "label_en": "Cable Management",
+     "front_ports": 0,  "back_ports": 0},
+    {"key": "distribution_plug", "label_nl": "Verdeelstekker", "label_en": "Distribution Plug",
+     "front_ports": 0,  "back_ports": 0},
+    {"key": "fiber",        "label_nl": "Fiber converter",  "label_en": "Fiber Converter",
+     "front_ports": 2,  "back_ports": 2},
+    {"key": "nuc1",         "label_nl": "NUC / Mini-PC",    "label_en": "NUC / Mini-PC",
+     "front_ports": 2,  "back_ports": 0},
+    {"key": "sonos_server", "label_nl": "Sonos server",     "label_en": "Sonos Server",
+     "front_ports": 1,  "back_ports": 0},
 ]
 
 # Ingebouwde wandpunt locatie types — configureerbaar

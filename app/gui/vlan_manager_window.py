@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/vlan_manager_window.py
 # Role:    VLAN definities beheren — apart venster
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
+#          1.1.0 — IP adres en subnetmasker velden toegevoegd aan VLAN definitie
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -102,6 +103,14 @@ class VlanManagerWindow(QDialog):
         self._fld_name = QLineEdit()
         self._fld_name.setPlaceholderText("bv. Clients")
 
+        self._fld_ip = QLineEdit()
+        self._fld_ip.setPlaceholderText("bv. 192.168.10.1")
+        self._fld_ip.setMaxLength(45)  # IPv6 max lengte
+
+        self._fld_subnet = QLineEdit()
+        self._fld_subnet.setPlaceholderText("bv. 255.255.255.0  of  /24")
+        self._fld_subnet.setMaxLength(45)
+
         self._fld_desc = QTextEdit()
         self._fld_desc.setFixedHeight(56)
         self._fld_desc.setPlaceholderText("Optionele beschrijving")
@@ -121,10 +130,12 @@ class VlanManagerWindow(QDialog):
         color_row.addWidget(btn_color)
         color_row.addStretch()
 
-        form_l.addRow("VLAN ID *:", self._fld_id)
-        form_l.addRow("Naam *:",    self._fld_name)
-        form_l.addRow("Omschrijving:", self._fld_desc)
-        form_l.addRow("Kleur:",     color_row)
+        form_l.addRow("VLAN ID *:",      self._fld_id)
+        form_l.addRow("Naam *:",         self._fld_name)
+        form_l.addRow("IP adres:",       self._fld_ip)
+        form_l.addRow("Subnetmasker:",   self._fld_subnet)
+        form_l.addRow("Omschrijving:",   self._fld_desc)
+        form_l.addRow("Kleur:",          color_row)
 
         right_l.addWidget(self._form_frame)
         self._form_frame.setVisible(False)
@@ -178,6 +189,8 @@ class VlanManagerWindow(QDialog):
         v = self._vlans[row]
         self._fld_id.setValue(v.get("id", 1))
         self._fld_name.setText(v.get("name", ""))
+        self._fld_ip.setText(v.get("ip", ""))
+        self._fld_subnet.setText(v.get("subnet", ""))
         self._fld_desc.setPlainText(v.get("description", ""))
         color = v.get("color", _DEFAULT_COLOR)
         self._color_val = color
@@ -197,7 +210,7 @@ class VlanManagerWindow(QDialog):
         # Zoek eerstvolgende vrije ID
         used = {v["id"] for v in self._vlans}
         new_id = next((i for i in range(1, 4095) if i not in used), 1)
-        new_vlan = {"id": new_id, "name": "", "description": "", "color": _DEFAULT_COLOR}
+        new_vlan = {"id": new_id, "name": "", "description": "", "color": _DEFAULT_COLOR, "ip": "", "subnet": ""}
         self._vlans.append(new_vlan)
         self._selected = len(self._vlans) - 1
         self._refresh_list()
@@ -247,6 +260,8 @@ class VlanManagerWindow(QDialog):
         self._vlans[self._selected] = {
             "id":          new_id,
             "name":        name,
+            "ip":          self._fld_ip.text().strip(),
+            "subnet":      self._fld_subnet.text().strip(),
             "description": self._fld_desc.toPlainText().strip(),
             "color":       self._color_val,
         }

@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.8.0
+# Version: 1.9.1
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv import van hardcoded _DEVICE_TYPES uit device_dialog
@@ -14,6 +14,7 @@
 #                  (u_start > total_u ipv u_start + height - 1 > total_u)
 #          1.7.0 — Extra ports_per_row opties: 3 en 4
 #          1.8.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
+#          1.9.0 — Subnetmasker veld toegevoegd (direct na IP adres)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -108,6 +109,8 @@ class PlaceDeviceDialog(QDialog):
         self._brand  = QLineEdit()
         self._model  = QLineEdit()
         self._ip     = QLineEdit()
+        self._subnet = QLineEdit()
+        self._subnet.setPlaceholderText("bv. 255.255.255.0  of  /24")
         self._mac    = QLineEdit()
         self._serial = QLineEdit()
         self._notes  = QTextEdit()
@@ -126,6 +129,7 @@ class PlaceDeviceDialog(QDialog):
         form.addRow(t("label_brand")         + ":",   self._brand)
         form.addRow(t("label_model")         + ":",   self._model)
         form.addRow(t("label_ip")            + ":",   self._ip)
+        form.addRow(t("label_subnet")        + ":",   self._subnet)
         form.addRow(t("label_mac")           + ":",   self._mac)
         form.addRow(t("label_serial")        + ":",   self._serial)
         form.addRow(t("label_notes")         + ":",   self._notes)
@@ -245,6 +249,7 @@ class PlaceDeviceDialog(QDialog):
                 "brand":         self._brand.text().strip(),
                 "model":         self._model.text().strip(),
                 "ip":            self._ip.text().strip(),
+                "subnet":        self._subnet.text().strip(),
                 "mac":           self._mac.text().strip(),
                 "serial":        self._serial.text().strip(),
                 "notes":         self._notes.toPlainText().strip(),
