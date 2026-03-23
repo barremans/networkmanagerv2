@@ -1,2 +1,2 @@
-7.3.7
-https://github.com/barremans/networkmanagerv2/releases/download/v7.3.7/Networkmap_Creator_setup_7.3.7.exe
+7.4.0
+https://github.com/barremans/networkmanagerv2/releases/download/v7.4.0/Networkmap_Creator_setup_7.4.0.exe
