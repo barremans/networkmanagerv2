@@ -2,9 +2,20 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.32.3
+# Version: 1.35.0
 # Author:  Barremans
-# Changes: F1 — ESC annuleert verbindingsmodus
+# Changes: B8 — Cross-side port highlight: gekoppelde front/back poort
+#                   van hetzelfde device ook highlighten bij trace
+#                   Lege poorten niet highlighten als trace geen externe
+#                   verbinding bevat (alleen patchpanel intern = leeg)
+#          B6 — Device bewerken opent nu PlaceDeviceDialog in edit-modus
+#                   Positie (u_start, height) aanpasbaar bij bestaand device
+#          B7 — Dubbel "Instellingen" menu verwijderd uit "Bestand" menu
+#          F5 — Read-only modus
+#                   _apply_read_only_mode(): alle edit-acties in/uitschakelen
+#                   statusbalk indicator "R" / "R/W"
+#                   aanroep bij opstart en na sluiten SettingsWindow
+#          F1 — ESC annuleert verbindingsmodus
 #               Klik op lege poort wist vorige trace + highlight
 #          G1+G2 — PNG/JPG + PDF export via QPainter renderer
 #          G3 — Word rapport export via python-docx
@@ -33,6 +44,23 @@
 #                   Instellingen uit toolbar; Im/Export shortcuts opgeschoond
 #          1.32.0 — Uppercase weergave: site/room/rack/device/wandpunt namen in boom
 #          1.32.1 — outlet_edit_requested gekoppeld in room- en site-modus wandpuntview
+#          1.33.0 — B1: WallOutletView refresh na bewerken wandpunt (_edit_wall_outlet)
+#                   B2: cross-rack trace highlight gecorrigeerd
+#                       _show_rack_view: setParent(None) i.p.v. deleteLater()
+#                       _on_navigate_to_rack: QTimer.singleShot(50ms)
+#                       helpers: _get_port_ids_in_rack, _get_rack_names_for_ports
+#                   B3: trace-volgorde gecorrigeerd voor back poort klik (rack)
+#                       back poort: reversed → endpoint → wall_outlet → pp_back
+#                       front poort: geen reversed, trace al in juiste richting
+#                       trace_from_wall_outlet: ongewijzigd, al correct
+#          1.34.0 — F3: _data_modified flag bijhouden voor backup-bij-afsluiten
+#                   closeEvent: vereenvoudigd — dialoog als _data_modified + enabled + pad
+#                   startup sync: lokaal ↔ netwerk synchronisatie bij opstarten
+#                   _save_and_backup: zet _data_modified na elke opslag
+#          1.35.0 — F2: polling timer elke 30s — netwerk bestand mtime vergelijken
+#                   data herladen als extern gewijzigd, boom hertekenen
+#                   _start_poll_timer, _on_poll_tick, _last_known_mtime bijhouden
+#                   F4: closeEvent vereenvoudigd (dubbele has_changes conditie verwijderd)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -68,6 +96,7 @@ from app.services import tracing
 from app.services import search_service
 from app.services import import_export_service
 from app.services import backup_service
+from app.services import sync_service
 from app.services.logger import log_info, log_warning, log_error
 from app.services import export_renderer
 from app.services import report_generator
@@ -115,15 +144,21 @@ class MainWindow(QMainWindow):
 
         self._current_view    = None
         self._connect_mode    = False
-        self._connect_port_a  = None   # eerste geselecteerde poort ID
-        self._outlet_locator_view = None  # persistent view, hergebruikt (E3)
+        self._connect_port_a  = None
+        self._data_modified   = False  # F3 — bijhouden of data gewijzigd is voor backup-bij-afsluiten
+        self._last_known_mtime: float | None = None   # F2 — mtime van het actief bestand bij laatste load/save
+        self._outlet_locator_view = None
         self._setup_window()
         self._build_menubar()
         self._build_toolbar()
         self._build_central()
         self._build_statusbar()
-        self._attach_new_menu()   # dropdown op Nieuw knop
+        self._apply_read_only_mode()  # F5 — pas UI aan op basis van modus
+        self._attach_new_menu()
         self._populate_tree()
+        self._startup_sync()      # F3 — sync lokaal ↔ netwerk bij opstarten
+        self._init_mtime()        # F2 — sla initiële mtime op na laden
+        self._start_poll_timer()  # F2 — start polling timer
 
     # ------------------------------------------------------------------
     # Venster
@@ -143,11 +178,6 @@ class MainWindow(QMainWindow):
 
         # ── Bestand menu ─────────────────────────────────────────────
         self._menu_file = mb.addMenu(t("menubar_file"))
-
-        act_settings = self._menu_file.addAction(t("menu_settings"))
-        act_settings.triggered.connect(self._on_settings)
-
-        self._menu_file.addSeparator()
 
         act_quit = self._menu_file.addAction(t("menubar_quit"))
         act_quit.setShortcut("Alt+F4")
@@ -392,8 +422,53 @@ class MainWindow(QMainWindow):
         version_label = QLabel(f"Networkmap Creator v{_APP_VERSION}")
         version_label.setObjectName("secondary")
         sb.addPermanentWidget(version_label)
+
+        # F5 — toegangsmodus indicator
+        self._lbl_access_mode = QLabel()
+        self._lbl_access_mode.setObjectName("access_mode_label")
+        self._lbl_access_mode.setToolTip(t("access_mode_tooltip"))
+        sb.addPermanentWidget(self._lbl_access_mode)
+
         self.setStatusBar(sb)
         self.set_status(t("app_ready"))
+
+    # ------------------------------------------------------------------
+    # Toegangsmodus — F5
+    # ------------------------------------------------------------------
+
+    def _apply_read_only_mode(self):
+        """
+        F5 — Pas de UI aan op basis van de read_only_mode instelling.
+        Read-only : alle edit-acties uitschakelen, indicator toont "🔒 R"
+        R/W       : alle edit-acties inschakelen,  indicator toont "✏ R/W"
+        """
+        read_only = settings_storage.get_read_only_mode()
+
+        # Toolbar / menu acties
+        self._act_new.setEnabled(not read_only)
+        self._act_edit.setEnabled(not read_only)
+        self._act_delete.setEnabled(not read_only)
+        self._act_duplicate.setEnabled(not read_only)
+        self._act_connect.setEnabled(not read_only)
+        self._act_import.setEnabled(not read_only)
+
+        # In read-only mogen exports nog wel
+        # (export = lezen, geen datawijziging)
+
+        # Statusbalk indicator
+        if read_only:
+            self._lbl_access_mode.setText("🔒 R")
+            self._lbl_access_mode.setToolTip(t("access_mode_readonly_tooltip"))
+            self._lbl_access_mode.setStyleSheet("color: #F0E442; font-weight: bold; padding: 0 8px;")
+        else:
+            self._lbl_access_mode.setText("✏ R/W")
+            self._lbl_access_mode.setToolTip(t("access_mode_rw_tooltip"))
+            self._lbl_access_mode.setStyleSheet("color: #56B4E9; font-weight: bold; padding: 0 8px;")
+
+        # Als verbindingsmodus actief was en we naar read-only gaan → annuleren
+        if read_only and self._connect_mode:
+            self._on_connect_mode_toggled(False)
+            self._act_connect.setChecked(False)
 
     # ------------------------------------------------------------------
     # Toetsenbord — F1
@@ -585,6 +660,7 @@ class MainWindow(QMainWindow):
                         f"{t('label_wall_outlet')}: {wo['name']}  ·  "
                         f"{room['name']}  ·  {site['name']}"
                     )
+                    # trace_from_wall_outlet geeft al de juiste volgorde: endpoint → wall_outlet → patchpanel → switch
                     self._wire_detail.set_trace(steps, wo.get("name", ""), data=self._data)
 
         elif item_type == _TYPE_ROOM:
@@ -615,11 +691,14 @@ class MainWindow(QMainWindow):
     def _on_tree_context_menu(self, pos):
         """Rechtermuisklik op boom — toont context menu op basis van item type."""
         from PySide6.QtWidgets import QMenu
+        read_only = settings_storage.get_read_only_mode()  # F5
+
         item = self._tree.itemAt(pos)
         if not item:
-            menu = QMenu(self)
-            menu.addAction(f"📍  {t('label_site')}", self._new_site)
-            menu.exec(self._tree.viewport().mapToGlobal(pos))
+            if not read_only:                               # F5 — geen nieuw item in read-only
+                menu = QMenu(self)
+                menu.addAction(f"📍  {t('label_site')}", self._new_site)
+                menu.exec(self._tree.viewport().mapToGlobal(pos))
             return
 
         data      = item.data(_COL, Qt.ItemDataRole.UserRole)
@@ -630,41 +709,46 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         if item_type == _TYPE_SITE:
-            menu.addAction(t("ctx_edit"),       lambda: self._on_edit())
-            menu.addSeparator()
-            menu.addAction(t("ctx_new_room"),   lambda: self._new_room(data["id"]))
-            menu.addSeparator()
-            menu.addAction(t("ctx_delete"),     lambda: self._on_delete())
+            if not read_only:                              # F5
+                menu.addAction(t("ctx_edit"),       lambda: self._on_edit())
+                menu.addSeparator()
+                menu.addAction(t("ctx_new_room"),   lambda: self._new_room(data["id"]))
+                menu.addSeparator()
+                menu.addAction(t("ctx_delete"),     lambda: self._on_delete())
 
         elif item_type == _TYPE_ROOM:
-            menu.addAction(t("ctx_edit"),       lambda: self._on_edit())
-            menu.addSeparator()
-            menu.addAction(t("ctx_new_rack"),   lambda: self._new_rack(data["id"]))
-            menu.addAction(t("ctx_new_outlet"),
-                           lambda: self._new_wall_outlet(data["id"]))
-            menu.addSeparator()
-            menu.addAction(t("ctx_delete"),     lambda: self._on_delete())
+            if not read_only:                              # F5
+                menu.addAction(t("ctx_edit"),       lambda: self._on_edit())
+                menu.addSeparator()
+                menu.addAction(t("ctx_new_rack"),   lambda: self._new_rack(data["id"]))
+                menu.addAction(t("ctx_new_outlet"),
+                               lambda: self._new_wall_outlet(data["id"]))
+                menu.addSeparator()
+                menu.addAction(t("ctx_delete"),     lambda: self._on_delete())
 
         elif item_type == _TYPE_RACK:
-            menu.addAction(t("ctx_edit"),
-                           lambda: self._edit_rack_direct(data))
-            menu.addSeparator()
-            menu.addAction(t("ctx_new_device"),
-                           lambda: self._new_device_in_rack(data["id"]))
-            menu.addSeparator()
-            menu.addAction(t("ctx_delete"),
-                           lambda: self._delete_rack_direct(data))
+            if not read_only:                              # F5
+                menu.addAction(t("ctx_edit"),
+                               lambda: self._edit_rack_direct(data))
+                menu.addSeparator()
+                menu.addAction(t("ctx_new_device"),
+                               lambda: self._new_device_in_rack(data["id"]))
+                menu.addSeparator()
+                menu.addAction(t("ctx_delete"),
+                               lambda: self._delete_rack_direct(data))
 
         elif item_type == _TYPE_OUTLETS:
-            menu.addAction(t("ctx_new_outlet"),
-                           lambda: self._new_wall_outlet(data["room_id"]))
+            if not read_only:                              # F5
+                menu.addAction(t("ctx_new_outlet"),
+                               lambda: self._new_wall_outlet(data["room_id"]))
 
         elif item_type == _TYPE_OUTLET:
-            menu.addAction(t("ctx_edit_outlet"),
-                           lambda: self._edit_wall_outlet(data))
-            menu.addSeparator()
-            menu.addAction(t("ctx_delete_outlet"),
-                           lambda: self._delete_wall_outlet(data))
+            if not read_only:                              # F5
+                menu.addAction(t("ctx_edit_outlet"),
+                               lambda: self._edit_wall_outlet(data))
+                menu.addSeparator()
+                menu.addAction(t("ctx_delete_outlet"),
+                               lambda: self._delete_wall_outlet(data))
 
         if not menu.isEmpty():
             menu.exec(self._tree.viewport().mapToGlobal(pos))
@@ -687,10 +771,15 @@ class MainWindow(QMainWindow):
             wo.update(dlg.get_result())
             self._save_and_backup()
             self._populate_tree()
+            # B1 — refresh de WallOutletView als die actief is na bewerken wandpunt
+            if isinstance(self._current_view, WallOutletView):
+                self._current_view.refresh(self._data)
             self.set_status(f"✓  {t('label_wall_outlet')} '{wo['name']}' bijgewerkt.")
 
     def _on_outlet_edit_requested(self, outlet_id: str):
         """Rechtsklik 'Bewerken' vanuit WallOutletView kaartje."""
+        if settings_storage.get_read_only_mode():          # F5
+            return
         # Zoek het wandpunt en de bijhorende ruimte op in de data
         for site in self._data.get("sites", []):
             for room in site.get("rooms", []):
@@ -704,6 +793,8 @@ class MainWindow(QMainWindow):
 
     def _delete_wall_outlet(self, data: dict):
         """Wandpunt verwijderen via context menu."""
+        if settings_storage.get_read_only_mode():          # F5
+            return
         from PySide6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             self, t("menu_delete"), t("msg_confirm_delete"),
@@ -726,6 +817,8 @@ class MainWindow(QMainWindow):
 
     def _on_device_context_menu(self, device_id: str, action: str):
         """Dispatcher voor device context menu acties vanuit rack_view."""
+        if settings_storage.get_read_only_mode():          # F5
+            return
         rack_data = None
         for site in self._data.get("sites", []):
             for room in site.get("rooms", []):
@@ -746,9 +839,34 @@ class MainWindow(QMainWindow):
             return
 
         if action == "edit":
-            dlg = DeviceDialog(parent=self, device=device)
+            # B6 — PlaceDeviceDialog in edit-modus: device + positie aanpasbaar
+            # Zoek het rack en slot op voor dit device
+            edit_rack = None
+            edit_slot = None
+            for site in self._data.get("sites", []):
+                for room in site.get("rooms", []):
+                    for rack in room.get("racks", []):
+                        for slot in rack.get("slots", []):
+                            if slot.get("device_id") == device_id:
+                                edit_rack = rack
+                                edit_slot = slot
+                                break
+
+            dlg = PlaceDeviceDialog(
+                parent=self,
+                rack=edit_rack or {},
+                data=self._data,
+                device=device,
+                slot=edit_slot,
+            )
             if dlg.exec() and dlg.get_result():
-                device.update(dlg.get_result())
+                result = dlg.get_result()
+                # Device velden bijwerken
+                device.update(result["device"])
+                # Slotpositie bijwerken
+                if edit_slot and result["slot"]:
+                    edit_slot["u_start"] = result["slot"]["u_start"]
+                    edit_slot["height"]  = result["slot"]["height"]
                 # Genereer ontbrekende SFP poorten
                 new_front = device.get("front_ports", 0)
                 new_sfp   = device.get("sfp_ports",   0)
@@ -767,7 +885,6 @@ class MainWindow(QMainWindow):
                             "number":    sfp_num,
                         })
                 self._save_and_backup()
-                # Taak2 — log device bewerken
                 log_change(
                     action=ACTION_EDIT,
                     entity=ENTITY_DEVICE,
@@ -898,6 +1015,7 @@ class MainWindow(QMainWindow):
             self.set_status(status)
 
             steps = tracing.trace_from_wall_outlet(self._data, outlet_id)
+            # trace_from_wall_outlet geeft al de juiste volgorde: endpoint → wall_outlet → patchpanel → switch
             self._wire_detail.set_trace(steps, outlet.get("name", outlet_id), data=self._data)
 
     def _show_rack_view(self, rack: dict, room: dict, site: dict):
@@ -905,7 +1023,10 @@ class MainWindow(QMainWindow):
         while self._mid_layout.count():
             item = self._mid_layout.takeAt(0)
             if item.widget():
-                item.widget().deleteLater()
+                # B2 — setParent(None) i.p.v. deleteLater() voor onmiddellijke verwijdering
+                # deleteLater() stelt verwijdering uit via event loop, waardoor Qt een extra
+                # render pass doet die highlight_trace overschrijft
+                item.widget().setParent(None)
 
         rack_view = RackView(rack, room, site, self._data, parent=self._mid_frame)
         rack_view.port_clicked.connect(self._on_port_clicked)
@@ -1025,13 +1146,58 @@ class MainWindow(QMainWindow):
         steps  = tracing.trace_from_port(self._data, port_id)
         origin = f"{dev.get('name', '')} — {port.get('name', '')} ({side.upper()})"
 
-        self._wire_detail.set_trace(steps, origin, conn_id=conn_id, data=self._data)
+        # B8 — controleer of de trace een zinvolle externe verbinding bevat.
+        # Een patchpanel poort zonder externe verbinding geeft via de interne
+        # doorverbinding toch 2 stappen terug (front + back) — maar die mogen
+        # NIET oplichten want het is een lege poort.
+        # Zinvol = trace bevat minstens één poort van een ander device
+        # of een wall_outlet/endpoint stap.
+        has_external = any(
+            s for s in steps
+            if s["obj_type"] in ("wall_outlet", "endpoint")
+            or (s["obj_type"] == "port"
+                and next((p for p in self._data.get("ports", [])
+                          if p["id"] == s["obj_id"]), {}).get("device_id") != device_id)
+        )
+        if not has_external:
+            self._wire_detail.clear()
+            if isinstance(self._current_view, RackView):
+                self._current_view.clear_trace_highlight()
+            return
+
+        # B3 — back poort: trace loopt van aangeklikte poort → wall_outlet → endpoint
+        #       display-volgorde moet endpoint → wall_outlet → poort zijn → reversed
+        #       front poort: trace loopt al in de juiste richting → geen reversed
+        steps_display = list(reversed(steps)) if side == "back" else steps
+        self._wire_detail.set_trace(steps_display, origin, conn_id=conn_id, data=self._data)
 
         if isinstance(self._current_view, RackView):
             trace_port_ids = [
                 s["obj_id"] for s in steps if s["obj_type"] == "port"
             ]
-            self._current_view.highlight_trace(trace_port_ids)
+
+            # B8 — tracing.py volgt nu correct de interne patchpanel doorverbinding
+            current_rack_id = self._current_view._rack.get("id", "")
+            local_port_ids  = self._get_port_ids_in_rack(trace_port_ids, current_rack_id)
+
+            # B8 — QTimer.singleShot(0) zodat Qt de port-selected stijl
+            # volledig verwerkt heeft vóór highlight_trace de stijl overschrijft
+            from PySide6.QtCore import QTimer
+            view = self._current_view
+            def _do_highlight(pids=list(local_port_ids)):
+                view.highlight_trace(pids)
+            QTimer.singleShot(0, _do_highlight)
+
+            # B2 — check of er poorten in andere racks zitten → toon hint in statusbalk
+            cross_rack_ports = [pid for pid in trace_port_ids if pid not in local_port_ids]
+            if cross_rack_ports:
+                other_racks = self._get_rack_names_for_ports(cross_rack_ports)
+                if other_racks:
+                    rack_hint = ", ".join(other_racks)
+                    self.set_status(
+                        self.statusBar().currentMessage() +
+                        f"  ·  🗄 {t('trace_cross_rack')}: {rack_hint}"
+                    )
 
     def _on_delete_connection(self, conn_id: str):
         """Verbinding verwijderen na bevestiging — getriggerd vanuit wire_detail_view."""
@@ -1135,6 +1301,7 @@ class MainWindow(QMainWindow):
 
     def _on_navigate_to_rack(self, rack_id: str, port_ids: list):
         """E5 — Cross-rack navigatie vanuit wire_detail."""
+        from PySide6.QtCore import QTimer
         for site in self._data.get("sites", []):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
@@ -1144,12 +1311,20 @@ class MainWindow(QMainWindow):
                         self.set_status(
                             f"🗄  {rack['name']}  ·  {room['name']}  ·  {site['name']}"
                         )
-                        if isinstance(self._current_view, RackView):
-                            self._current_view.highlight_trace(port_ids)
+                        # B2 — highlight uitstellen tot na Qt's initiële render pass
+                        # addWidget() + deleteLater() van de oude widget triggeren een
+                        # extra event loop cyclus waarna de stijlen pas actief zijn.
+                        # singleShot(50ms) is voldoende om over die render heen te komen.
+                        def _do_highlight(pids=list(port_ids)):
+                            if isinstance(self._current_view, RackView):
+                                self._current_view.highlight_trace(pids)
+                        QTimer.singleShot(50, _do_highlight)
                         return
 
     def _on_port_context_menu(self, port_id: str, global_pos):
         """Rechtermuisklik op een poort — toon context menu."""
+        if settings_storage.get_read_only_mode():          # F5
+            return
         from PySide6.QtWidgets import QMenu
         port = next((p for p in self._data.get("ports", [])
                      if p["id"] == port_id), None)
@@ -1218,6 +1393,36 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Data opzoeken
     # ------------------------------------------------------------------
+
+    def _get_port_ids_in_rack(self, port_ids: list, rack_id: str) -> list:
+        """B2 — Geeft alleen de port IDs terug die in het opgegeven rack zitten."""
+        rack_port_ids = set()
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    if rack["id"] == rack_id:
+                        for slot in rack.get("slots", []):
+                            dev_id = slot.get("device_id", "")
+                            for p in self._data.get("ports", []):
+                                if p.get("device_id") == dev_id:
+                                    rack_port_ids.add(p["id"])
+        return [pid for pid in port_ids if pid in rack_port_ids]
+
+    def _get_rack_names_for_ports(self, port_ids: list) -> list:
+        """B2 — Geeft de rack-namen terug voor de opgegeven port IDs (zonder duplicaten)."""
+        seen = set()
+        names = []
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    for slot in rack.get("slots", []):
+                        dev_id = slot.get("device_id", "")
+                        for p in self._data.get("ports", []):
+                            if p.get("device_id") == dev_id and p["id"] in port_ids:
+                                if rack["id"] not in seen:
+                                    seen.add(rack["id"])
+                                    names.append(rack["name"])
+        return names
 
     def _find_site(self, site_id: str) -> dict | None:
         for s in self._data.get("sites", []):
@@ -1959,6 +2164,7 @@ class MainWindow(QMainWindow):
         dlg = SettingsWindow(parent=self)
         dlg.language_changed.connect(self.reload_ui_labels)
         dlg.exec()
+        self._apply_read_only_mode()  # F5 — modus kan gewijzigd zijn in settings
 
     # ------------------------------------------------------------------
     # Import / Export
@@ -2379,6 +2585,15 @@ class MainWindow(QMainWindow):
     def _save_and_backup(self):
         try:
             settings_storage.save_network_data(self._data)
+            self._data_modified = True  # F3 — markeer dat er wijzigingen zijn
+            # F2 — mtime bijwerken na opslag zodat polling geen vals alarm geeft
+            try:
+                import os
+                self._last_known_mtime = os.path.getmtime(
+                    settings_storage.get_network_data_path()
+                )
+            except OSError:
+                pass
             log_info("network_data opgeslagen")
         except Exception as e:
             log_error("Opslaan mislukt", e)
@@ -2460,3 +2675,173 @@ class MainWindow(QMainWindow):
     def refresh_tree(self):
         self._data = settings_storage.load_network_data()
         self._populate_tree()
+
+    # ------------------------------------------------------------------
+    # Afsluiten — F3
+    # ------------------------------------------------------------------
+
+    def closeEvent(self, event):
+        """
+        F3/F4 — Bij afsluiten: vraag backup als backup ingeschakeld is én:
+        - er wijzigingen zijn geweest deze sessie (_data_modified), OF
+        - er nog nooit een backup bestaat (eerste keer)
+        Altijd enkel als backup.enabled én network_path ingevuld.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        settings   = settings_storage.load_settings()
+        backup_cfg = settings.get("backup", {})
+        network_path = backup_cfg.get("network_path", "").strip()
+
+        if backup_cfg.get("enabled", False) and network_path:
+            # Vraag backup als er wijzigingen zijn, of als er nog nooit een backup bestaat
+            no_backup_yet = backup_service.has_changes_since_last_backup(
+                settings_storage.get_network_data_path(), backup_cfg
+            )
+            if self._data_modified or no_backup_yet:
+                msg = QMessageBox(self)
+                msg.setWindowTitle(t("backup_on_exit_title"))
+                msg.setText(t("backup_on_exit_msg"))
+                btn_yes    = msg.addButton(t("backup_on_exit_yes"),
+                                           QMessageBox.ButtonRole.AcceptRole)
+                btn_no     = msg.addButton(t("backup_on_exit_no"),
+                                           QMessageBox.ButtonRole.DestructiveRole)
+                btn_cancel = msg.addButton(t("backup_on_exit_cancel"),
+                                           QMessageBox.ButtonRole.RejectRole)
+                msg.setDefaultButton(btn_yes)
+                msg.exec()
+
+                clicked = msg.clickedButton()
+                if clicked == btn_cancel:
+                    event.ignore()
+                    return
+                elif clicked == btn_yes:
+                    source = settings_storage.get_network_data_path()
+                    ok, err = backup_service.create_backup(source, backup_cfg)
+                    if ok:
+                        log_info("Backup bij afsluiten aangemaakt.")
+                    else:
+                        log_warning(f"Backup bij afsluiten mislukt: {err}")
+                        warn = QMessageBox.warning(
+                            self,
+                            t("backup_on_exit_title"),
+                            f"{t('backup_on_exit_fail')} {err}\n\nToch afsluiten?",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                        )
+                        if warn == QMessageBox.StandardButton.No:
+                            event.ignore()
+                            return
+
+        event.accept()
+
+    # ------------------------------------------------------------------
+    # Startup sync — F3
+    # ------------------------------------------------------------------
+
+    def _startup_sync(self):
+        """
+        F3 — Bij opstarten: synchroniseer lokaal bestand met netwerkbestand.
+        Richting wordt bepaald door bestandstimestamp:
+          lokaal nieuwer  → push naar netwerk
+          netwerk nieuwer → pull naar lokaal (herlaad data)
+        Stille sync: geen dialog, alleen statusbalk melding.
+        """
+        settings = settings_storage.load_settings()
+        nd_cfg   = settings.get("network_data", {})
+
+        if not nd_cfg.get("use_network_path", False):
+            return   # netwerk databron niet ingeschakeld
+
+        network_dir = nd_cfg.get("network_path", "").strip()
+        if not network_dir:
+            return
+
+        local_path = settings_storage._NETWORK_FILE  # altijd het lokale pad
+
+        action, success, err = sync_service.sync(local_path, network_dir)
+
+        if action == "pull" and success:
+            # Netwerkversie was nieuwer → herlaad data
+            self._data = settings_storage.load_network_data()
+            self._populate_tree()
+            self.set_status(t("sync_pull_done"))
+            log_info(f"Startup sync: pull van {network_dir}")
+        elif action == "push" and success:
+            self.set_status(t("sync_push_done"))
+            log_info(f"Startup sync: push naar {network_dir}")
+        elif action == "network_unavailable":
+            self.set_status(t("sync_unavailable"))
+            log_warning(f"Startup sync: netwerk niet bereikbaar ({network_dir})")
+        elif not success:
+            log_warning(f"Startup sync mislukt ({action}): {err}")
+            self.set_status(f"⚠  Sync mislukt: {err}")
+
+    # ------------------------------------------------------------------
+    # Polling timer — F2
+    # ------------------------------------------------------------------
+
+    _POLL_INTERVAL_MS = 30_000   # 30 seconden
+
+    def _init_mtime(self):
+        """F2 — Sla de initiële mtime van het actieve databestand op."""
+        import os
+        try:
+            path = settings_storage.get_network_data_path()
+            self._last_known_mtime = os.path.getmtime(path)
+        except OSError:
+            self._last_known_mtime = None
+
+    def _start_poll_timer(self):
+        """F2 — Start de polling timer. Alleen actief als netwerk databron ingeschakeld is."""
+        from PySide6.QtCore import QTimer
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._on_poll_tick)
+        self._poll_timer.start(self._POLL_INTERVAL_MS)
+
+    def _on_poll_tick(self):
+        """
+        F2 — Controleer elke 30s of het actieve databestand extern gewijzigd is.
+        Alleen actief als netwerk databron ingeschakeld is.
+        Bij wijziging: data herladen + boom hertekenen + statusbalk melding.
+        """
+        import os
+
+        settings = settings_storage.load_settings()
+        nd_cfg   = settings.get("network_data", {})
+
+        # Polling alleen zinvol als netwerkpad actief is
+        if not nd_cfg.get("use_network_path", False):
+            return
+
+        network_dir = nd_cfg.get("network_path", "").strip()
+        if not network_dir or not settings_storage.is_network_path_available(network_dir):
+            return
+
+        active_path = settings_storage.get_network_data_path()
+        try:
+            current_mtime = os.path.getmtime(active_path)
+        except OSError:
+            return
+
+        # Nog geen baseline → sla op en wacht volgende tick
+        if self._last_known_mtime is None:
+            self._last_known_mtime = current_mtime
+            return
+
+        # Meer dan 2 seconden verschil = extern gewijzigd
+        if (current_mtime - self._last_known_mtime) > 2:
+            self._last_known_mtime = current_mtime
+            log_info(f"F2 polling: extern gewijzigd gedetecteerd ({active_path})")
+
+            # Herlaad data en herteken boom
+            self._data = settings_storage.load_network_data()
+            self._populate_tree()
+
+            # Huidige view refreshen indien van toepassing
+            if hasattr(self._current_view, "refresh"):
+                try:
+                    self._current_view.refresh(self._data)
+                except Exception:
+                    pass
+
+            self.set_status("🔄  Netwerkdata bijgewerkt door andere gebruiker.")

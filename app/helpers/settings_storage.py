@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.8.0
+# Version: 1.9.0
 # Author:  Barremans
-# Changes: F2 — Device types configureerbaar via settings.json
+# Changes: F5 — read_only_mode toegevoegd aan _DEFAULT_SETTINGS
+#               get_read_only_mode(), set_read_only_mode()
+#          F2 — Device types configureerbaar via settings.json
 #               _DEFAULT_DEVICE_TYPES, load/save/get_device_type_*
 #          F3 — Lokaal vs netwerkdata
 #               get_network_data_path() kiest netwerkpad als bereikbaar
@@ -188,6 +190,8 @@ _DEFAULT_SETTINGS = {
         "use_network_path": False,
         "network_path":     "",
     },
+    # F5 — toegangsmodus: standaard read-only bij opstarten
+    "read_only_mode": True,
 }
 
 # Fallback defaults bij ontbrekend of corrupt network_data.json
@@ -471,6 +475,20 @@ def set_last_folder(key: str, path: str) -> None:
         settings["last_folders"] = {}
     settings["last_folders"][key] = path
     save_settings(settings)
+
+# ---------------------------------------------------------------------------
+# Toegangsmodus — F5
+# ---------------------------------------------------------------------------
+
+def get_read_only_mode() -> bool:
+    """Geeft True als de applicatie in read-only modus staat (standaard True)."""
+    return load_settings().get("read_only_mode", True)
+
+
+def set_read_only_mode(read_only: bool) -> bool:
+    """Slaat de toegangsmodus op. Geeft True bij succes."""
+    return save_setting("read_only_mode", read_only)
+
 
 def validate_network_data(data: dict) -> tuple[bool, str]:
     if not isinstance(data, dict):

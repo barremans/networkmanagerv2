@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.9.1
+# Version: 1.12.0
 # Author:  Barremans
 # Changes: F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
@@ -16,6 +16,10 @@
 #          1.9.0 — t() fallback voor device_* keys: haalt label op uit settings_storage
 #                  als de key niet in TRANSLATIONS staat (custom device types)
 #                  Voorkomt [device_cable_management] weergave in rack_view
+#          1.10.0 — B2: trace_cross_rack toegevoegd (NL + EN)
+#          1.11.0 — F3: backup_on_exit_*, sync_* sleutels toegevoegd (NL + EN)
+#          1.12.0 — F5: settings_group_access, settings_access_*,
+#                       access_mode_readonly_tooltip, access_mode_rw_tooltip (NL + EN)
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -411,8 +415,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "err_no_outlet_selected":       "Selecteer eerst een wandpunt.",
         "warn_outlet_already_connected": "Dit wandpunt is al verbonden. Toch doorgaan?",
 
-        # Cross-rack trace (E5)
+        # Cross-rack trace (E5 + B2)
         "trace_racks":                  "Racks in trace",
+        "trace_cross_rack":             "Cross-rack",
+
+        # Backup bij afsluiten + sync (F3)
+        "backup_on_exit_title":         "Backup bij afsluiten",
+        "backup_on_exit_msg":           "Er zijn wijzigingen aangebracht. Wilt u een backup maken voor u afsluit?",
+        "backup_on_exit_yes":           "💾  Backup maken",
+        "backup_on_exit_no":            "Afsluiten zonder backup",
+        "backup_on_exit_cancel":        "Annuleren",
+        "backup_on_exit_ok":            "✓  Backup gemaakt.",
+        "backup_on_exit_fail":          "⚠  Backup mislukt:",
+        "sync_push_done":               "↑  Lokaal gekopieerd naar netwerk.",
+        "sync_pull_done":               "↓  Netwerkversie geladen (nieuwer dan lokaal).",
+        "sync_unavailable":             "⚠  Netwerk niet bereikbaar — lokaal actief.",
 
         # --- Fase D: update check bij opstarten ---
         "update_check_url":         "Update check URL",
@@ -510,7 +527,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_loc_restore_confirm":  "Alle eigen locaties verwijderen en standaardlijst herstellen?",
         "settings_loc_new_title":        "Nieuwe locatie",
         "settings_loc_edit_title":       "Locatie bewerken",
- 
+
+        # --- Toegangsmodus (F5) — 1.12.0
+        "settings_group_access":         "Toegangsmodus",
+        "settings_access_readonly":      "Standaard read-only openen",
+        "settings_access_hint":          "In read-only modus zijn aanmaken, bewerken en verwijderen uitgeschakeld. Schakel R/W in via Instellingen.",
+        "access_mode_readonly_tooltip":  "Read-only — bewerken is uitgeschakeld",
+        "access_mode_rw_tooltip":        "Lezen en schrijven — bewerken is ingeschakeld",
+
     },
 
     # -------------------------------------------------------------------------
@@ -904,8 +928,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "err_no_outlet_selected":       "Please select a wall outlet first.",
         "warn_outlet_already_connected": "This wall outlet is already connected. Continue anyway?",
 
-        # Cross-rack trace (E5)
+        # Cross-rack trace (E5 + B2)
         "trace_racks":                  "Racks in trace",
+        "trace_cross_rack":             "Cross-rack",
+
+        # Backup bij afsluiten + sync (F3)
+        "backup_on_exit_title":         "Backup on exit",
+        "backup_on_exit_msg":           "Changes have been made. Do you want to create a backup before closing?",
+        "backup_on_exit_yes":           "💾  Create backup",
+        "backup_on_exit_no":            "Exit without backup",
+        "backup_on_exit_cancel":        "Cancel",
+        "backup_on_exit_ok":            "✓  Backup created.",
+        "backup_on_exit_fail":          "⚠  Backup failed:",
+        "sync_push_done":               "↑  Local file copied to network.",
+        "sync_pull_done":               "↓  Network version loaded (newer than local).",
+        "sync_unavailable":             "⚠  Network unavailable — using local.",
 
         # --- Phase D: update check on startup ---
         "update_check_url":         "Update check URL",
@@ -1003,6 +1040,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_loc_restore_confirm":  "Delete all custom locations and restore the default list?",
         "settings_loc_new_title":        "New Location",
         "settings_loc_edit_title":       "Edit Location",
+
+        # --- Access mode (F5) — 1.12.0
+        "settings_group_access":         "Access Mode",
+        "settings_access_readonly":      "Open in read-only by default",
+        "settings_access_hint":          "In read-only mode, creating, editing and deleting are disabled. Enable R/W in Settings.",
+        "access_mode_readonly_tooltip":  "Read-only — editing is disabled",
+        "access_mode_rw_tooltip":        "Read/Write — editing is enabled",
 
     },
 }

@@ -2,10 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/wire_detail_view.py
 # Role:    Trace visualisatie in het detail frame onderaan
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
 # Changes: 1.4.0 — edit_connection signal + bewerk-knop + refresh_info()
 #          1.5.0 — VLAN label tonen per stap: "Port 1 (FRONT) (VLAN 110)"
+#          1.6.0 — B2: rack-nav knoppen alleen tonen bij 2+ racks (cross-rack trace)
+#                   B5: rack-wissel zichtbaar als tussenstap in de ketting bij cross-rack traces
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -173,7 +175,31 @@ class WireDetailView(QWidget):
         i18n_key, _ = _CABLE_META.get(cable_type, ("cable_other", "cable-other"))
         self._update_info_lbl(i18n_key, data, conn_id)
 
+        # B5 — bouw een port_id → (rack_id, rack_name) lookup voor cross-rack labels
+        _port_rack: dict[str, tuple[str, str]] = {}
+        if data:
+            for _s in data.get("sites", []):
+                for _r in _s.get("rooms", []):
+                    for _rk in _r.get("racks", []):
+                        for _sl in _rk.get("slots", []):
+                            _dev_id = _sl.get("device_id", "")
+                            for _p in data.get("ports", []):
+                                if _p.get("device_id") == _dev_id:
+                                    _port_rack[_p["id"]] = (_rk["id"], _rk["name"])
+
+        _prev_rack_id: str | None = None
         for idx, step in enumerate(steps):
+            # B5 — injecteer rack-label als de rack wisselt tussen opeenvolgende port-stappen
+            if step["obj_type"] == "port":
+                rack_info = _port_rack.get(step["obj_id"])
+                if rack_info:
+                    cur_rack_id, cur_rack_name = rack_info
+                    if _prev_rack_id is not None and cur_rack_id != _prev_rack_id:
+                        self._chain_layout.addWidget(
+                            self._make_rack_label(cur_rack_name)
+                        )
+                    _prev_rack_id = cur_rack_id
+
             self._chain_layout.addWidget(self._make_node(step, data))
             if idx < len(steps) - 1:
                 self._chain_layout.addWidget(
@@ -270,7 +296,8 @@ class WireDetailView(QWidget):
                         rack_order.append(rack_id)
                     seen_racks[rack_id][2].append(step["obj_id"])
 
-        if len(rack_order) < 1:
+        # B2 — rack-nav knoppen alleen tonen bij 2+ racks (cross-rack trace)
+        if len(rack_order) < 2:
             self._rack_nav_widget.hide()
             return
 
@@ -352,6 +379,23 @@ class WireDetailView(QWidget):
         if side:
             frame.setToolTip(f"{t('label_' + side)}")
 
+        return frame
+
+    # ------------------------------------------------------------------
+    # Rack-wissel label — B5
+    # ------------------------------------------------------------------
+
+    def _make_rack_label(self, rack_name: str) -> QFrame:
+        """B5 — Visuele tussenstap die een rack-wissel aangeeft in de ketting."""
+        frame = QFrame()
+        frame.setObjectName("trace_step_rack")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(2)
+        lbl = QLabel(f"🗄 {rack_name}")
+        lbl.setObjectName("trace_step_rack")
+        lbl.setStyleSheet("color: #E69F00; font-size: 8pt; font-style: italic;")
+        layout.addWidget(lbl)
         return frame
 
     # ------------------------------------------------------------------

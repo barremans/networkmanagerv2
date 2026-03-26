@@ -2,18 +2,18 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
 # Changes: 1.3.0 — Fix: locatie key vertaald via get_outlet_location_label()
 #                  op kaartje en tooltip (was raw key, bv. containerd_a)
-# Author:  Barremans
-# Changes: 1.2.0 — Dubbelklik op kaartje toont detail popup (alle velden + eindapparaat)
-#                  Rechtsklik op kaartje toont contextmenu met 'Bewerken'
+#          1.4.0 — V5: wandpunten gegroepeerd per locatie met sectieheader
+#                  Binnen elke groep: vaste 4-koloms grid zonder lege gaten
+#                  Onbekende/lege locatie → groep "Overig" onderaan
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QScrollArea,
-    QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy,
+    QVBoxLayout, QHBoxLayout, QSizePolicy,
     QDialog, QMenu, QFormLayout, QTextBrowser
 )
 from PySide6.QtCore import Qt, Signal
@@ -118,7 +118,7 @@ class WallOutletView(QWidget):
         body = QWidget()
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(12, 12, 12, 12)
-        body_layout.setSpacing(8)
+        body_layout.setSpacing(16)
         body_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         ep_map = {e["id"]: e for e in self._data.get("endpoints", [])}
@@ -132,37 +132,111 @@ class WallOutletView(QWidget):
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             body_layout.addWidget(empty_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
         else:
+            # V5 — groeperen per locatie (location_description)
             col_count = 3 if self._mode == "site" else 4
-            grid = QGridLayout()
-            grid.setSpacing(8)
-            for idx, (room, outlet) in enumerate(all_outlets):
-                endpoint = ep_map.get(outlet.get("endpoint_id", ""))
-                trace    = tracing.trace_from_wall_outlet(self._data, outlet["id"])
-                card     = self._build_outlet_card(
-                    outlet, endpoint, trace,
-                    room_name=room["name"] if self._mode == "site" else None
-                )
-                grid.addWidget(card, idx // col_count, idx % col_count)
+            groups = self._group_by_location(all_outlets)
 
-            # Opvullen lege cellen
-            remainder = len(all_outlets) % col_count
-            if remainder:
-                for i in range(col_count - remainder):
-                    spacer = QWidget()
-                    spacer.setSizePolicy(
-                        QSizePolicy.Policy.Expanding,
-                        QSizePolicy.Policy.Preferred
+            for loc_key, loc_label, outlets_in_group in groups:
+                # Sectieheader
+                header = self._build_group_header(loc_label, len(outlets_in_group))
+                body_layout.addWidget(header)
+
+                # Kaartjes in vaste rijen van col_count — geen QGridLayout
+                # (QGridLayout geeft inconsistente kolombreedte bij herlaad)
+                row_widget = None
+                row_layout = None
+                for idx, (room, outlet) in enumerate(outlets_in_group):
+                    if idx % col_count == 0:
+                        row_widget = QWidget()
+                        row_layout = QHBoxLayout(row_widget)
+                        row_layout.setContentsMargins(0, 0, 0, 0)
+                        row_layout.setSpacing(8)
+                        row_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+                        body_layout.addWidget(row_widget)
+
+                    endpoint = ep_map.get(outlet.get("endpoint_id", ""))
+                    trace    = tracing.trace_from_wall_outlet(self._data, outlet["id"])
+                    card     = self._build_outlet_card(
+                        outlet, endpoint, trace,
+                        room_name=room["name"] if self._mode == "site" else None
                     )
-                    grid.addWidget(
-                        spacer,
-                        len(all_outlets) // col_count,
-                        remainder + i
-                    )
-            body_layout.addLayout(grid)
+                    row_layout.addWidget(card)
+
+                # Opvullen laatste rij met stretch zodat kaartjes links blijven
+                if row_layout is not None:
+                    row_layout.addStretch()
 
         body_layout.addStretch()
         scroll.setWidget(body)
         outer.addWidget(scroll)
+
+    def _group_by_location(
+        self, outlets: list[tuple[dict, dict]]
+    ) -> list[tuple[str, str, list]]:
+        """
+        V5 — Groepeer (room, outlet) tuples per location_description.
+        Bewaart de volgorde van eerste optreden per locatie.
+        Lege/onbekende locatie komt als laatste groep ('overig').
+
+        Retourneert: lijst van (loc_key, loc_label, [(room, outlet), ...])
+        Gesorteerd: bekende locaties op volgorde van eerste optreden,
+                    lege locatie altijd laatste.
+        """
+        lang = get_language()
+        order   : list[str]              = []
+        groups  : dict[str, list]        = {}
+        labels  : dict[str, str]         = {}
+        fallback_key = "__overig__"
+
+        for room, outlet in outlets:
+            key = outlet.get("location_description", "").strip()
+            if not key:
+                key = fallback_key
+                label = "Overig"
+            else:
+                label = get_outlet_location_label(key, lang) or key
+
+            if key not in groups:
+                order.append(key)
+                groups[key] = []
+                labels[key] = label
+            groups[key].append((room, outlet))
+
+        # Zet lege locatie altijd achteraan
+        if fallback_key in order and order[-1] != fallback_key:
+            order.remove(fallback_key)
+            order.append(fallback_key)
+
+        return [(k, labels[k], groups[k]) for k in order]
+
+    def _build_group_header(self, label: str, count: int) -> QFrame:
+        """V5 — Sectieheader boven elke locatiegroep."""
+        frame = QFrame()
+        frame.setObjectName("outlet_group_header")
+        frame.setStyleSheet(
+            "QFrame#outlet_group_header {"
+            "  background-color: rgba(255,255,255,0.05);"
+            "  border-left: 3px solid #56B4E9;"
+            "  border-radius: 2px;"
+            "  padding: 2px 6px;"
+            "}"
+        )
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+
+        lbl = QLabel(f"📍  {label}")
+        lbl.setObjectName("rack_title")
+        lbl.setStyleSheet("font-size: 12px; font-weight: bold;")
+
+        cnt = QLabel(f"{count}  {t('tree_wall_outlets').lower()}")
+        cnt.setObjectName("secondary")
+        cnt.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        layout.addWidget(lbl)
+        layout.addStretch()
+        layout.addWidget(cnt)
+        return frame
 
     def _collect_site_outlets(self) -> list[tuple[dict, dict]]:
         """Verzamel alle (room, outlet) tuples voor de huidige site."""

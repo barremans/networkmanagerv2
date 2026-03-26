@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.9.1
+# Version: 1.10.0
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv import van hardcoded _DEVICE_TYPES uit device_dialog
@@ -15,6 +15,9 @@
 #          1.7.0 — Extra ports_per_row opties: 3 en 4
 #          1.8.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
 #          1.9.0 — Subnetmasker veld toegevoegd (direct na IP adres)
+#          1.10.0 — B6: edit-modus toegevoegd (slot=... parameter)
+#                   Positie (u_start, height) aanpasbaar bij bestaand device
+#                   Huidige slot uitgesloten uit bezettingscontrole
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -32,19 +35,41 @@ class PlaceDeviceDialog(QDialog):
     """
     Combineert device aanmaken + U-positie kiezen in één venster.
     Device types worden geladen uit settings_storage — volledig configureerbaar.
+
+    Aanmaken (standaard):
+        PlaceDeviceDialog(parent, rack=rack, data=data)
+
+    Bewerken — B6:
+        PlaceDeviceDialog(parent, rack=rack, data=data,
+                          device=device_dict, slot=slot_dict)
+        Vult alle velden voor met bestaande waarden.
+        Positie aanpasbaar; huidig slot uitgesloten uit bezettingscontrole.
     """
 
-    def __init__(self, parent=None, rack: dict = None, data: dict = None):
+    def __init__(self, parent=None, rack: dict = None, data: dict = None,
+                 device: dict = None, slot: dict = None):
         super().__init__(parent)
         self._rack         = rack or {}
         self._data         = data or {}
+        self._device       = device        # None = aanmaken, dict = bewerken (B6)
+        self._slot         = slot          # None = aanmaken, dict = bewerken (B6)
+        self._edit_mode    = device is not None
         self._result       = None
         self._device_types = self._load_types()
 
-        self.setWindowTitle(f"{t('label_device')} — {rack.get('name', '')} toevoegen")
+        if self._edit_mode:
+            self.setWindowTitle(
+                f"{t('label_device')} — {device.get('name', '')} bewerken"
+            )
+        else:
+            self.setWindowTitle(
+                f"{t('label_device')} — {rack.get('name', '')} toevoegen"
+            )
         self.setMinimumWidth(480)
         self.setModal(True)
         self._build()
+        if self._edit_mode:
+            self._populate()
 
     def _load_types(self) -> list:
         try:
@@ -149,7 +174,9 @@ class PlaceDeviceDialog(QDialog):
         self._height.setRange(1, total_u)
         self._height.setValue(1)
 
-        occupied = self._occupied_units()
+        occupied = self._occupied_units(
+            exclude_slot_id=self._slot.get("id") if self._slot else None
+        )
         if occupied:
             occ_str = ", ".join(str(u) for u in sorted(occupied))
             occ_lbl = QLabel(f"Bezet: U{occ_str}")
@@ -171,6 +198,44 @@ class PlaceDeviceDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._on_type_changed()
+
+    # ------------------------------------------------------------------
+    # Voorinvullen bij edit-modus — B6
+    # ------------------------------------------------------------------
+
+    def _populate(self):
+        """Vul alle velden met de bestaande device- en slotwaarden."""
+        d = self._device
+        s = self._slot
+
+        self._name.setText(d.get("name", ""))
+
+        # Type DDL op juiste waarde zetten
+        idx = self._ddl_type.findData(d.get("type", ""))
+        if idx >= 0:
+            self._ddl_type.setCurrentIndex(idx)
+
+        self._front_ports.setValue(d.get("front_ports", 0))
+        self._back_ports.setValue(d.get("back_ports", 0))
+        self._sfp_ports.setValue(d.get("sfp_ports", 0))
+
+        ppr_idx = self._ports_per_row.findData(d.get("ports_per_row", 12))
+        if ppr_idx >= 0:
+            self._ports_per_row.setCurrentIndex(ppr_idx)
+
+        self._brand.setText(d.get("brand", ""))
+        self._model.setText(d.get("model", ""))
+        self._ip.setText(d.get("ip", ""))
+        self._subnet.setText(d.get("subnet", ""))
+        self._mac.setText(d.get("mac", ""))
+        self._serial.setText(d.get("serial", ""))
+        self._notes.setPlainText(d.get("notes", ""))
+
+        # Slotpositie — omzetten naar display-U
+        if s:
+            display_u = self._internal_to_display(s.get("u_start", 1))
+            self._u_start.setValue(display_u)
+            self._height.setValue(s.get("height", 1))
 
     # ------------------------------------------------------------------
     # Type DDL handler
@@ -230,7 +295,9 @@ class PlaceDeviceDialog(QDialog):
         if numbering == "bottom_up":
             u_start = u_top
 
-        occupied = self._occupied_units()
+        # B6 — huidig slot uitsluiten bij edit-modus
+        exclude  = self._slot.get("id") if self._slot else None
+        occupied = self._occupied_units(exclude_slot_id=exclude)
         needed   = set(range(u_start, u_start + height))
         conflict = needed & occupied
         if conflict:
@@ -239,9 +306,13 @@ class PlaceDeviceDialog(QDialog):
                                 f"{', '.join('U'+str(u) for u in sorted(conflict))}")
             return
 
+        # B6 — bij edit: bewaar bestaande device_id en slot_id
+        device_id = self._device.get("id", "") if self._device else ""
+        slot_id   = self._slot.get("id",   "") if self._slot   else ""
+
         self._result = {
             "device": {
-                "id":            "",
+                "id":            device_id,
                 "name":          name,
                 "type":          self._ddl_type.currentData(),
                 "front_ports":   self._front_ports.value(),
@@ -257,7 +328,7 @@ class PlaceDeviceDialog(QDialog):
                 "sfp_ports":     self._sfp_ports.value(),
             },
             "slot": {
-                "id":      "",
+                "id":      slot_id,
                 "u_start": u_start,
                 "height":  height,
             }
@@ -267,9 +338,12 @@ class PlaceDeviceDialog(QDialog):
     def get_result(self) -> dict | None:
         return self._result
 
-    def _occupied_units(self) -> set:
+    def _occupied_units(self, exclude_slot_id: str = None) -> set:
+        """Geef bezette U-posities terug. Bij edit-modus: huidig slot uitsluiten."""
         occupied = set()
         for slot in self._rack.get("slots", []):
+            if exclude_slot_id and slot.get("id") == exclude_slot_id:
+                continue   # B6 — huidig slot niet als bezet beschouwen
             height = slot.get("height", 1)
             u      = slot.get("u_start", 1)
             for i in range(height):
@@ -277,7 +351,9 @@ class PlaceDeviceDialog(QDialog):
         return occupied
 
     def _next_free_u(self) -> int:
-        occupied  = self._occupied_units()
+        # B6 — huidig slot uitsluiten bij edit-modus
+        exclude = self._slot.get("id") if self._slot else None
+        occupied  = self._occupied_units(exclude_slot_id=exclude)
         total_u   = self._rack.get("total_units", 12)
         numbering = self._rack.get("numbering", "top_down")
         if numbering == "bottom_up":

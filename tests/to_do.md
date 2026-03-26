@@ -1,123 +1,107 @@
-# Networkmap_Creator — Openstaande werkpunten
+# Networkmap Creator — Openstaande werkpunten v5
+
+## Legende
+- 🔴 Bug
+- 🟠 Functionele verbetering (hoge prioriteit)
+- 🟡 Visuele verbetering
+- 🔵 Export
+- ⚪ Later / security
+- 🟣 Nieuw
+
+---
 
 ## 1. Bugs
 
-- **Manuele backup werkt niet**
-  - Foutmelding:
-    - `Backup mislukt. Controleer het netwerkpad.`
-    - `Geen schrijfrechten op: //wsqlvsOI/Cutrite/Networkmapping`
-
-- **Netwerkdata wordt niet automatisch ververst**
-  - Wanneer twee machines met dezelfde netwerkmap werken, zijn wijzigingen van machine 1 niet zichtbaar op machine 2.
-  - Er ontbreekt een automatische refresh wanneer de brondata nieuwer is.
-
-- **Synchronisatie lokaal ↔ netwerk ontbreekt**
-  - De applicatie moet controleren of het lokale bestand en het netwerkbestand gelijk lopen.
-  - Er moet altijd een lokaal bestand beschikbaar zijn, ook wanneer men met netwerkdata werkt, zodat offline werken mogelijk blijft.
-  - Indien lokaal nieuwer is dan netwerk: netwerk updaten.
-  - Indien netwerk nieuwer is dan lokaal: lokaal updaten.
-
-- **VLAN-overzicht in export niet correct**
-  - Het veld **“Via poort”** is leeg, terwijl er wel een koppeling is met bijvoorbeeld `Patchpanel A port 20`.
-
-- **Tracing-volgorde bij rack tracing is omgekeerd voor achterzijde patchpanelwandpunten**
-  - Huidige weergave:
-    - `Patchpanel A - Port 20 (Back) => A20 (VLAN 100) => Airtame Xperience`
-  - Gewenste weergave:
-    - `Airtame Xperience => A20 (VLAN 100) => Patchpanel A - Port 20 (Back)`
+| ID | Omschrijving | Bestand(en) | Status |
+|---|---|---|---|
+| B2 | Cross-rack poort inkleuring (Qt render timing) | `rack_view.py`, `main_window.py` | ⏸ Uitgesteld |
 
 ---
 
 ## 2. Functionele verbeteringen
 
-### 2.1 Settings
-
-- **Wandpunt**
-  - pop-up icon
-    - dubbel icoon
-
-- **Databron**
-  - Ondersteuning verbeteren voor werken met:
-    - lokale databron
-    - netwerkdatabron
-    - automatische vergelijking en synchronisatie tussen beide
-
-- **Backup**
-  - Automatisch backup laten uitvoeren bij het afsluiten van de applicatie.
-
-### 2.2 Toegangsmodus
-
-- De applicatie moet standaard in **read-only** openen.
-- Via **settings** moet bewerken expliciet kunnen worden ingeschakeld.
-- De huidige modus moet duidelijk zichtbaar zijn in de applicatie:
-  - `"read"`
-  - `"R/W"`
-
-### 2.3 Wandpunten
-
-### 2.4 Tracing en overzicht
-
-- Het huidige overzicht groepeert reeds per:
-  - site
-  - ruimte
-- Dit uitbreiden zodat ook gegroepeerd kan worden per device:
-  - bijvoorbeeld `Patchpanel A` → bijhorende wandpunten
+| ID | Omschrijving | Bestand(en) | Status |
+|---|---|---|---|
+| F5 | Read-only modus — standaard read-only, R/W via settings, indicator in UI | `main_window.py`, `settings_window.py`, `settings_storage.py`, alle dialogs | 🟠 Open |
+| F6 | Tracing per device groeperen in wandpuntenview | `wall_outlet_view.py`, `main_window.py` | 🟠 Open |
+| F7 | Backup automatisch bij afsluiten | `main_window.py`, `backup_service.py` | ✅ Opgelost (F3/v4) |
 
 ---
 
 ## 3. Visuele verbeteringen
 
-- Devices in een rack een **kleur** kunnen geven.
-
-- Mogelijk extra **ruimte tussen devices in een rack** voorzien.
-  - Rekening houden met de hoogte van het device.
-
-- device niet standaardkleur, niet duidelijk zoals standaardkleur (afbeeelding)
-
-- **Afbeelding export**
-  - De huidige rack-afbeelding is te lang en onvoldoende duidelijk.
-  - Export compacter en leesbaarder maken.
+| ID | Omschrijving | Bestand(en) | Status |
+|---|---|---|---|
+| V1 | Wandpunt popup dubbel icoon in settings | `settings_window.py` | 🟡 Open |
+| V2 | Custom gekleurde devices minder zichtbaar dan type-standaardkleuren | `rack_view.py`, `main.qss` | 🟡 Open |
+| V3 | Extra ruimte tussen devices in rack (margin_below, rekening met hoogte) | `rack_view.py`, `place_device_dialog.py` | 🟡 Open |
+| V4 | Afbeeldingexport rack te lang en onvoldoende leesbaar | export module | 🟡 Open |
 
 ---
 
 ## 4. Export
 
-### 4.1 Word-export
-
-- Export uitbreiden met:
-  - toestelinfo
-  - detailinformatie
-  - VLAN-overzicht
-
-### 4.2 Afbeeldingexport
-
-- Rackweergave duidelijker exporteren.
-- Vermijden dat de afbeelding te lang en moeilijk leesbaar wordt.
+| ID | Omschrijving | Bestand(en) | Status |
+|---|---|---|---|
+| E1 | Word-export uitbreiden (toestelinfo, detailinfo, VLAN-overzicht) | Word export service | 🔵 Open |
+| E2 | Tekstuele rack-export (visueel met pijltjes en symbolen) | nieuw export module | 🔵 Open |
+| E3 | Afbeeldingexport rack compacter en leesbaarder | export module | 🔵 Open |
 
 ---
 
 ## 5. Security — MFA / Active Directory
 
-- [ ] **MFA introduceren**
-  - [ ] Standaard **niet actief**
-  - [ ] Activeerbaar via:
-    - [ ] **installer (Inno Setup)**
-    - [ ] **settings**
-  - [ ] Gebruiker moet **niveau 5** hebben in Active Directory
-  - [ ] Indien onvoldoende rechten:
-    - [ ] popup tonen
-    - [ ] applicatie sluiten
-  - [ ] AD-server standaard **hardcoded voor CGK**
-  - [ ] AD-server ook **configureerbaar via settings**
-
-### Open vraag
-
-- [ ] Hoe MFA-activatie koppelen aan GitHub builds?
-  - [ ] Optie 1: via **Inno Setup installer flag**
-  - [ ] Optie 2: via **setting in build/config**
+| ID | Omschrijving | Status |
+|---|---|---|
+| S1 | MFA introduceren via AD (niveau 5 vereist) | ⚪ Later |
+| S1a | Standaard niet actief | ⚪ Later |
+| S1b | Activeerbaar via installer (Inno Setup) of settings | ⚪ Later |
+| S1c | Bij onvoldoende rechten: popup + applicatie sluiten | ⚪ Later |
+| S1d | AD-server hardcoded voor CGK + configureerbaar via settings | ⚪ Later |
+| S1e | Open vraag: MFA-activatie koppelen aan GitHub builds (Inno Setup flag of build config) | ⚪ Later |
 
 ---
 
 ## 6. Overig
 
-- Direct uitlezen uit een CSV.
+| ID | Omschrijving | Status |
+|---|---|---|
+| O1 | Direct uitlezen uit CSV | 🟣 Nieuw — Open |
+
+---
+
+## 7. SVG Tekeningen (nieuw)
+
+| ID | Omschrijving | Status |
+|---|---|---|
+| G1 | Grondplan van wandpunten opladen en linken aan ruimte | 🟣 Nieuw — Open |
+| G2 | Grondplan kunnen bekijken in de applicatie | 🟣 Nieuw — Open |
+
+---
+
+## Aanbevolen volgorde
+
+1. **F5** — Read-only modus (compact, veel impact)
+2. **V1 + V2 + V3** — Visuele fixes (snel resultaat)
+3. **F6** — Tracing per device groeperen
+4. **E1 + E2 + E3** — Export uitbreiden
+5. **G1 + G2** — SVG grondplannen
+6. **O1** — CSV import
+7. **S1** — MFA/AD (later)
+8. **B2** — Cross-rack highlight (als elegantere Qt oplossing gevonden)
+
+
+- Rack device - bewerken - positie kan niet aangepast worden
+- Instellingen menu dubbel, onder "Bestand" en "Settings" menu. Onder "Bestand" mag weg
+- Wandpunten:
+  - Visiueel groeperen per locatie
+- achterkant toestellen met ook ports aan de front, aanklikken front ook port achterzijde gekleurd tonen nu blijft die geelklik front port nu kleurt bv. front van switch op die verbonden is maar niet de back port van de device. bv patchpanel port 1 front aangeklikt - switch port 1 gekleurd alsook port 1 back van de patchpanel
+- backup bug, test map lukt, backup maken lukt, maar na een tijdje niet meer. error : Backup mislukt. Controleer het netwerkpad. Geen schrijfrechten op ***maar als ik test doe dan lukt de test.
+
+- backup neemt niet alles mee
+  - Eindapparaten, Device Types, Wandpunten locaties die in instellingen zijn bepaald
+
+- Rack verplaatsen van ruimte niet aanwezig
+
+- wandpunten overzicht
+  - volgorde van wandpunten locatie kunnen bepalen

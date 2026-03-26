@@ -2,8 +2,15 @@
 # Networkmap_Creator
 # File:    app/services/tracing.py
 # Role:    Trace berekening — pure logica, GEEN Qt imports
-# Version: 1.0.0
+# Version: 1.2.0
 # Author:  Barremans
+# Changes: 1.1.0 — B8: _is_patchpanel() helper — type check accepteert
+#                       zowel "patch_panel" als "patchpanel" (beide komen
+#                       voor in bestaande data)
+#          1.2.0 — B8: bij patchpanel poort met externe verbinding ook de
+#                       interne partner (andere zijde, zelfde nummer) toevoegen
+#                       aan de trace inclusief diens externe verbinding
+#                       (back→wall_outlet zichtbaar bij front klik en vice versa)
 # =============================================================================
 #
 # BELANGRIJK: Dit bestand bevat GEEN Qt imports.
@@ -112,13 +119,22 @@ def _get_partner_port(data: dict, port_id: str) -> tuple[dict | None, dict | Non
     return conn, None
 
 
+def _is_patchpanel(device: dict) -> bool:
+    """
+    B8 — Type check voor patchpanel.
+    Accepteert zowel 'patch_panel' als 'patchpanel' — beide komen
+    voor in bestaande data door historische inconsistentie.
+    """
+    return device.get("type") in ("patch_panel", "patchpanel")
+
+
 def _get_patchpanel_partner(data: dict, port: dict) -> dict | None:
     """
     Patchpanel interne doorverbinding:
     back port nummer N ↔ front port nummer N op hetzelfde device.
     """
     device = _get_device(data, port["device_id"])
-    if not device or device.get("type") != "patchpanel":
+    if not device or not _is_patchpanel(device):   # B8 — gebruik _is_patchpanel()
         return None
     target_side = "front" if port["side"] == "back" else "back"
     target_num  = port["number"]
@@ -221,10 +237,38 @@ def _trace_from_port_internal(data: dict, port_id: str,
             port_name  = port.get("name", ""),
         ))
 
+        # B8 — patchpanel: interne partner altijd toevoegen aan de trace,
+        # ook als de huidige poort een externe verbinding heeft.
+        # Zo wordt zowel front→switch als front↔back zichtbaar bij één klik.
+        if _is_patchpanel(device) and conn:
+            internal = _get_patchpanel_partner(data, port)
+            if internal and internal["id"] not in visited:
+                visited.add(internal["id"])
+                internal_device = _get_device(data, internal["device_id"])
+                # Kijk of de interne partner zelf ook een externe verbinding heeft
+                internal_conn = _get_connection_for_port(data, internal["id"])
+                internal_cable = internal_conn["cable_type"] if internal_conn else ""
+                steps.append(_make_step(
+                    obj_type   = "port",
+                    obj_id     = internal["id"],
+                    label      = _port_label(internal, internal_device),
+                    side       = internal["side"],
+                    cable_type = internal_cable,
+                    port_name  = internal.get("name", ""),
+                ))
+                # Volg de externe verbinding van de interne partner indien aanwezig
+                if internal_conn:
+                    if internal_conn["from_id"] == internal["id"] and internal_conn["to_type"] == "wall_outlet":
+                        if internal_conn["to_id"] != skip_outlet_id:
+                            _follow_wall_outlet(internal_conn["to_id"], internal_cable)
+                    elif internal_conn["to_id"] == internal["id"] and internal_conn["from_type"] == "wall_outlet":
+                        if internal_conn["from_id"] != skip_outlet_id:
+                            _follow_wall_outlet(internal_conn["from_id"], internal_cable)
+
         if not conn:
             # Geen externe verbinding — maar als dit een patchpanel poort is,
             # volg de interne doorverbinding naar de andere kant
-            if device.get("type") == "patchpanel":
+            if _is_patchpanel(device):
                 internal = _get_patchpanel_partner(data, port)
                 if internal and internal["id"] not in visited:
                     _follow(internal["id"])
@@ -234,7 +278,7 @@ def _trace_from_port_internal(data: dict, port_id: str,
         if conn["from_id"] == current_port_id and conn["to_type"] == "wall_outlet":
             if conn["to_id"] != skip_outlet_id:
                 _follow_wall_outlet(conn["to_id"], cable)
-            elif device.get("type") == "patchpanel":
+            elif _is_patchpanel(device):
                 # We komen van wall_outlet kant — volg intern door naar front
                 internal = _get_patchpanel_partner(data, port)
                 if internal and internal["id"] not in visited:
@@ -243,7 +287,7 @@ def _trace_from_port_internal(data: dict, port_id: str,
         if conn["to_id"] == current_port_id and conn["from_type"] == "wall_outlet":
             if conn["from_id"] != skip_outlet_id:
                 _follow_wall_outlet(conn["from_id"], cable)
-            elif device.get("type") == "patchpanel":
+            elif _is_patchpanel(device):
                 # We komen van wall_outlet kant — volg intern door naar front
                 internal = _get_patchpanel_partner(data, port)
                 if internal and internal["id"] not in visited:
@@ -253,7 +297,7 @@ def _trace_from_port_internal(data: dict, port_id: str,
         # Verbinding naar andere poort?
         if partner_port and partner_port["id"] not in visited:
             partner_device = _get_device(data, partner_port["device_id"])
-            if partner_device and partner_device.get("type") == "patchpanel":
+            if partner_device and _is_patchpanel(partner_device):
                 visited.add(partner_port["id"])
                 steps.append(_make_step(
                     obj_type   = "port",

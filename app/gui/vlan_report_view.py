@@ -2,11 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/vlan_report_view.py
 # Role:    Zijpaneel VLAN rapport — alle poorten per VLAN, over sites/racks
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #          1.1.0 — VLAN namen uit vlan_config tonen via vlan_service
 #          1.2.0 — IP adres en subnetmasker tonen in VLAN header indien ingevuld
+#          1.3.0 — B4: VLAN type-mismatch fix — p.get("vlan") kan str of int zijn,
+#                  alle vergelijkingen genormaliseerd via _vlan_eq() helper
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -16,6 +18,16 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from app.helpers.i18n import t
 from app.services.vlan_service import load_vlans, vlan_label
+
+
+def _vlan_eq(port_vlan, vlan_num: int) -> bool:
+    """B4 — Vergelijk VLAN waarden type-onafhankelijk (str of int in JSON)."""
+    if port_vlan is None:
+        return False
+    try:
+        return int(port_vlan) == vlan_num
+    except (ValueError, TypeError):
+        return False
 
 
 class VlanReportView(QWidget):
@@ -127,14 +139,14 @@ class VlanReportView(QWidget):
         # Verzamel alle poorten van dit VLAN
         vlan_ports = [
             p for p in self._data.get("ports", [])
-            if p.get("vlan") == vlan_num
+            if _vlan_eq(p.get("vlan"), vlan_num)
         ]
         # Wandpunten met dit VLAN verzamelen
         vlan_outlets = []
         for s in self._data.get("sites", []):
             for r in s.get("rooms", []):
                 for wo in r.get("wall_outlets", []):
-                    if wo.get("vlan") == vlan_num:
+                    if _vlan_eq(wo.get("vlan"), vlan_num):
                         vlan_outlets.append({
                             "wo": wo,
                             "room": r.get("name", "?"),
@@ -297,7 +309,7 @@ class VlanReportView(QWidget):
         """
         vlan_port_ids = {
             p["id"] for p in self._data.get("ports", [])
-            if p.get("vlan") == vlan_num
+            if _vlan_eq(p.get("vlan"), vlan_num)
         }
 
         outlet_conns = []
@@ -318,7 +330,7 @@ class VlanReportView(QWidget):
         for s in self._data.get("sites", []):
             for r in s.get("rooms", []):
                 for wo in r.get("wall_outlets", []):
-                    if (wo.get("vlan") == vlan_num
+                    if (_vlan_eq(wo.get("vlan"), vlan_num)
                             and wo["id"] not in direct_ids):
                         ep_id = wo.get("endpoint_id", "")
                         ep = next((e for e in self._data.get("endpoints", [])
@@ -384,4 +396,4 @@ class VlanReportView(QWidget):
 
     def refresh(self, data: dict):
         self._data = data
-        self._refresh_report()
+        self._refresh_report()pcadmin@cgk-group.com 

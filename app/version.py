@@ -7,4 +7,4 @@ Versie: 1.0.0
 Auteur: Barremans
 """
 
-__version__ = "7.3.7"  # Pas dit manueel aan bij elke release
+__version__ = "7.6.0"  # Pas dit manueel aan bij elke release

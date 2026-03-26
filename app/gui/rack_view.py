@@ -2,12 +2,16 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.21.0
+# Version: 1.23.0
 # Author:  Barremans
 # Changes: 1.19.0 — Uitlijning verbindingen, device kleur, ruimte tussen devices
 #          1.20.0 — Tooltip uitgebreid met device naam, port-connected-back shape
 #          1.21.0 — Fix: tooltip ook voor poorten zonder port_id (nog niet aangemaakt)
 #                   Poorten 11-13 van een 13-poorts router hadden geen hover info
+#          1.22.0 — B2: pending_highlight mechanisme — highlight_trace aanroepen
+#                   na _populate() zodat _port_widgets gegarandeerd gevuld is
+#          1.23.0 — B8: highlight_trace zet ook de geselecteerde poort op port-trace
+#                   zodat de aangeklikte poort mee oplicht bij cross-side highlight
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -123,6 +127,7 @@ class RackView(QWidget):
         self._connect_mode  = False
         self._selected_port = None
         self._port_widgets  = {}
+        self._pending_highlight: list | None = None  # B2
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -235,6 +240,11 @@ class RackView(QWidget):
         bl.addStretch()
         scroll.setWidget(body)
         outer.addWidget(scroll)
+
+        # B2 — pending highlight toepassen als die ingesteld was vóór _populate klaar was
+        if self._pending_highlight is not None:
+            self.highlight_trace(self._pending_highlight)
+            self._pending_highlight = None
 
     # ------------------------------------------------------------------
     # Rijen bouwen
@@ -591,12 +601,22 @@ class RackView(QWidget):
         self.update()
 
     def highlight_trace(self, port_ids: list):
+        # B2 — als _port_widgets nog leeg is, opslaan als pending
+        # (kan voorkomen als highlight_trace aangeroepen wordt vóór _populate klaar is)
+        if not self._port_widgets:
+            self._pending_highlight = list(port_ids)
+            return
         for pid, widget in self._port_widgets.items():
             if pid in port_ids:
+                # B8 — ook de geselecteerde (witte) poort op port-trace zetten
+                # zodat aangeklikte poort mee oplicht bij cross-side highlight
                 widget.setObjectName("port-trace")
                 _refresh_style(widget)
-            elif pid != self._selected_port:
+            else:
                 self._restore_port_style(pid, widget)
+        # B8 — selected_port resetten zodat clear_trace_highlight
+        # de stijl correct kan herstellen
+        self._selected_port = None
 
     def clear_trace_highlight(self):
         for pid, widget in self._port_widgets.items():

@@ -3,9 +3,10 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.7.0
+# Version: 1.8.0
 # Author:  Barremans
-# Changes: F2 — Tabblad "Device types" met CRUD + standaard FRONT/BACK
+# Changes: F5 — Toegangsmodus toggle in Algemeen tabblad (read-only / R/W)
+#          F2 — Tabblad "Device types" met CRUD + standaard FRONT/BACK
 #          F3 — Sectie "Databron" in Algemeen tabblad
 #          H1d — Standaard exportmap in Weergave tabblad
 #          D  — Update check URL veld in Algemeen tabblad
@@ -101,6 +102,21 @@ class SettingsWindow(QDialog):
         hint_lang.setObjectName("secondary")
         form_lang.addRow("", hint_lang)
         layout.addWidget(grp_lang)
+
+        # --- Toegangsmodus (F5) ---
+        grp_access  = QGroupBox(t("settings_group_access"))
+        form_access = QVBoxLayout(grp_access)
+        form_access.setSpacing(8)
+
+        self._chk_read_only = QCheckBox(t("settings_access_readonly"))
+        form_access.addWidget(self._chk_read_only)
+
+        hint_access = QLabel(t("settings_access_hint"))
+        hint_access.setObjectName("secondary")
+        hint_access.setWordWrap(True)
+        form_access.addWidget(hint_access)
+
+        layout.addWidget(grp_access)
 
         # --- Databron (F3) ---
         grp_data  = QGroupBox(t("settings_group_datasource"))
@@ -407,6 +423,9 @@ class SettingsWindow(QDialog):
         ui = self._settings.get("ui", {})
         self._spn_unit_h.setValue(ui.get("rack_unit_height", 30))
         self._txt_export_folder.setText(ui.get("export_folder", ""))
+
+        # Toegangsmodus (F5)
+        self._chk_read_only.setChecked(self._settings.get("read_only_mode", True))
 
         # Eindapparaten
         self._refresh_ep_list()
@@ -890,6 +909,7 @@ class SettingsWindow(QDialog):
             "use_network_path": use_net,
             "network_path":     ds_path,
         })
+        settings_storage.save_setting("read_only_mode", self._chk_read_only.isChecked())  # F5
         settings_storage.save_endpoint_types(self._ep_types)
         settings_storage.save_device_types(self._dev_types)
         settings_storage.save_outlet_locations(self._loc_types)
