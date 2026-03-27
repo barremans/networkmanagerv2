@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.10.0
+# Version: 1.11.0
 # Author:  Barremans
 # Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv import van hardcoded _DEVICE_TYPES uit device_dialog
@@ -12,7 +12,7 @@
 #          1.5.0 — S/N en MAC velden toegevoegd (pariteit met device_dialog)
 #          1.6.0 — Fix: grenzenvalidatie bij bottom_up nummering
 #                  (u_start > total_u ipv u_start + height - 1 > total_u)
-#          1.7.0 — Extra ports_per_row opties: 3 en 4
+#          1.11.0 — Uitbreiding ports_per_row: optie 48 toegevoegd voor 48-poort switches
 #          1.8.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
 #          1.9.0 — Subnetmasker veld toegevoegd (direct na IP adres)
 #          1.10.0 — B6: edit-modus toegevoegd (slot=... parameter)
@@ -121,6 +121,7 @@ class PlaceDeviceDialog(QDialog):
         self._ports_per_row = QComboBox()
         self._ports_per_row.addItem("12  (standaard)", 12)
         self._ports_per_row.addItem("24  (1 rij)",     24)
+        self._ports_per_row.addItem("48  (1 rij)",     48)
         self._ports_per_row.addItem("3",                3)
         self._ports_per_row.addItem("4",                4)
         self._ports_per_row.addItem("6",                6)
@@ -258,7 +259,12 @@ class PlaceDeviceDialog(QDialog):
         self._back_ports.setValue(back)
         self._sfp_ports.setValue(sfp)
         total = max(front, back)
-        default_ppr = 24 if total > 12 else 12
+        if total > 24:
+            default_ppr = 24   # 48p switch: 2 rijen van 24
+        elif total > 12:
+            default_ppr = 24
+        else:
+            default_ppr = 12
         idx = self._ports_per_row.findData(default_ppr)
         if idx >= 0:
             self._ports_per_row.setCurrentIndex(idx)

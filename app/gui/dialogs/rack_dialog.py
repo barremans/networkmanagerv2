@@ -2,10 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/rack_dialog.py
 # Role:    Rack aanmaken en bewerken
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
 # Changes: 1.1.0 — Keuze nummering: 1 bovenaan of 1 onderaan (professioneel)
 #          1.2.0 — Uppercase invoer: naam automatisch naar hoofdletters
+#          1.3.0 — F7: ruimte-DDL toegevoegd — rack verplaatsen naar andere ruimte
+#                  Vereist rooms parameter met lijst van beschikbare ruimtes
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -18,10 +20,18 @@ from app.gui.dialogs.device_dialog import _bind_uppercase
 
 
 class RackDialog(QDialog):
-    def __init__(self, parent=None, rack: dict = None, room_id: str = ""):
+    def __init__(self, parent=None, rack: dict = None, room_id: str = "",
+                 rooms: list | None = None):
+        """
+        rack    — bestaand rack dict (bewerken) of None (aanmaken)
+        room_id — huidige ruimte-ID
+        rooms   — F7: lijst van alle beschikbare ruimtes [{id, name}, ...]
+                  Als opgegeven: toont DDL om rack te verplaatsen naar andere ruimte
+        """
         super().__init__(parent)
         self._rack    = rack or {}
         self._room_id = room_id
+        self._rooms   = rooms or []   # F7
         self._result  = None
         self.setWindowTitle(t("label_rack"))
         self.setMinimumWidth(380)
@@ -53,7 +63,21 @@ class RackDialog(QDialog):
         form.addRow(t("label_name")           + " *:", self._name)
         form.addRow(t("label_units")          + ":",   self._units)
         form.addRow(t("rack_numbering_label") + ":",   self._numbering)
-        form.addRow(t("label_notes")          + ":",   self._notes)
+
+        # F7 — ruimte-DDL: alleen tonen als meerdere ruimtes beschikbaar
+        if len(self._rooms) > 1:
+            self._ddl_room = QComboBox()
+            for room in self._rooms:
+                self._ddl_room.addItem(room["name"], room["id"])
+            # Huidige ruimte vooraf selecteren
+            idx = self._ddl_room.findData(self._room_id)
+            if idx >= 0:
+                self._ddl_room.setCurrentIndex(idx)
+            form.addRow(t("label_room") + ":", self._ddl_room)
+        else:
+            self._ddl_room = None
+
+        form.addRow(t("label_notes") + ":", self._notes)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
@@ -81,12 +105,18 @@ class RackDialog(QDialog):
         if not name:
             QMessageBox.warning(self, t("label_rack"), t("label_name") + " is verplicht.")
             return
+
+        # F7 — gebruik gekozen ruimte uit DDL als die aanwezig is
+        new_room_id = self._room_id
+        if self._ddl_room is not None:
+            new_room_id = self._ddl_room.currentData()
+
         self._result = {
             "id":          self._rack.get("id", ""),
-            "room_id":     self._room_id or self._rack.get("room_id", ""),
+            "room_id":     new_room_id,
             "name":        name,
             "total_units": self._units.value(),
-            "numbering":   self._numbering.currentData(),   # "top_down" | "bottom_up"
+            "numbering":   self._numbering.currentData(),
             "notes":       self._notes.toPlainText().strip(),
             "slots":       self._rack.get("slots", []),
         }

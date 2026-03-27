@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.9.0
+# Version: 1.10.0
 # Author:  Barremans
-# Changes: F5 — read_only_mode toegevoegd aan _DEFAULT_SETTINGS
+# Changes: G4 — floorplan opslag helpers toegevoegd
+#               get_floorplans_path(), get_floorplans_dir()
+#               last_folders["floorplan_svg"] toegevoegd
+#          F5 — read_only_mode toegevoegd aan _DEFAULT_SETTINGS
 #               get_read_only_mode(), set_read_only_mode()
 #          F2 — Device types configureerbaar via settings.json
 #               _DEFAULT_DEVICE_TYPES, load/save/get_device_type_*
@@ -30,6 +33,7 @@ import sys
 import shutil
 from datetime import datetime
 
+
 # ---------------------------------------------------------------------------
 # Pad bepaling — v1.5.0
 #
@@ -40,8 +44,8 @@ from datetime import datetime
 #      (treedt op bij installatie in C:\Program Files\)
 # ---------------------------------------------------------------------------
 
-_APP_NAME    = "Networkmap_Creator"
-_FIXED_DATA  = r"C:\Networkmap_Creator"   # Vaste datamap — altijd schrijfbaar
+_APP_NAME   = "Networkmap_Creator"
+_FIXED_DATA = r"C:\Networkmap_Creator"   # Vaste datamap — altijd schrijfbaar
 
 
 def _get_base_dir() -> str:
@@ -83,10 +87,12 @@ def _get_base_dir() -> str:
     return appdata_dir
 
 
-_BASE_DIR      = _get_base_dir()
-_DATA_DIR      = os.path.join(_BASE_DIR, "data")
-_SETTINGS_FILE = os.path.join(_DATA_DIR, "settings.json")
-_NETWORK_FILE  = os.path.join(_DATA_DIR, "network_data.json")
+_BASE_DIR        = _get_base_dir()
+_DATA_DIR        = os.path.join(_BASE_DIR, "data")
+_SETTINGS_FILE   = os.path.join(_DATA_DIR, "settings.json")
+_NETWORK_FILE    = os.path.join(_DATA_DIR, "network_data.json")
+_FLOORPLANS_FILE = os.path.join(_DATA_DIR, "floorplans.json")
+_FLOORPLANS_DIR  = os.path.join(_DATA_DIR, "floorplans")
 
 # Verplichte sleutels voor validatie
 _REQUIRED_SETTINGS_KEYS = ["app_version", "language", "backup", "ui", "last_folders"]
@@ -95,67 +101,67 @@ _REQUIRED_NETWORK_KEYS  = ["version", "sites", "devices", "ports", "endpoints", 
 # Ingebouwde eindapparaat-types
 _DEFAULT_ENDPOINT_TYPES = [
     {"key": "pc",           "label_nl": "PC",           "label_en": "PC"},
-    {"key": "laptop",       "label_nl": "Laptop",        "label_en": "Laptop"},
-    {"key": "thin_client",  "label_nl": "Thin Client",   "label_en": "Thin Client"},
-    {"key": "printer",      "label_nl": "Printer",       "label_en": "Printer"},
-    {"key": "plotter",      "label_nl": "Plotter",       "label_en": "Plotter"},
-    {"key": "scanner",      "label_nl": "Scanner",       "label_en": "Scanner"},
-    {"key": "all_in_one",   "label_nl": "All-in-one",    "label_en": "All-in-One"},
-    {"key": "phone",        "label_nl": "IP-telefoon",   "label_en": "IP Phone"},
-    {"key": "ip_camera",    "label_nl": "IP-camera",     "label_en": "IP Camera"},
-    {"key": "access_point", "label_nl": "Access Point",  "label_en": "Access Point"},
-    {"key": "nas",          "label_nl": "NAS",           "label_en": "NAS"},
-    {"key": "other",        "label_nl": "Ander",         "label_en": "Other"},
+    {"key": "laptop",       "label_nl": "Laptop",       "label_en": "Laptop"},
+    {"key": "thin_client",  "label_nl": "Thin Client",  "label_en": "Thin Client"},
+    {"key": "printer",      "label_nl": "Printer",      "label_en": "Printer"},
+    {"key": "plotter",      "label_nl": "Plotter",      "label_en": "Plotter"},
+    {"key": "scanner",      "label_nl": "Scanner",      "label_en": "Scanner"},
+    {"key": "all_in_one",   "label_nl": "All-in-one",   "label_en": "All-in-One"},
+    {"key": "phone",        "label_nl": "IP-telefoon",  "label_en": "IP Phone"},
+    {"key": "ip_camera",    "label_nl": "IP-camera",    "label_en": "IP Camera"},
+    {"key": "access_point", "label_nl": "Access Point", "label_en": "Access Point"},
+    {"key": "nas",          "label_nl": "NAS",          "label_en": "NAS"},
+    {"key": "other",        "label_nl": "Ander",        "label_en": "Other"},
 ]
 
 # Ingebouwde device-types — F2
 _DEFAULT_DEVICE_TYPES = [
-    {"key": "patch_panel",  "label_nl": "Patchpanel",       "label_en": "Patch Panel",
+    {"key": "patch_panel",       "label_nl": "Patchpanel",       "label_en": "Patch Panel",
      "front_ports": 24, "back_ports": 24},
-    {"key": "switch",       "label_nl": "Switch",           "label_en": "Switch",
+    {"key": "switch",            "label_nl": "Switch",           "label_en": "Switch",
      "front_ports": 24, "back_ports": 0},
-    {"key": "router",       "label_nl": "Router",           "label_en": "Router",
+    {"key": "router",            "label_nl": "Router",           "label_en": "Router",
      "front_ports": 4,  "back_ports": 0},
-    {"key": "firewall",     "label_nl": "Firewall",         "label_en": "Firewall",
+    {"key": "firewall",          "label_nl": "Firewall",         "label_en": "Firewall",
      "front_ports": 4,  "back_ports": 0},
-    {"key": "server",       "label_nl": "Server",           "label_en": "Server",
+    {"key": "server",            "label_nl": "Server",           "label_en": "Server",
      "front_ports": 2,  "back_ports": 0},
-    {"key": "kvm",          "label_nl": "KVM-switch",       "label_en": "KVM Switch",
+    {"key": "kvm",               "label_nl": "KVM-switch",       "label_en": "KVM Switch",
      "front_ports": 8,  "back_ports": 0},
-    {"key": "ups",          "label_nl": "UPS",              "label_en": "UPS",
+    {"key": "ups",               "label_nl": "UPS",              "label_en": "UPS",
      "front_ports": 0,  "back_ports": 0},
-    {"key": "pdu",          "label_nl": "PDU",              "label_en": "PDU",
+    {"key": "pdu",               "label_nl": "PDU",              "label_en": "PDU",
      "front_ports": 0,  "back_ports": 0},
-    {"key": "media_conv",   "label_nl": "Mediaconverter",   "label_en": "Media Converter",
+    {"key": "media_conv",        "label_nl": "Mediaconverter",   "label_en": "Media Converter",
      "front_ports": 2,  "back_ports": 0},
-    {"key": "other",        "label_nl": "Ander",            "label_en": "Other",
+    {"key": "other",             "label_nl": "Ander",            "label_en": "Other",
      "front_ports": 0,  "back_ports": 0},
-    {"key": "cable_management", "label_nl": "Kabelgoot",    "label_en": "Cable Management",
+    {"key": "cable_management",  "label_nl": "Kabelgoot",        "label_en": "Cable Management",
      "front_ports": 0,  "back_ports": 0},
-    {"key": "distribution_plug", "label_nl": "Verdeelstekker", "label_en": "Distribution Plug",
+    {"key": "distribution_plug", "label_nl": "Verdeelstekker",   "label_en": "Distribution Plug",
      "front_ports": 0,  "back_ports": 0},
-    {"key": "fiber",        "label_nl": "Fiber converter",  "label_en": "Fiber Converter",
+    {"key": "fiber",             "label_nl": "Fiber converter",  "label_en": "Fiber Converter",
      "front_ports": 2,  "back_ports": 2},
-    {"key": "nuc1",         "label_nl": "NUC / Mini-PC",    "label_en": "NUC / Mini-PC",
+    {"key": "nuc1",              "label_nl": "NUC / Mini-PC",    "label_en": "NUC / Mini-PC",
      "front_ports": 2,  "back_ports": 0},
-    {"key": "sonos_server", "label_nl": "Sonos server",     "label_en": "Sonos Server",
+    {"key": "sonos_server",      "label_nl": "Sonos server",     "label_en": "Sonos Server",
      "front_ports": 1,  "back_ports": 0},
 ]
 
 # Ingebouwde wandpunt locatie types — configureerbaar
 _DEFAULT_OUTLET_LOCATIONS = [
-    {"key": "links",       "label_nl": "Links",        "label_en": "Left"},
-    {"key": "rechts",      "label_nl": "Rechts",       "label_en": "Right"},
-    {"key": "voor",        "label_nl": "Voor",         "label_en": "Front"},
-    {"key": "achter",      "label_nl": "Achter",       "label_en": "Rear"},
-    {"key": "boven",       "label_nl": "Boven",        "label_en": "Top"},
-    {"key": "onder",       "label_nl": "Onder",        "label_en": "Bottom"},
-    {"key": "hoek",        "label_nl": "Hoek",         "label_en": "Corner"},
-    {"key": "plafond",     "label_nl": "Plafond",      "label_en": "Ceiling"},
-    {"key": "vloer",       "label_nl": "Vloer",        "label_en": "Floor"},
-    {"key": "bureau",      "label_nl": "Bureau",       "label_en": "Desk"},
-    {"key": "kast",        "label_nl": "Kast",         "label_en": "Cabinet"},
-    {"key": "other",       "label_nl": "Ander",        "label_en": "Other"},
+    {"key": "links",    "label_nl": "Links",    "label_en": "Left"},
+    {"key": "rechts",   "label_nl": "Rechts",   "label_en": "Right"},
+    {"key": "voor",     "label_nl": "Voor",     "label_en": "Front"},
+    {"key": "achter",   "label_nl": "Achter",   "label_en": "Rear"},
+    {"key": "boven",    "label_nl": "Boven",    "label_en": "Top"},
+    {"key": "onder",    "label_nl": "Onder",    "label_en": "Bottom"},
+    {"key": "hoek",     "label_nl": "Hoek",     "label_en": "Corner"},
+    {"key": "plafond",  "label_nl": "Plafond",  "label_en": "Ceiling"},
+    {"key": "vloer",    "label_nl": "Vloer",    "label_en": "Floor"},
+    {"key": "bureau",   "label_nl": "Bureau",   "label_en": "Desk"},
+    {"key": "kast",     "label_nl": "Kast",     "label_en": "Cabinet"},
+    {"key": "other",    "label_nl": "Ander",    "label_en": "Other"},
 ]
 
 # Fallback defaults bij ontbrekend of corrupt settings.json
@@ -180,15 +186,16 @@ _DEFAULT_SETTINGS = {
         "export_image":  "",
         "export_pdf":    "",
         "export_report": "",
+        "floorplan_svg": "",
     },
     "last_opened_site": "",
     "endpoint_types": _DEFAULT_ENDPOINT_TYPES,
-    "device_types":   _DEFAULT_DEVICE_TYPES,
+    "device_types": _DEFAULT_DEVICE_TYPES,
     "outlet_locations": _DEFAULT_OUTLET_LOCATIONS,
     # F3 — netwerkdata locatie
     "network_data": {
         "use_network_path": False,
-        "network_path":     "",
+        "network_path": "",
     },
     # F5 — toegangsmodus: standaard read-only bij opstarten
     "read_only_mode": True,
@@ -227,6 +234,7 @@ def _save_json(path: str, data: dict) -> bool:
         os.makedirs(os.path.dirname(path), exist_ok=True)
     except OSError:
         pass
+
     tmp_path = path + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -249,9 +257,11 @@ def _validate_keys(data: dict, required_keys: list) -> bool:
 def _make_backup(path: str):
     if not os.path.exists(path):
         return
-    timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base, ext   = os.path.splitext(path)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base, ext = os.path.splitext(path)
     backup_path = f"{base}_backup_{timestamp}{ext}"
+
     try:
         shutil.copy2(path, backup_path)
     except OSError:
@@ -275,6 +285,16 @@ def load_settings() -> dict:
         if key not in data:
             data[key] = value
             changed = True
+
+    # Zorg dat nested last_folders sleutels ook bestaan
+    if "last_folders" not in data or not isinstance(data["last_folders"], dict):
+        data["last_folders"] = dict(_DEFAULT_SETTINGS["last_folders"])
+        changed = True
+    else:
+        for key, value in _DEFAULT_SETTINGS["last_folders"].items():
+            if key not in data["last_folders"]:
+                data["last_folders"][key] = value
+                changed = True
 
     if changed:
         _save_json(_SETTINGS_FILE, data)
@@ -366,7 +386,7 @@ def is_network_path_available(path: str) -> bool:
 
 def get_network_data_path() -> str:
     settings = load_settings()
-    nd_cfg   = settings.get("network_data", {})
+    nd_cfg = settings.get("network_data", {})
 
     if nd_cfg.get("use_network_path", False):
         net_path = nd_cfg.get("network_path", "").strip()
@@ -378,13 +398,13 @@ def get_network_data_path() -> str:
 
 def get_network_data_source_label() -> tuple[str, bool]:
     settings = load_settings()
-    nd_cfg   = settings.get("network_data", {})
+    nd_cfg = settings.get("network_data", {})
 
     if nd_cfg.get("use_network_path", False):
         net_path = nd_cfg.get("network_path", "").strip()
         if net_path and is_network_path_available(net_path):
             return net_path, True
-        elif net_path:
+        if net_path:
             return "Lokaal (fallback: netwerk niet bereikbaar)", False
 
     return "Lokaal", False
@@ -397,6 +417,33 @@ def get_settings_path() -> str:
 def get_data_dir() -> str:
     """Geeft de actieve data map terug — handig voor diagnostiek."""
     return _DATA_DIR
+
+
+# ---------------------------------------------------------------------------
+# Floorplans pad — G4
+# ---------------------------------------------------------------------------
+
+def get_floorplans_path() -> str:
+    """
+    Geeft het pad naar floorplans.json terug.
+    Bestand wordt automatisch aangemaakt indien het nog niet bestaat.
+    """
+    _ensure_data_dir()
+
+    if not os.path.exists(_FLOORPLANS_FILE):
+        _save_json(_FLOORPLANS_FILE, {"floorplans": []})
+
+    return _FLOORPLANS_FILE
+
+
+def get_floorplans_dir() -> str:
+    """
+    Geeft de map terug waar SVG floorplan-bestanden bewaard worden.
+    Map wordt automatisch aangemaakt indien nodig.
+    """
+    _ensure_data_dir()
+    os.makedirs(_FLOORPLANS_DIR, exist_ok=True)
+    return _FLOORPLANS_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -433,8 +480,6 @@ def save_network_data(data: dict) -> bool:
     return _save_json(path, data)
 
 
-
-
 # ---------------------------------------------------------------------------
 # Wandpunt locatie types (configureerbaar)
 # ---------------------------------------------------------------------------
@@ -463,18 +508,19 @@ def get_outlet_location_label(key: str, lang: str = "nl") -> str:
 # ---------------------------------------------------------------------------
 
 def get_last_folder(key: str) -> str:
-    """Geeft de laatste gebruikte map terug voor het gegeven export type."""
+    """Geeft de laatste gebruikte map terug voor het gegeven type."""
     settings = load_settings()
     return settings.get("last_folders", {}).get(key, "")
 
 
 def set_last_folder(key: str, path: str) -> None:
-    """Slaat de laatste gebruikte map op voor het gegeven export type."""
+    """Slaat de laatste gebruikte map op voor het gegeven type."""
     settings = load_settings()
-    if "last_folders" not in settings:
+    if "last_folders" not in settings or not isinstance(settings["last_folders"], dict):
         settings["last_folders"] = {}
     settings["last_folders"][key] = path
     save_settings(settings)
+
 
 # ---------------------------------------------------------------------------
 # Toegangsmodus — F5
@@ -490,10 +536,23 @@ def set_read_only_mode(read_only: bool) -> bool:
     return save_setting("read_only_mode", read_only)
 
 
+# ---------------------------------------------------------------------------
+# Validatie
+# ---------------------------------------------------------------------------
+
 def validate_network_data(data: dict) -> tuple[bool, str]:
     if not isinstance(data, dict):
         return False, "Geen geldig JSON object."
     for key in _REQUIRED_NETWORK_KEYS:
+        if key not in data:
+            return False, f"Verplichte sleutel ontbreekt: '{key}'"
+    return True, ""
+
+
+def validate_settings_data(data: dict) -> tuple[bool, str]:
+    if not isinstance(data, dict):
+        return False, "Geen geldig JSON object."
+    for key in _REQUIRED_SETTINGS_KEYS:
         if key not in data:
             return False, f"Verplichte sleutel ontbreekt: '{key}'"
     return True, ""

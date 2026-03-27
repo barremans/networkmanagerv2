@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.35.0
+# Version: 1.37.0
 # Author:  Barremans
-# Changes: B8 — Cross-side port highlight: gekoppelde front/back poort
+# Changes: 1.37.0 — G1/G2/G3: Grondplannen volledig geïntegreerd
+#                   Menu: Nieuw, Bekijk (met site-filter + DDL), Beheren
+#                   Context menu op wandpunt locatie: Bekijk grondplan
+#                   _show_floorplan_view: setParent ipv deleteLater (consistent)
+#          1.36.0 — G1/G2: basisintegratie menu + FloorplanView
 #                   van hetzelfde device ook highlighten bij trace
 #                   Lege poorten niet highlighten als trace geen externe
 #                   verbinding bevat (alleen patchpanel intern = leeg)
@@ -97,6 +101,7 @@ from app.services import search_service
 from app.services import import_export_service
 from app.services import backup_service
 from app.services import sync_service
+from app.services import floorplan_service          # G1/G2
 from app.services.logger import log_info, log_warning, log_error
 from app.services import export_renderer
 from app.services import report_generator
@@ -229,6 +234,20 @@ class MainWindow(QMainWindow):
 
         act_vlan_mgr_mb = self._menu_settings_mb.addAction("⚙  VLAN beheer")
         act_vlan_mgr_mb.triggered.connect(self._on_vlan_manager)
+
+        # ── Grondplannen menu — G1/G2/G3 ─────────────────────────────
+        self._menu_floorplan = mb.addMenu(t("menu_floorplan"))
+
+        act_fp_new = self._menu_floorplan.addAction(t("menu_floorplan_new"))
+        act_fp_new.triggered.connect(self._on_floorplan_new)
+
+        act_fp_view = self._menu_floorplan.addAction(t("menu_floorplan_view"))
+        act_fp_view.triggered.connect(self._on_floorplan_view)
+
+        self._menu_floorplan.addSeparator()
+
+        act_fp_manage = self._menu_floorplan.addAction(t("menu_floorplan_manage"))
+        act_fp_manage.triggered.connect(self._on_floorplan_manage)
 
         # ── Help menu ────────────────────────────────────────────────
         self._menu_help = mb.addMenu(t("menubar_help"))
@@ -549,9 +568,10 @@ class MainWindow(QMainWindow):
                     else f"🌐  {t('tree_wall_outlets')}"
                 ])
                 outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                    "type":    _TYPE_OUTLETS,
-                    "room_id": room["id"],
-                    "site_id": site["id"],
+                    "type":                _TYPE_OUTLETS,
+                    "room_id":             room["id"],
+                    "site_id":             site["id"],
+                    "outlet_location_key": room.get("outlet_location_key", ""),
                 })
                 for wo in outlets:
                     wo_item = QTreeWidgetItem([f"   {wo.get('name', wo['id']).upper()}"])
@@ -741,6 +761,15 @@ class MainWindow(QMainWindow):
             if not read_only:                              # F5
                 menu.addAction(t("ctx_new_outlet"),
                                lambda: self._new_wall_outlet(data["room_id"]))
+            # G3 — grondplan bekijken voor deze wandpunt locatie
+            menu.addSeparator()
+            menu.addAction(
+                f"🗺  {t('menu_floorplan_view')}",
+                lambda: self._on_floorplan_view_for_location(
+                    data.get("site_id", ""),
+                    data.get("outlet_location_key", ""),
+                )
+            )
 
         elif item_type == _TYPE_OUTLET:
             if not read_only:                              # F5
@@ -1667,14 +1696,50 @@ class MainWindow(QMainWindow):
         rack = self._find_rack(data["id"])
         if not rack:
             return
-        dlg = RackDialog(parent=self, rack=rack, room_id=data["room_id"])
+
+        # F7 — verzamel alle ruimtes van de huidige site voor de ruimte-DDL
+        rooms_in_site = []
+        site = self._find_site(data["site_id"])
+        if site:
+            rooms_in_site = [
+                {"id": r["id"], "name": r["name"]}
+                for r in site.get("rooms", [])
+            ]
+
+        dlg = RackDialog(parent=self, rack=rack, room_id=data["room_id"],
+                         rooms=rooms_in_site)
         if dlg.exec() and dlg.get_result():
-            rack.update(dlg.get_result())
+            result      = dlg.get_result()
+            old_room_id = data["room_id"]
+            new_room_id = result.get("room_id", old_room_id)
+
+            # F7 — verplaatsen naar andere ruimte indien gewijzigd
+            if new_room_id != old_room_id:
+                old_room = self._find_room(old_room_id)
+                new_room = self._find_room(new_room_id)
+                if old_room and new_room:
+                    old_room["racks"] = [
+                        r for r in old_room.get("racks", [])
+                        if r["id"] != rack["id"]
+                    ]
+                    rack.update(result)
+                    new_room.setdefault("racks", []).append(rack)
+                    self._save_and_backup()
+                    self._populate_tree()
+                    self._select_tree_item_by_id(data["id"])
+                    self.set_status(
+                        f"✓  {t('label_rack')} '{rack['name']}' "
+                        f"verplaatst naar '{new_room['name']}'."
+                    )
+                    return
+
+            # Geen verplaatsing — gewoon bijwerken
+            rack.update(result)
             self._save_and_backup()
             self._populate_tree()
             self._select_tree_item_by_id(data["id"])
             if isinstance(self._current_view, RackView):
-                room = self._find_room(data["room_id"])
+                room = self._find_room(new_room_id)
                 site = self._find_site(data["site_id"])
                 if room and site:
                     self._show_rack_view(rack, room, site)
@@ -2095,6 +2160,152 @@ class MainWindow(QMainWindow):
                 from app.gui.vlan_report_view import VlanReportView
                 if isinstance(self._current_view, VlanReportView):
                     self._current_view.refresh(self._data)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Grondplannen — G1/G2/G3
+    # ------------------------------------------------------------------
+
+    def _on_floorplan_new(self):
+        """G1 — Nieuw grondplan koppelen aan site + wandpunt locatie."""
+        if settings_storage.get_read_only_mode():
+            self.set_status(t("access_mode_readonly_tooltip"))
+            return
+        from app.gui.dialogs.floorplan_dialog import FloorplanDialog
+        dlg = FloorplanDialog(parent=self, data=self._data)
+        if dlg.exec():
+            result = dlg.get_result()
+            if result:
+                self._show_floorplan_view(result)
+                self.set_status(f"✓  {t('msg_floorplan_created')}")
+
+    def _on_floorplan_view(self):
+        """G2 — Grondplan bekijken, gefilterd op huidige site indien bekend."""
+        from PySide6.QtWidgets import QInputDialog
+
+        # Bepaal site_id + outlet_location_key uit huidige boomselectie
+        site_id     = None
+        loc_key     = None
+        data = self._selected_tree_data()
+        if data:
+            dtype = data.get("type", "")
+            site_id = data.get("site_id") or (data.get("id") if dtype == _TYPE_SITE else None)
+            if dtype == _TYPE_OUTLETS:
+                loc_key = data.get("outlet_location_key", "")
+
+        # Laad geldige grondplannen
+        all_fp = floorplan_service.load_floorplans().get("floorplans", [])
+        valid_fp = [
+            fp for fp in all_fp
+            if fp.get("outlet_location_key", "").strip()
+            and floorplan_service.svg_exists(fp)
+        ]
+
+        if not valid_fp:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, t("title_floorplan_view"),
+                                    t("msg_floorplan_not_found"))
+            return
+
+        # Filter op site indien bekend
+        candidates = valid_fp
+        if site_id:
+            site_fp = [fp for fp in valid_fp if fp.get("site_id") == site_id]
+            if site_fp:
+                candidates = site_fp
+
+        # Filter op locatie indien bekend
+        if loc_key:
+            loc_fp = [fp for fp in candidates if fp.get("outlet_location_key") == loc_key]
+            if loc_fp:
+                self._show_floorplan_view(loc_fp[0])
+                return
+
+        # Meerdere kandidaten — laat gebruiker kiezen
+        if len(candidates) == 1:
+            self._show_floorplan_view(candidates[0])
+            return
+
+        lang = settings_storage.load_settings().get("language", "nl")
+        locs = settings_storage.load_outlet_locations()
+        loc_labels = {
+            loc["key"]: loc.get(f"label_{lang}") or loc.get("label_nl") or loc["key"]
+            for loc in locs
+        }
+
+        items = []
+        for fp in candidates:
+            sname = next(
+                (s["name"] for s in self._data.get("sites", [])
+                 if s["id"] == fp.get("site_id")), "-"
+            )
+            lbl = loc_labels.get(fp.get("outlet_location_key", ""),
+                                  fp.get("outlet_location_key", "-"))
+            items.append(f"{sname}  —  {lbl}")
+
+        choice, ok = QInputDialog.getItem(
+            self, t("title_floorplan_view"), t("menu_floorplan_view") + ":",
+            items, 0, False
+        )
+        if ok and choice in items:
+            self._show_floorplan_view(candidates[items.index(choice)])
+
+    def _on_floorplan_view_for_location(self, site_id: str, loc_key: str):
+        """G3 — Grondplan bekijken voor specifieke site + wandpunt locatie."""
+        fp = floorplan_service.get_floorplan_for_location(site_id, loc_key)
+        if fp and floorplan_service.svg_exists(fp):
+            self._show_floorplan_view(fp)
+        else:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, t("title_floorplan_view"),
+                                    t("msg_floorplan_not_found"))
+
+    def _on_floorplan_manage(self):
+        """G3 — Grondplannen beheren (naam, site, locatie, verwijderen)."""
+        from app.gui.dialogs.floorplan_manage_dialog import FloorplanManageDialog
+        dlg = FloorplanManageDialog(parent=self, data=self._data)
+        dlg.exec()
+        # Als huidige view een grondplan is: herlaad na mogelijke wijzigingen
+        if dlg.has_changes():
+            from app.gui.floorplan_view import FloorplanView
+            if isinstance(self._current_view, FloorplanView):
+                self._current_view._refresh_from_storage()
+
+    def _show_floorplan_view(self, floorplan: dict):
+        """Toon FloorplanView in het centrale paneel."""
+        from app.gui.floorplan_view import FloorplanView
+
+        # Verwijder huidige centrale view — setParent(None) voor onmiddellijke verwijdering
+        while self._mid_layout.count():
+            item = self._mid_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+        view = FloorplanView(
+            floorplan=floorplan,
+            data=self._data,
+            parent=self._mid_frame,
+        )
+        view.request_map_point.connect(
+            lambda fp_id, svg_pt: self._refresh_floorplan_view()
+        )
+        self._mid_layout.addWidget(view)
+        self._current_view = view
+
+        site_name = next(
+            (s["name"] for s in self._data.get("sites", [])
+             if s["id"] == floorplan.get("site_id")), "-"
+        )
+        self.set_status(f"🗺  {t('title_floorplan_view')}  —  {site_name}")
+
+    def _refresh_floorplan_view(self):
+        """Herlaad huidige FloorplanView na mapping wijziging."""
+        from app.gui.floorplan_view import FloorplanView
+        if isinstance(self._current_view, FloorplanView):
+            try:
+                self._current_view._refresh_from_storage()
             except Exception:
                 pass
 
@@ -2611,7 +2822,10 @@ class MainWindow(QMainWindow):
                 return
 
             source = settings_storage.get_network_data_path()
-            ok, err = backup_service.create_backup(source, backup_cfg)
+            ok, err = backup_service.create_backup(
+                source, backup_cfg,
+                settings_path=settings_storage.get_settings_path()  # B10
+            )
             if ok:
                 log_info(f"Backup aangemaakt naar: {network_path}")
             else:
@@ -2657,6 +2871,7 @@ class MainWindow(QMainWindow):
         self._menu_inex.setTitle(t("menubar_inexport"))
         self._menu_report.setTitle(t("menubar_report"))
         self._menu_settings_mb.setTitle("Settings")
+        self._menu_floorplan.setTitle(t("menu_floorplan"))   # G1/G2
         self._menu_help.setTitle(t("menubar_help"))
         self._act_new.setText(t("menu_new"))
         self._act_edit.setText(t("menu_edit"))
@@ -2717,7 +2932,10 @@ class MainWindow(QMainWindow):
                     return
                 elif clicked == btn_yes:
                     source = settings_storage.get_network_data_path()
-                    ok, err = backup_service.create_backup(source, backup_cfg)
+                    ok, err = backup_service.create_backup(
+                        source, backup_cfg,
+                        settings_path=settings_storage.get_settings_path()  # B10
+                    )
                     if ok:
                         log_info("Backup bij afsluiten aangemaakt.")
                     else:

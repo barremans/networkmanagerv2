@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.12.0
+# Version: 1.15.0
 # Author:  Barremans
 # Changes: F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
@@ -20,6 +20,9 @@
 #          1.11.0 — F3: backup_on_exit_*, sync_* sleutels toegevoegd (NL + EN)
 #          1.12.0 — F5: settings_group_access, settings_access_*,
 #                       access_mode_readonly_tooltip, access_mode_rw_tooltip (NL + EN)
+#          1.13.0 — G4: floorplan vertalingen toegevoegd (NL + EN)
+#          1.14.0 — G4: floorplan SVG detectie/waarschuwing vertalingen toegevoegd
+#          1.15.0 — G4: floorplan_action_fit en floorplan_validation_ok toegevoegd
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -40,10 +43,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "menu_connect":             "Verbinding",
         "menu_import":              "Importeren",
         "menu_export":              "Exporteren",
-        "menu_export_image":        "Exporteer afbeelding",          # G2
-        "menu_export_pdf":          "Exporteer PDF",                 # G1
-        "menu_export_report":       "Rapport (Word)",                # G3
+        "menu_export_image":        "Exporteer afbeelding",
+        "menu_export_pdf":          "Exporteer PDF",
+        "menu_export_report":       "Rapport (Word)",
         "menu_settings":            "Instellingen",
+
+        # Floorplans — G4
+        "menu_floorplan":               "Grondplannen",
+        "menu_floorplan_new":           "Nieuw grondplan...",
+        "menu_floorplan_view":          "Bekijk grondplan",
+        "menu_floorplan_manage":        "Grondplannen beheren",
 
         # Menubar — H1
         "menubar_file":             "Bestand",
@@ -112,6 +121,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_max_backups":        "Max. backups bewaren",
         "label_rack_unit_height":   "U-hoogte (pixels)",
         "label_rack_unit_width":    "Rack breedte (pixels)",
+
+        # Floorplan velden — G4
+        "label_floorplan_svg":          "SVG bestand",
+        "label_floorplan_site":         "Site",
+        "label_floorplan_room":         "Ruimte",
 
         # Kabeltype DDL
         "cable_utp_cat5e":          "UTP Cat5e",
@@ -186,16 +200,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_connect_select_a":     "Selecteer eerste poort...",
         "msg_connect_select_b":     "Selecteer tweede poort...",
         "msg_connect_cancel":       "Verbindingsmodus geannuleerd.",
-        "msg_connect_cancelled":    "Verbindingsmodus geannuleerd (ESC).",   # F1
+        "msg_connect_cancelled":    "Verbindingsmodus geannuleerd (ESC).",
         "msg_connect_done":         "Verbinding aangemaakt.",
         "msg_search_no_results":    "Geen resultaten gevonden.",
         "msg_language_restart":     "Taalwijziging wordt direct toegepast.",
-        "msg_image_exported":       "Afbeelding opgeslagen",                 # G2
-        "msg_image_export_failed":  "Afbeelding opslaan mislukt",            # G2
-        "msg_pdf_exported":         "PDF opgeslagen",                        # G1
-        "msg_pdf_export_failed":    "PDF opslaan mislukt",                   # G1
-        "msg_report_exported":      "Rapport opgeslagen",                    # G3
-        "msg_report_export_failed": "Rapport opslaan mislukt",               # G3
+        "msg_image_exported":       "Afbeelding opgeslagen",
+        "msg_image_export_failed":  "Afbeelding opslaan mislukt",
+        "msg_pdf_exported":         "PDF opgeslagen",
+        "msg_pdf_export_failed":    "PDF opslaan mislukt",
+        "msg_report_exported":      "Rapport opgeslagen",
+        "msg_report_export_failed": "Rapport opslaan mislukt",
+
+        # Floorplan statusberichten — G4
+        "msg_floorplan_created":        "Grondplan toegevoegd.",
+        "msg_floorplan_exists":         "Er bestaat al een grondplan voor deze ruimte.",
+        "msg_floorplan_not_found":      "Geen grondplan gevonden.",
+        "msg_floorplan_deleted":        "Grondplan verwijderd.",
+        "msg_floorplan_point_selected": "SVG punt geselecteerd",
+        "msg_floorplan_mapping_saved":  "Koppeling opgeslagen",
+        "msg_floorplan_detected_points": "{count} punt(en) gedetecteerd: {preview}{extra}",
+        "msg_floorplan_detected_zero":  "0 punt(en) gedetecteerd",
+        "msg_floorplan_no_points_warning": "Er werden geen herkenbare SVG-puntlabels gevonden. Je kan dit grondplan wel opslaan, maar mapping zal pas handig werken als labels zoals M1, M2, WO1, WP1 ... aanwezig zijn.",
 
         # Titels vensters / dialogs
         "title_settings":           "Instellingen",
@@ -216,6 +241,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "title_wire_detail":        "Verbindingsdetail",
         "title_wall_outlets":       "Wandpunten",
 
+        # Floorplan titels — G4
+        "title_floorplan_new":          "Nieuw grondplan",
+        "title_floorplan_view":         "Grondplan",
+        "floorplan_mapping_title":      "Koppel wandpunt",
+
         # Boom (tree view)
         "tree_wall_outlets":        "Wandpunten",
         "tree_no_endpoint":         "(geen eindapparaat)",
@@ -230,13 +260,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "trace_no_connection":      "Geen verbinding op deze poort.",
         "trace_internal":           "Interne doorverbinding",
 
+        # Floorplan labels — G4
+        "floorplan_tab_selection":       "Selectie",
+        "floorplan_tab_mapping":         "Koppelingen",
+        "floorplan_tab_trace":           "Trace",
+        "floorplan_tab_validation":      "Validatie",
+        "floorplan_mapping_svg_point":   "SVG punt",
+        "floorplan_mapping_outlet":      "Wandpunt",
+        "floorplan_mapping_assign":      "Koppelen",
+        "floorplan_mapping_remove":      "Koppeling verwijderen",
+        "floorplan_validation_unmapped": "Niet gekoppelde punten",
+        "floorplan_validation_duplicate": "Dubbele koppelingen",
+        "floorplan_validation_missing_svg": "SVG bestand ontbreekt",
+        "floorplan_validation_ok":       "OK",
+        "floorplan_action_fit":          "Passend weergeven",
+
         # Import/export
         "import_mode_replace":      "Vervangen",
         "import_mode_merge":        "Samenvoegen",
         "import_mode_label":        "Importmodus",
         "export_filename_prefix":   "networkmap_export",
 
-        # Export renderer — kolommen (G1+G2)
+        # Export renderer — kolommen
         "export_table_title":       "Aansluitingstabel",
         "export_col_port":          "Poort",
         "export_col_side":          "Zijde",
@@ -274,7 +319,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "err_backup_path_required": "Backup is ingeschakeld maar er is geen pad ingesteld.",
         "err_corrupt_data":         "Databestand is corrupt of onleesbaar.",
         "err_save_failed":          "Opslaan mislukt. Controleer de schijfruimte.",
-        "err_ds_path_required":     "Netwerkdata is ingeschakeld maar er is geen pad ingesteld.",  # F3
+        "err_ds_path_required":     "Netwerkdata is ingeschakeld maar er is geen pad ingesteld.",
 
         # Status / info berichten
         "msg_ready":                "Klaar.",
@@ -294,13 +339,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_tab_backup":          "💾  Backup",
         "settings_tab_display":         "🖥  Weergave",
         "settings_tab_endpoints":       "🖥  Eindapparaten",
-        "settings_tab_device_types":    "🗄  Device types",      # F2
+        "settings_tab_device_types":    "🗄  Device types",
 
         # Settings — groepen algemeen
-        "settings_group_language":      "Taal",                  # F3
-        "settings_group_datasource":    "Databron",              # F3
+        "settings_group_language":      "Taal",
+        "settings_group_datasource":    "Databron",
 
-        # Settings — databron (F3)
+        # Settings — databron
         "settings_ds_use_network":      "Netwerkpad gebruiken als databron",
         "settings_ds_hint":             "Als het netwerkpad niet bereikbaar is, wordt automatisch teruggevallen op de lokale data.",
         "settings_ds_browse_title":     "Databron map kiezen",
@@ -318,7 +363,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_backup_test":     "Test",
         "settings_unit_height":     "Rack unit hoogte:",
         "settings_unit_hint":       "Wijzigingen zijn zichtbaar na herstart.",
-        # Settings — standaard exportmap — H1d
         "settings_export_folder":             "Standaard exportmap",
         "settings_export_folder_placeholder": "Kies een map...",
         "settings_export_folder_hint":        "Exportbestanden worden hier standaard opgeslagen. Leeg = elke keer vragen.",
@@ -341,7 +385,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_ep_restore":          "Standaard herstellen",
         "settings_ep_restore_confirm":  "Alle eigen types verwijderen en standaardlijst herstellen?",
 
-        # Settings — device types (F2)
+        # Settings — device types
         "settings_dt_hint":             "Beheer de types netwerkdevices. De FRONT/BACK waarden zijn de standaard poorttelling bij het aanmaken van een nieuw device.",
         "settings_dt_restore":          "Standaardlijst herstellen",
         "settings_dt_restore_confirm":  "Alle wijzigingen gaan verloren. Doorgaan?",
@@ -393,7 +437,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_edit_outlet":          "✏  Wandpunt bewerken",
         "ctx_delete_outlet":        "🗑  Wandpunt verwijderen",
 
-        # Site wandpunten-overzicht (E3)
+        # Site wandpunten-overzicht
         "tree_site_outlets":            "Alle wandpunten",
         "site_outlets_title":           "Wandpunten overzicht",
         "site_outlets_room":            "Ruimte",
@@ -401,25 +445,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "site_outlets_trace":           "Trace",
         "site_outlets_empty":           "Geen wandpunten gevonden in deze site.",
 
-        # Outlet locator (E3)
+        # Outlet locator
         "menu_outlet_locator":          "🌐  Wandpunten zoeken",
         "outlet_filter_placeholder":    "Filter op naam of locatie...",
         "outlet_no_trace":              "Geen verbinding",
         "outlet_locator_choose_room":   "← Kies een ruimte om wandpunten te tonen",
         "outlet_locator_no_outlets":    "Geen wandpunten gevonden in deze ruimte",
 
-        # Poort context menu + verbinding met wandpunt (E3)
+        # Poort context menu + verbinding met wandpunt
         "ctx_connect_to_outlet":        "🌐  Verbinden met wandpunt...",
         "ctx_disconnect_port":          "✂  Verbinding verwijderen",
         "dlg_connect_outlet_title":     "Poort verbinden met wandpunt",
         "err_no_outlet_selected":       "Selecteer eerst een wandpunt.",
         "warn_outlet_already_connected": "Dit wandpunt is al verbonden. Toch doorgaan?",
 
-        # Cross-rack trace (E5 + B2)
+        # Cross-rack trace
         "trace_racks":                  "Racks in trace",
         "trace_cross_rack":             "Cross-rack",
 
-        # Backup bij afsluiten + sync (F3)
+        # Backup bij afsluiten + sync
         "backup_on_exit_title":         "Backup bij afsluiten",
         "backup_on_exit_msg":           "Er zijn wijzigingen aangebracht. Wilt u een backup maken voor u afsluit?",
         "backup_on_exit_yes":           "💾  Backup maken",
@@ -431,18 +475,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "sync_pull_done":               "↓  Netwerkversie geladen (nieuwer dan lokaal).",
         "sync_unavailable":             "⚠  Netwerk niet bereikbaar — lokaal actief.",
 
-        # --- Fase D: update check bij opstarten ---
+        # Update check
         "update_check_url":         "Update check URL",
         "update_check_url_hint":    "Leeg = standaard GitHub URL gebruiken.",
         "update_available_title":   "Update beschikbaar",
         "update_available_msg":     "Versie {version} is beschikbaar.\nWil je naar GitHub gaan om te downloaden?",
         "update_goto_github":       "Naar GitHub",
         "update_later":             "Later",
-        
-        # --- Feature and bug report
+
+        # Rapporteren
         "menubar_report":           "Rapporteren",
         "menu_report_bug":          "🐞 Bug melden...",
         "menu_report_feature":      "✨ Feature aanvragen...",
+        "menu_report_cases":        "📋 Open cases",
+
         "report_dialog_title":      "Bug of Feature melden",
         "report_label_type":        "Type melding:",
         "report_type_bug":          "Bugmelding",
@@ -463,64 +509,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "report_err_no_connection": "Geen internetverbinding.",
         "report_err_github":        "GitHub fout:",
         "report_err_unknown":       "Onbekende fout:",
-        
-        # --- Rapporteren menu ---
-        "menubar_report":             "Rapporteren",
-        "menu_report_bug":            "🐞 Bug melden...",
-        "menu_report_feature":        "✨ Feature aanvragen...",
-        "menu_report_cases":          "📋 Open cases",
 
-        # --- BugReportDialog ---
-        "report_dialog_title":        "Bug of Feature melden",
-        "report_label_type":          "Type melding:",
-        "report_type_bug":            "Bugmelding",
-        "report_type_feature":        "Feature-aanvraag",
-        "report_type_label":          "Type",
-        "report_label_name":          "Je naam:",
-        "report_placeholder_name":    "Voornaam Achternaam",
-        "report_label_description":   "Omschrijving:",
-        "report_placeholder_description": "Beschrijf de bug of feature zo duidelijk mogelijk...",
-        "report_btn_submit":          "Verzenden",
-        "report_btn_sending":         "Bezig met verzenden...",
-        "report_preview_title":       "Voorvertoning",
-        "report_confirm_send":        "Doorgaan met verzenden?",
-        "report_success_title":       "Verzonden",
-        "report_success_msg":         "Melding succesvol verzonden:",
-        "report_err_no_name":         "Vul je naam in.",
-        "report_err_no_description":  "Vul een beschrijving in.",
-        "report_err_no_connection":   "Geen internetverbinding.",
-        "report_err_github":          "GitHub fout:",
-        "report_err_unknown":         "Onbekende fout:",
+        "cases_dialog_title":       "Open cases",
+        "cases_loading":            "Laden...",
+        "cases_loaded":             "Geladen",
+        "cases_tab_bugs":           "Bugs",
+        "cases_tab_features":       "Features",
+        "cases_col_title":          "Titel",
+        "cases_col_labels":         "Labels",
+        "cases_col_branch":         "Branch",
+        "cases_col_date":           "Datum",
+        "cases_btn_refresh":        "Vernieuwen",
+        "cases_btn_open_browser":   "Openen in browser",
+        "cases_no_selection":       "Selecteer eerst een rij.",
 
-        # --- GithubCasesDialog ---
-        "cases_dialog_title":         "Open cases",
-        "cases_loading":              "Laden...",
-        "cases_loaded":               "Geladen",
-        "cases_tab_bugs":             "Bugs",
-        "cases_tab_features":         "Features",
-        "cases_col_title":            "Titel",
-        "cases_col_labels":           "Labels",
-        "cases_col_branch":           "Branch",
-        "cases_col_date":             "Datum",
-        "cases_btn_refresh":          "Vernieuwen",
-        "cases_btn_open_browser":     "Openen in browser",
-        "cases_no_selection":         "Selecteer eerst een rij.",
-        
-        # --- rack sortering
-        "rack_numbering_label":   "Nummering:",
+        # rack sortering
+        "rack_numbering_label":     "Nummering:",
         "rack_numbering_top_down":  "1 bovenaan (standaard)",
         "rack_numbering_bottom_up": "1 onderaan (professioneel)",
-        "label_ports_per_row": "Poorten per rij:",
-        "label_sfp_ports": "SFP poorten:",
-        "ctx_ports_device": "Poorten beheren",
-        # --- VLAN
+        "label_ports_per_row":      "Poorten per rij:",
+        "label_sfp_ports":          "SFP poorten:",
+        "ctx_ports_device":         "Poorten beheren",
+
+        # VLAN
         "vlan_report_no_vlans":     "Geen VLAN toewijzingen gevonden.",
         "vlan_report_title":        "VLAN rapport",
         "vlan_manager_title":       "VLAN beheer",
         "vlan_conflict_title":      "VLAN conflict",
         "vlan_propagate_confirm":   "Propageer naar hele trace?",
 
-        # --- Wandpunt locaties (settings) — 1.7.0
+        # Wandpunt locaties
         "settings_tab_outlet_locations": "🌐  Wandpunt locaties",
         "settings_loc_hint":             "Beheer de lijst van locaties voor wandpunten. Deze opties verschijnen in het wandpunt-dialoogvenster.",
         "settings_loc_restore":          "Standaard herstellen",
@@ -528,13 +546,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_loc_new_title":        "Nieuwe locatie",
         "settings_loc_edit_title":       "Locatie bewerken",
 
-        # --- Toegangsmodus (F5) — 1.12.0
+        # Toegangsmodus
         "settings_group_access":         "Toegangsmodus",
         "settings_access_readonly":      "Standaard read-only openen",
         "settings_access_hint":          "In read-only modus zijn aanmaken, bewerken en verwijderen uitgeschakeld. Schakel R/W in via Instellingen.",
         "access_mode_readonly_tooltip":  "Read-only — bewerken is uitgeschakeld",
         "access_mode_rw_tooltip":        "Lezen en schrijven — bewerken is ingeschakeld",
-
     },
 
     # -------------------------------------------------------------------------
@@ -553,10 +570,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "menu_connect":             "Connection",
         "menu_import":              "Import",
         "menu_export":              "Export",
-        "menu_export_image":        "Export image",                  # G2
-        "menu_export_pdf":          "Export PDF",                    # G1
-        "menu_export_report":       "Report (Word)",                 # G3
+        "menu_export_image":        "Export image",
+        "menu_export_pdf":          "Export PDF",
+        "menu_export_report":       "Report (Word)",
         "menu_settings":            "Settings",
+
+        # Floorplans — G4
+        "menu_floorplan":               "Floorplans",
+        "menu_floorplan_new":           "New floorplan...",
+        "menu_floorplan_view":          "View floorplan",
+        "menu_floorplan_manage":        "Manage floorplans",
 
         # Menubar — H1
         "menubar_file":             "File",
@@ -625,6 +648,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_max_backups":        "Max. Backups to Keep",
         "label_rack_unit_height":   "Unit Height (pixels)",
         "label_rack_unit_width":    "Rack Width (pixels)",
+
+        # Floorplan velden — G4
+        "label_floorplan_svg":          "SVG file",
+        "label_floorplan_site":         "Site",
+        "label_floorplan_room":         "Room",
 
         # Kabeltype DDL
         "cable_utp_cat5e":          "UTP Cat5e",
@@ -699,16 +727,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_connect_select_a":     "Select first port...",
         "msg_connect_select_b":     "Select second port...",
         "msg_connect_cancel":       "Connection mode cancelled.",
-        "msg_connect_cancelled":    "Connection mode cancelled (ESC).",   # F1
+        "msg_connect_cancelled":    "Connection mode cancelled (ESC).",
         "msg_connect_done":         "Connection created.",
         "msg_search_no_results":    "No results found.",
         "msg_language_restart":     "Language change applied immediately.",
-        "msg_image_exported":       "Image saved",                        # G2
-        "msg_image_export_failed":  "Failed to save image",               # G2
-        "msg_pdf_exported":         "PDF saved",                          # G1
-        "msg_pdf_export_failed":    "Failed to save PDF",                 # G1
-        "msg_report_exported":      "Report saved",                       # G3
-        "msg_report_export_failed": "Failed to save report",              # G3
+        "msg_image_exported":       "Image saved",
+        "msg_image_export_failed":  "Failed to save image",
+        "msg_pdf_exported":         "PDF saved",
+        "msg_pdf_export_failed":    "Failed to save PDF",
+        "msg_report_exported":      "Report saved",
+        "msg_report_export_failed": "Failed to save report",
+
+        # Floorplan statusberichten — G4
+        "msg_floorplan_created":        "Floorplan added.",
+        "msg_floorplan_exists":         "A floorplan already exists for this room.",
+        "msg_floorplan_not_found":      "No floorplan found.",
+        "msg_floorplan_deleted":        "Floorplan deleted.",
+        "msg_floorplan_point_selected": "SVG point selected",
+        "msg_floorplan_mapping_saved":  "Mapping saved",
+        "msg_floorplan_detected_points": "{count} point(s) detected: {preview}{extra}",
+        "msg_floorplan_detected_zero":  "0 point(s) detected",
+        "msg_floorplan_no_points_warning": "No recognizable SVG point labels were found. You can still save this floorplan, but mapping will only be practical when labels such as M1, M2, WO1, WP1 ... are present.",
 
         # Titels vensters / dialogs
         "title_settings":           "Settings",
@@ -729,6 +768,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "title_wire_detail":        "Connection Detail",
         "title_wall_outlets":       "Wall Outlets",
 
+        # Floorplan titels — G4
+        "title_floorplan_new":          "New floorplan",
+        "title_floorplan_view":         "Floorplan",
+        "floorplan_mapping_title":      "Map wall outlet",
+
         # Boom (tree view)
         "tree_wall_outlets":        "Wall Outlets",
         "tree_no_endpoint":         "(no endpoint)",
@@ -743,13 +787,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "trace_no_connection":      "No connection on this port.",
         "trace_internal":           "Internal cross-connect",
 
+        # Floorplan labels — G4
+        "floorplan_tab_selection":       "Selection",
+        "floorplan_tab_mapping":         "Mappings",
+        "floorplan_tab_trace":           "Trace",
+        "floorplan_tab_validation":      "Validation",
+        "floorplan_mapping_svg_point":   "SVG point",
+        "floorplan_mapping_outlet":      "Wall outlet",
+        "floorplan_mapping_assign":      "Assign",
+        "floorplan_mapping_remove":      "Remove mapping",
+        "floorplan_validation_unmapped": "Unmapped points",
+        "floorplan_validation_duplicate": "Duplicate mappings",
+        "floorplan_validation_missing_svg": "SVG file missing",
+        "floorplan_validation_ok":       "OK",
+        "floorplan_action_fit":          "Fit to view",
+
         # Import/export
         "import_mode_replace":      "Replace",
         "import_mode_merge":        "Merge",
         "import_mode_label":        "Import Mode",
         "export_filename_prefix":   "networkmap_export",
 
-        # Export renderer — kolommen (G1+G2)
+        # Export renderer — kolommen
         "export_table_title":       "Connection table",
         "export_col_port":          "Port",
         "export_col_side":          "Side",
@@ -787,7 +846,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "err_backup_path_required": "Backup is enabled but no path is set.",
         "err_corrupt_data":         "Data file is corrupt or unreadable.",
         "err_save_failed":          "Save failed. Check disk space.",
-        "err_ds_path_required":     "Network data is enabled but no path is set.",  # F3
+        "err_ds_path_required":     "Network data is enabled but no path is set.",
 
         # Status / info berichten
         "msg_ready":                "Ready.",
@@ -807,13 +866,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_tab_backup":          "💾  Backup",
         "settings_tab_display":         "🖥  Display",
         "settings_tab_endpoints":       "🖥  Endpoints",
-        "settings_tab_device_types":    "🗄  Device Types",     # F2
+        "settings_tab_device_types":    "🗄  Device Types",
 
         # Settings — groepen algemeen
-        "settings_group_language":      "Language",             # F3
-        "settings_group_datasource":    "Data Source",          # F3
+        "settings_group_language":      "Language",
+        "settings_group_datasource":    "Data Source",
 
-        # Settings — databron (F3)
+        # Settings — databron
         "settings_ds_use_network":      "Use network path as data source",
         "settings_ds_hint":             "If the network path is not available, the app automatically falls back to local data.",
         "settings_ds_browse_title":     "Choose data source folder",
@@ -831,7 +890,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_backup_test":     "Test",
         "settings_unit_height":     "Rack unit height:",
         "settings_unit_hint":       "Changes are visible after restart.",
-        # Settings — default export folder — H1d
         "settings_export_folder":             "Default Export Folder",
         "settings_export_folder_placeholder": "Choose a folder...",
         "settings_export_folder_hint":        "Export files are saved here by default. Empty = ask every time.",
@@ -854,7 +912,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_ep_restore":          "Restore Defaults",
         "settings_ep_restore_confirm":  "Delete all custom types and restore the default list?",
 
-        # Settings — device types (F2)
+        # Settings — device types
         "settings_dt_hint":             "Manage network device types. The FRONT/BACK values are the default port count when creating a new device.",
         "settings_dt_restore":          "Restore Default List",
         "settings_dt_restore_confirm":  "All changes will be lost. Continue?",
@@ -906,7 +964,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_edit_outlet":          "✏  Edit Wall Outlet",
         "ctx_delete_outlet":        "🗑  Delete Wall Outlet",
 
-        # Site wall outlets overview (E3)
+        # Site wall outlets overview
         "tree_site_outlets":            "All Wall Outlets",
         "site_outlets_title":           "Wall Outlets Overview",
         "site_outlets_room":            "Room",
@@ -914,25 +972,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "site_outlets_trace":           "Trace",
         "site_outlets_empty":           "No wall outlets found in this site.",
 
-        # Outlet locator (E3)
+        # Outlet locator
         "menu_outlet_locator":          "🌐  Find Wall Outlets",
         "outlet_filter_placeholder":    "Filter by name or location...",
         "outlet_no_trace":              "No connection",
         "outlet_locator_choose_room":   "← Choose a room to show wall outlets",
         "outlet_locator_no_outlets":    "No wall outlets found in this room",
 
-        # Port context menu + connect to outlet (E3)
+        # Port context menu + connect to outlet
         "ctx_connect_to_outlet":        "🌐  Connect to wall outlet...",
         "ctx_disconnect_port":          "✂  Remove connection",
         "dlg_connect_outlet_title":     "Connect port to wall outlet",
         "err_no_outlet_selected":       "Please select a wall outlet first.",
         "warn_outlet_already_connected": "This wall outlet is already connected. Continue anyway?",
 
-        # Cross-rack trace (E5 + B2)
+        # Cross-rack trace
         "trace_racks":                  "Racks in trace",
         "trace_cross_rack":             "Cross-rack",
 
-        # Backup bij afsluiten + sync (F3)
+        # Backup bij afsluiten + sync
         "backup_on_exit_title":         "Backup on exit",
         "backup_on_exit_msg":           "Changes have been made. Do you want to create a backup before closing?",
         "backup_on_exit_yes":           "💾  Create backup",
@@ -944,96 +1002,70 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "sync_pull_done":               "↓  Network version loaded (newer than local).",
         "sync_unavailable":             "⚠  Network unavailable — using local.",
 
-        # --- Phase D: update check on startup ---
+        # Update check
         "update_check_url":         "Update check URL",
         "update_check_url_hint":    "Empty = use default GitHub URL.",
         "update_available_title":   "Update available",
         "update_available_msg":     "Version {version} is available.\nDo you want to go to GitHub to download?",
         "update_goto_github":       "Go to GitHub",
         "update_later":             "Later",
-        
-        # --- Feature and bug reporting
-        "menubar_report":            "Report",
-        "menu_report_bug":           "🐞 Report a bug...",
-        "menu_report_feature":       "✨ Request a feature...",
-        "report_dialog_title":       "Report Bug or Feature",
-        "report_label_type":         "Report type:",
-        "report_type_bug":           "Bug report",
-        "report_type_feature":       "Feature request",
-        "report_type_label":         "Type",
-        "report_label_name":         "Your name:",
-        "report_placeholder_name":   "First Last",
-        "report_label_description":  "Description:",
-        "report_placeholder_description": "Describe the bug or feature as clearly as possible...",
-        "report_btn_submit":         "Submit",
-        "report_btn_sending":        "Sending...",
-        "report_preview_title":      "Preview",
-        "report_confirm_send":       "Proceed with submission?",
-        "report_success_title":      "Submitted",
-        "report_success_msg":        "Report successfully submitted:",
-        "report_err_no_name":        "Please enter your name.",
-        "report_err_no_description": "Please enter a description.",
-        "report_err_no_connection":  "No internet connection.",
-        "report_err_github":         "GitHub error:",
-        "report_err_unknown":        "Unknown error:",
-        
-        # --- Report menu ---
-        "menubar_report":             "Report",
-        "menu_report_bug":            "🐞 Report a bug...",
-        "menu_report_feature":        "✨ Request a feature...",
-        "menu_report_cases":          "📋 Open cases",
 
-        # --- BugReportDialog ---
-        "report_dialog_title":        "Report Bug or Feature",
-        "report_label_type":          "Report type:",
-        "report_type_bug":            "Bug report",
-        "report_type_feature":        "Feature request",
-        "report_type_label":          "Type",
-        "report_label_name":          "Your name:",
-        "report_placeholder_name":    "First Last",
-        "report_label_description":   "Description:",
-        "report_placeholder_description": "Describe the bug or feature as clearly as possible...",
-        "report_btn_submit":          "Submit",
-        "report_btn_sending":         "Sending...",
-        "report_preview_title":       "Preview",
-        "report_confirm_send":        "Proceed with submission?",
-        "report_success_title":       "Submitted",
-        "report_success_msg":         "Report successfully submitted:",
-        "report_err_no_name":         "Please enter your name.",
-        "report_err_no_description":  "Please enter a description.",
-        "report_err_no_connection":   "No internet connection.",
-        "report_err_github":          "GitHub error:",
-        "report_err_unknown":         "Unknown error:",
+        # Report menu
+        "menubar_report":           "Report",
+        "menu_report_bug":          "🐞 Report a bug...",
+        "menu_report_feature":      "✨ Request a feature...",
+        "menu_report_cases":        "📋 Open cases",
 
-        # --- GithubCasesDialog ---
-        "cases_dialog_title":         "Open cases",
-        "cases_loading":              "Loading...",
-        "cases_loaded":               "Loaded",
-        "cases_tab_bugs":             "Bugs",
-        "cases_tab_features":         "Features",
-        "cases_col_title":            "Title",
-        "cases_col_labels":           "Labels",
-        "cases_col_branch":           "Branch",
-        "cases_col_date":             "Date",
-        "cases_btn_refresh":          "Refresh",
-        "cases_btn_open_browser":     "Open in browser",
-        "cases_no_selection":         "Select a row first.",
-        
-        # --- rack sortering
-        "rack_numbering_label":   "Numbering:",
+        "report_dialog_title":      "Report Bug or Feature",
+        "report_label_type":        "Report type:",
+        "report_type_bug":          "Bug report",
+        "report_type_feature":      "Feature request",
+        "report_type_label":        "Type",
+        "report_label_name":        "Your name:",
+        "report_placeholder_name":  "First Last",
+        "report_label_description": "Description:",
+        "report_placeholder_description": "Describe the bug or feature as clearly as possible...",
+        "report_btn_submit":        "Submit",
+        "report_btn_sending":       "Sending...",
+        "report_preview_title":     "Preview",
+        "report_confirm_send":      "Proceed with submission?",
+        "report_success_title":     "Submitted",
+        "report_success_msg":       "Report successfully submitted:",
+        "report_err_no_name":       "Please enter your name.",
+        "report_err_no_description":"Please enter a description.",
+        "report_err_no_connection": "No internet connection.",
+        "report_err_github":        "GitHub error:",
+        "report_err_unknown":       "Unknown error:",
+
+        "cases_dialog_title":       "Open cases",
+        "cases_loading":            "Loading...",
+        "cases_loaded":             "Loaded",
+        "cases_tab_bugs":           "Bugs",
+        "cases_tab_features":       "Features",
+        "cases_col_title":          "Title",
+        "cases_col_labels":         "Labels",
+        "cases_col_branch":         "Branch",
+        "cases_col_date":           "Date",
+        "cases_btn_refresh":        "Refresh",
+        "cases_btn_open_browser":   "Open in browser",
+        "cases_no_selection":       "Select a row first.",
+
+        # rack sortering
+        "rack_numbering_label":     "Numbering:",
         "rack_numbering_top_down":  "1 at top (default)",
         "rack_numbering_bottom_up": "1 at bottom (professional)",
-        "label_ports_per_row": "Ports per row:",
-        "label_sfp_ports": "SFP ports:",
-        "ctx_ports_device": "Manage ports",
-        # --- VLAN
+        "label_ports_per_row":      "Ports per row:",
+        "label_sfp_ports":          "SFP ports:",
+        "ctx_ports_device":         "Manage ports",
+
+        # VLAN
         "vlan_report_no_vlans":     "No VLAN assignments found.",
         "vlan_report_title":        "VLAN report",
         "vlan_manager_title":       "VLAN management",
         "vlan_conflict_title":      "VLAN conflict",
         "vlan_propagate_confirm":   "Propagate to entire trace?",
 
-        # --- Wall outlet locations (settings) — 1.7.0
+        # Wall outlet locations
         "settings_tab_outlet_locations": "🌐  Outlet Locations",
         "settings_loc_hint":             "Manage the list of locations for wall outlets. These options appear in the wall outlet dialog.",
         "settings_loc_restore":          "Restore Defaults",
@@ -1041,13 +1073,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_loc_new_title":        "New Location",
         "settings_loc_edit_title":       "Edit Location",
 
-        # --- Access mode (F5) — 1.12.0
+        # Access mode
         "settings_group_access":         "Access Mode",
         "settings_access_readonly":      "Open in read-only by default",
         "settings_access_hint":          "In read-only mode, creating, editing and deleting are disabled. Enable R/W in Settings.",
         "access_mode_readonly_tooltip":  "Read-only — editing is disabled",
         "access_mode_rw_tooltip":        "Read/Write — editing is enabled",
-
     },
 }
 
@@ -1080,21 +1111,19 @@ def t(key: str) -> str:
     Valt terug op NL als de sleutel niet bestaat in de actieve taal.
 
     Extra fallback voor 'device_*' sleutels:
-    Als de key niet in TRANSLATIONS staat (bv. een custom device type zoals
-    'device_cable_management'), wordt het label opgehaald uit settings_storage.
-    Zo worden custom device types altijd correct weergegeven zonder dat ze
-    handmatig in i18n.py toegevoegd moeten worden.
+    Als de key niet in TRANSLATIONS staat, wordt het label opgehaald uit
+    settings_storage.
     """
     result = TRANSLATIONS[_active_language].get(key)
     if result is not None:
         return result
+
     result = TRANSLATIONS["nl"].get(key)
     if result is not None:
         return result
 
-    # Fallback voor custom device types: zoek label in settings_storage
     if key.startswith("device_"):
-        dev_type_key = key[len("device_"):]  # bv. "cable_management"
+        dev_type_key = key[len("device_"):]
         try:
             from app.helpers.settings_storage import load_device_types
             lang_field = f"label_{_active_language}"
@@ -1104,7 +1133,6 @@ def t(key: str) -> str:
                     return label
         except Exception:
             pass
-        # Laatste fallback: key zonder prefix, underscores als spaties, title case
         return dev_type_key.replace("_", " ").title()
 
     return f"[{key}]"

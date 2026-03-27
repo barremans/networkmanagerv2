@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.23.0
+# Version: 1.24.0
 # Author:  Barremans
 # Changes: 1.19.0 — Uitlijning verbindingen, device kleur, ruimte tussen devices
 #          1.20.0 — Tooltip uitgebreid met device naam, port-connected-back shape
@@ -12,6 +12,10 @@
 #                   na _populate() zodat _port_widgets gegarandeerd gevuld is
 #          1.23.0 — B8: highlight_trace zet ook de geselecteerde poort op port-trace
 #                   zodat de aangeklikte poort mee oplicht bij cross-side highlight
+#          1.24.0 — Fix switch nummering bij 2+ rijen (bv. 48 poorts switch):
+#                   correct interleaved per blok van ports_per_row
+#                   (1,3..23 | 2,4..24 | 25,27..47 | 26,28..48)
+#                   Poorten per rij uitgebreid: 3,4,6,8,16,24,48 als opties
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -386,13 +390,23 @@ class RackView(QWidget):
         port_numbers = list(range(1, total + 1))
 
         # Switches met 2+ rijen: oneven boven, even onder (echte switch nummering)
-        if dev_type == "switch" and total > ports_per_row:
-            odd_nums  = [n for n in port_numbers if n % 2 == 1]
-            even_nums = [n for n in port_numbers if n % 2 == 0]
+        # Fix 1.24.0: correct interleaved per blok van ports_per_row
+        # Alleen voor switches zonder back poorten — switches met back poorten
+        # (zeldzaam) gebruiken gewone sequentiële nummering zoals patchpanels
+        has_back = side == "back"
+        is_switch_front = (dev_type == "switch" and not has_back
+                           and total > ports_per_row)
+        if is_switch_front:
             rows = []
-            for i in range(0, max(len(odd_nums), len(even_nums)), ports_per_row):
-                rows.append(odd_nums[i:i + ports_per_row])
-                rows.append(even_nums[i:i + ports_per_row])
+            block_size = ports_per_row * 2
+            for block_start in range(0, total, block_size):
+                block = port_numbers[block_start:block_start + block_size]
+                odd_in_block  = [n for n in block if n % 2 == 1]
+                even_in_block = [n for n in block if n % 2 == 0]
+                for i in range(0, len(odd_in_block), ports_per_row):
+                    rows.append(odd_in_block[i:i + ports_per_row])
+                for i in range(0, len(even_in_block), ports_per_row):
+                    rows.append(even_in_block[i:i + ports_per_row])
         else:
             rows = [port_numbers[i:i + ports_per_row]
                     for i in range(0, len(port_numbers), ports_per_row)]
