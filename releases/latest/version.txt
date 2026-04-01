@@ -1,2 +1,2 @@
-8.1.5
-https://github.com/barremans/networkmanagerv2/releases/download/v8.1.5/Networkmap_Creator_setup_8.1.5.exe
+8.1.6
+https://github.com/barremans/networkmanagerv2/releases/download/v8.1.6/Networkmap_Creator_setup_8.1.6.exe
