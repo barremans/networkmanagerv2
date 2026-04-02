@@ -2,20 +2,18 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.24.0
+# Version: 1.25.0
 # Author:  Barremans
-# Changes: 1.19.0 — Uitlijning verbindingen, device kleur, ruimte tussen devices
-#          1.20.0 — Tooltip uitgebreid met device naam, port-connected-back shape
-#          1.21.0 — Fix: tooltip ook voor poorten zonder port_id (nog niet aangemaakt)
-#                   Poorten 11-13 van een 13-poorts router hadden geen hover info
-#          1.22.0 — B2: pending_highlight mechanisme — highlight_trace aanroepen
-#                   na _populate() zodat _port_widgets gegarandeerd gevuld is
-#          1.23.0 — B8: highlight_trace zet ook de geselecteerde poort op port-trace
-#                   zodat de aangeklikte poort mee oplicht bij cross-side highlight
+# Changes: 1.25.0 — V3: vaste ruimte tussen devices via _DEVICE_GAP constante
 #          1.24.0 — Fix switch nummering bij 2+ rijen (bv. 48 poorts switch):
 #                   correct interleaved per blok van ports_per_row
 #                   (1,3..23 | 2,4..24 | 25,27..47 | 26,28..48)
 #                   Poorten per rij uitgebreid: 3,4,6,8,16,24,48 als opties
+#          1.23.0 — B8: highlight_trace zet ook de geselecteerde poort op port-trace
+#          1.22.0 — B2: pending_highlight mechanisme
+#          1.21.0 — Fix: tooltip voor poorten zonder port_id
+#          1.20.0 — Tooltip uitgebreid met device naam
+#          1.19.0 — Uitlijning verbindingen, device kleur, ruimte tussen devices
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -39,6 +37,7 @@ _ACT_PORTS  = "ports"
 
 _OCC_WARN     = 0.75
 _OCC_CRITICAL = 0.90
+_DEVICE_GAP   = 2    # V3: pixels ruimte tussen devices in rack
 
 
 def _lighten_color(hex_color: str, amount: int = 30) -> str:
@@ -54,6 +53,20 @@ def _lighten_color(hex_color: str, amount: int = 30) -> str:
         return f"#{r:02X}{g:02X}{b:02X}"
     except ValueError:
         return hex_color
+
+
+def _is_light_color(hex_color: str) -> bool:
+    """True als kleur licht genoeg is voor zwarte tekst (WCAG luminantie > 0.35)."""
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return False
+    try:
+        r = int(h[0:2], 16) / 255
+        g = int(h[2:4], 16) / 255
+        b = int(h[4:6], 16) / 255
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.35
+    except ValueError:
+        return False
 
 
 def _refresh_style(widget: QWidget):
@@ -230,6 +243,7 @@ class RackView(QWidget):
                         port_map.get(device["id"], []),
                         connected_ports
                     ))
+                    bl.addSpacing(_DEVICE_GAP)   # V3: vaste ruimte na elk device
                     u += height
                     # margin_below: extra lege rijen na device (visuele scheiding)
                     margin = slot.get("margin_below", 0)
@@ -342,6 +356,10 @@ class RackView(QWidget):
         type_lbl = QLabel(t(f"device_{dev_type}"))
         type_lbl.setObjectName("device-sublabel")
         type_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # V2: zwarte tekst bij lichte custom kleur (geel, oranje, ...), anders wit via QSS
+        if custom_color and _is_light_color(custom_color):
+            name_lbl.setStyleSheet("color: #1A1A2A;")
+            type_lbl.setStyleSheet("color: #3A3A3A;")
         ll.addWidget(name_lbl)
         ll.addWidget(type_lbl)
         layout.addWidget(lw, stretch=1)

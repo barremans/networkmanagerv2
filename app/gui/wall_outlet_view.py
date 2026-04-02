@@ -2,13 +2,21 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.4.0
+# Version: 1.7.0
 # Author:  Barremans
-# Changes: 1.3.0 — Fix: locatie key vertaald via get_outlet_location_label()
-#                  op kaartje en tooltip (was raw key, bv. containerd_a)
+# Changes: 1.7.0 — W1: eindapparaat aanmaken/bewerken vanuit wandpunt
+#                  outlet_endpoint_requested signaal + rechtsklik + detail popup knop
+#          1.6.0 — F6: sortering binnen locatiegroep op sort_id
+#                  Wandpunten zonder sort_id (0) komen achteraan binnen groep
+#          1.5.0 — F8: volgorde locatiegroepen gestuurd door load_outlet_locations()
+#                  Groepen verschijnen nu in de volgorde zoals ingesteld in settings,
+#                  niet meer op volgorde van eerste optreden in de data.
+#                  Onbekende/lege locatie blijft altijd laatste (Overig).
 #          1.4.0 — V5: wandpunten gegroepeerd per locatie met sectieheader
 #                  Binnen elke groep: vaste 4-koloms grid zonder lege gaten
 #                  Onbekende/lege locatie → groep "Overig" onderaan
+#          1.3.0 — Fix: locatie key vertaald via get_outlet_location_label()
+#                  op kaartje en tooltip (was raw key, bv. containerd_a)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -20,7 +28,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 
 from app.helpers.i18n import t, get_language
-from app.helpers.settings_storage import get_outlet_location_label
+from app.helpers.settings_storage import get_outlet_location_label, load_outlet_locations
 from app.services import tracing
 
 
@@ -43,7 +51,8 @@ class WallOutletView(QWidget):
     """
 
     outlet_clicked = Signal(str)
-    outlet_edit_requested = Signal(str)   # rechtsklik / dubbelklik → bewerken
+    outlet_edit_requested = Signal(str)       # rechtsklik → bewerken
+    outlet_endpoint_requested = Signal(str)   # W1: eindapparaat toevoegen/bewerken
 
     # ------------------------------------------------------------------
     # Constructor — room- of site-modus
@@ -174,18 +183,16 @@ class WallOutletView(QWidget):
         self, outlets: list[tuple[dict, dict]]
     ) -> list[tuple[str, str, list]]:
         """
-        V5 — Groepeer (room, outlet) tuples per location_description.
-        Bewaart de volgorde van eerste optreden per locatie.
-        Lege/onbekende locatie komt als laatste groep ('overig').
+        F8 — Groepeer (room, outlet) tuples per location_description.
+        Volgorde wordt bepaald door load_outlet_locations() uit settings,
+        zodat de gebruiker de volgorde kan instellen via Instellingen.
+        Lege/onbekende locatie komt altijd als laatste groep ('Overig').
 
         Retourneert: lijst van (loc_key, loc_label, [(room, outlet), ...])
-        Gesorteerd: bekende locaties op volgorde van eerste optreden,
-                    lege locatie altijd laatste.
         """
         lang = get_language()
-        order   : list[str]              = []
-        groups  : dict[str, list]        = {}
-        labels  : dict[str, str]         = {}
+        groups  : dict[str, list] = {}
+        labels  : dict[str, str]  = {}
         fallback_key = "__overig__"
 
         for room, outlet in outlets:
@@ -197,17 +204,31 @@ class WallOutletView(QWidget):
                 label = get_outlet_location_label(key, lang) or key
 
             if key not in groups:
-                order.append(key)
                 groups[key] = []
                 labels[key] = label
             groups[key].append((room, outlet))
 
-        # Zet lege locatie altijd achteraan
-        if fallback_key in order and order[-1] != fallback_key:
-            order.remove(fallback_key)
+        # Volgorde: gedefinieerde locaties in settings-volgorde, daarna Overig
+        defined_keys = [loc["key"] for loc in load_outlet_locations()]
+        order = [k for k in defined_keys if k in groups]
+
+        # Onbekende keys (niet in settings) tussengevoegd voor Overig
+        known = set(defined_keys) | {fallback_key}
+        for k in groups:
+            if k not in known:
+                order.append(k)
+
+        if fallback_key in groups:
             order.append(fallback_key)
 
-        return [(k, labels[k], groups[k]) for k in order]
+        # F6 — sorteren binnen elke groep op sort_id ascending
+        # sort_id=0 (niet ingesteld) komt achteraan via (sort_id==0, sort_id, naam)
+        def _sort_key(item):
+            _, outlet = item
+            sid = int(outlet.get("sort_id", 0) or 0)
+            return (sid == 0, sid, outlet.get("name", "").lower())
+
+        return [(k, labels[k], sorted(groups[k], key=_sort_key)) for k in order]
 
     def _build_group_header(self, label: str, count: int) -> QFrame:
         """V5 — Sectieheader boven elke locatiegroep."""
@@ -360,16 +381,22 @@ class WallOutletView(QWidget):
         """Dubbelklik — toon detail popup met alle wandpunt + eindapparaat info."""
         ep_map  = {e["id"]: e for e in self._data.get("endpoints", [])}
         ep      = ep_map.get(outlet.get("endpoint_id", ""))
-        dlg     = _OutletDetailDialog(outlet, ep, self._data, parent=self)
+        dlg     = _OutletDetailDialog(
+            outlet, ep, self._data, parent=self,
+            on_endpoint_clicked=lambda: self.outlet_endpoint_requested.emit(outlet_id),
+        )
         dlg.exec()
 
     def _on_outlet_context_menu(self, outlet_id: str, event):
-        """Rechtsklik — contextmenu met Bewerken optie."""
+        """Rechtsklik — contextmenu met Bewerken en Eindapparaat opties."""
         menu = QMenu(self)
-        act_edit = menu.addAction("✏  " + "Bewerken")
+        act_edit = menu.addAction("✏  " + t("ctx_edit"))
+        act_ep   = menu.addAction("🖥  " + t("btn_new_endpoint"))
         action   = menu.exec(QCursor.pos())
         if action == act_edit:
             self.outlet_edit_requested.emit(outlet_id)
+        elif action == act_ep:
+            self.outlet_endpoint_requested.emit(outlet_id)
 
     # ------------------------------------------------------------------
     # Data verversen
@@ -396,12 +423,14 @@ class _OutletDetailDialog(QDialog):
     read-only popup. Verschijnt bij dubbelklik op een wandpunt kaartje.
     """
 
-    def __init__(self, outlet: dict, endpoint, data: dict, parent=None):
+    def __init__(self, outlet: dict, endpoint, data: dict, parent=None,
+                 on_endpoint_clicked=None):
         super().__init__(parent)
-        self._outlet   = outlet
-        self._endpoint = endpoint
-        self._data     = data
-        self.setWindowTitle(f"📍  {outlet.get('name', '')}")
+        self._outlet              = outlet
+        self._endpoint            = endpoint
+        self._data                = data
+        self._on_endpoint_clicked = on_endpoint_clicked
+        self.setWindowTitle(outlet.get('name', ''))
         self.setMinimumWidth(400)
         self.setModal(True)
         self._build()
@@ -489,8 +518,20 @@ class _OutletDetailDialog(QDialog):
 
         # ── Sluitknop ──────────────────────────────────────────────────
         btn_row = QHBoxLayout()
+        # W1: knop eindapparaat toevoegen/bewerken
+        if self._on_endpoint_clicked:
+            ep_label = t("ctx_edit") if self._endpoint else t("btn_new_endpoint")
+            btn_ep = QPushButton(f"🖥  {ep_label}")
+            btn_ep.clicked.connect(self._on_ep_btn_clicked)
+            btn_row.addWidget(btn_ep)
         btn_row.addStretch()
         btn_close = QPushButton(t("btn_cancel"))
         btn_close.clicked.connect(self.accept)
         btn_row.addWidget(btn_close)
         layout.addLayout(btn_row)
+
+    def _on_ep_btn_clicked(self):
+        """Sluit de popup en roep de endpoint callback aan."""
+        self.accept()
+        if self._on_endpoint_clicked:
+            self._on_endpoint_clicked()

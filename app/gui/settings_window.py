@@ -3,14 +3,15 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.8.0
+# Version: 1.10.0
 # Author:  Barremans
-# Changes: F5 — Toegangsmodus toggle in Algemeen tabblad (read-only / R/W)
-#          F2 — Tabblad "Device types" met CRUD + standaard FRONT/BACK
-#          F3 — Sectie "Databron" in Algemeen tabblad
-#          H1d — Standaard exportmap in Weergave tabblad
-#          D  — Update check URL veld in Algemeen tabblad
-#          1.7.0 — Tabblad "Wandpunt locaties" met CRUD (configureerbare lijst)
+# Changes: 1.9.2 — B-BACKUP: _on_test_path toont Windows gebruikerscontext in succesmelding
+#          1.9.1 — Bugfix: _on_backup_now() geeft nu settings_path, floorplans_path
+#                  en floorplans_dir mee aan create_backup() — waren vergeten
+#          1.9.0 — Tabblad "SVG Labels" met configureerbare wandpunt prefix lijst
+#          1.8.0 — Tabblad "Wandpunt locaties" met CRUD (configureerbare lijst)
+#          1.10.0 — R-1: restore-sectie in backup tabblad
+#                   _on_restore_refresh() + _on_restore_now() + herstart via QApplication.quit()
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -45,6 +46,7 @@ class SettingsWindow(QDialog):
         self._ep_types      = list(settings_storage.load_endpoint_types())
         self._dev_types     = list(settings_storage.load_device_types())
         self._loc_types     = list(settings_storage.load_outlet_locations())
+        self._svg_prefixes  = list(settings_storage.load_outlet_label_prefixes())
         self.setWindowTitle(t("menu_settings"))
         self.setMinimumWidth(500)
         self.setMinimumHeight(460)
@@ -67,6 +69,7 @@ class SettingsWindow(QDialog):
         tabs.addTab(self._build_endpoint_tab(),   t("settings_tab_endpoints"))
         tabs.addTab(self._build_devicetype_tab(), t("settings_tab_device_types"))
         tabs.addTab(self._build_locations_tab(),  t("settings_tab_outlet_locations"))
+        tabs.addTab(self._build_svg_labels_tab(), "SVG Labels")
         layout.addWidget(tabs)
 
         btn_row = QHBoxLayout()
@@ -218,12 +221,59 @@ class SettingsWindow(QDialog):
 
         self._btn_backup_now = QPushButton(t("settings_backup_now"))
         layout.addWidget(self._btn_backup_now)
+
+        # ------------------------------------------------------------------
+        # R-1 — Restore sectie
+        # ------------------------------------------------------------------
+        sep_restore = QFrame()
+        sep_restore.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(sep_restore)
+
+        grp_restore = QGroupBox(t("settings_restore_group"))
+        grp_restore_layout = QVBoxLayout(grp_restore)
+        grp_restore_layout.setSpacing(8)
+
+        hint_restore = QLabel(t("settings_restore_hint"))
+        hint_restore.setObjectName("secondary")
+        hint_restore.setWordWrap(True)
+        grp_restore_layout.addWidget(hint_restore)
+
+        self._ddl_restore = QComboBox()
+        self._ddl_restore.setMinimumWidth(260)
+        self._ddl_restore.setPlaceholderText(t("settings_restore_placeholder"))
+        grp_restore_layout.addWidget(self._ddl_restore)
+
+        chk_row = QHBoxLayout()
+        self._chk_restore_data     = QCheckBox(t("settings_restore_item_data"))
+        self._chk_restore_settings = QCheckBox(t("settings_restore_item_settings"))
+        self._chk_restore_fp_json  = QCheckBox(t("settings_restore_item_fp_json"))
+        self._chk_restore_fp_dir   = QCheckBox(t("settings_restore_item_fp_dir"))
+        self._chk_restore_data.setChecked(True)
+        for chk in (self._chk_restore_data, self._chk_restore_settings,
+                    self._chk_restore_fp_json, self._chk_restore_fp_dir):
+            chk_row.addWidget(chk)
+        chk_row.addStretch()
+        grp_restore_layout.addLayout(chk_row)
+
+        restore_btn_row = QHBoxLayout()
+        self._btn_restore_refresh = QPushButton("↺")
+        self._btn_restore_refresh.setFixedWidth(32)
+        self._btn_restore_refresh.setToolTip(t("settings_restore_refresh"))
+        self._btn_restore_now = QPushButton(t("settings_restore_btn"))
+        restore_btn_row.addWidget(self._btn_restore_refresh)
+        restore_btn_row.addWidget(self._btn_restore_now)
+        restore_btn_row.addStretch()
+        grp_restore_layout.addLayout(restore_btn_row)
+
+        layout.addWidget(grp_restore)
         layout.addStretch()
 
         self._btn_browse.clicked.connect(self._on_browse_path)
         self._btn_test.clicked.connect(self._on_test_path)
         self._btn_backup_now.clicked.connect(self._on_backup_now)
         self._chk_backup.toggled.connect(self._on_backup_toggled)
+        self._btn_restore_refresh.clicked.connect(self._on_restore_refresh)
+        self._btn_restore_now.clicked.connect(self._on_restore_now)
 
         return tab
 
@@ -418,6 +468,7 @@ class SettingsWindow(QDialog):
         self._chk_history.setChecked(backup.get("keep_history", True))
         self._spn_max.setValue(backup.get("max_backups", 10))
         self._on_backup_toggled(backup.get("enabled", False))
+        self._on_restore_refresh()
 
         # Weergave + exportmap  [H1d]
         ui = self._settings.get("ui", {})
@@ -438,6 +489,9 @@ class SettingsWindow(QDialog):
         # Wandpunt locaties
         self._refresh_loc_list()
         self._on_loc_row_changed(-1)
+
+        # SVG label prefixen
+        self._refresh_prefix_list()
 
     def _update_ds_status_label(self):
         label, is_net = settings_storage.get_network_data_source_label()
@@ -697,13 +751,14 @@ class SettingsWindow(QDialog):
 
     def _on_test_path(self):
         path = self._txt_path.text().strip()
-        ok, err = backup_service.test_path(path)
+        ok, info = backup_service.test_path(path)
         if ok:
+            user = info if info else "onbekend"
             QMessageBox.information(self, t("settings_path_ok_title"),
-                                    f"✓  Pad bereikbaar en beschrijfbaar:\n{path}")
+                                    f"✓  Pad bereikbaar en beschrijfbaar:\n{path}\n\nGebruiker: {user}")
         else:
             QMessageBox.warning(self, t("settings_path_ok_title"),
-                                f"⚠  Pad niet bereikbaar:\n{err}")
+                                f"⚠  Pad niet bereikbaar:\n{info}")
 
     def _on_backup_now(self):
         path = self._txt_path.text().strip()
@@ -718,13 +773,102 @@ class SettingsWindow(QDialog):
             "max_backups":  self._spn_max.value(),
         }
         source = settings_storage.get_network_data_path()
-        ok, err = backup_service.create_backup(source, config)
+        ok, err = backup_service.create_backup(
+            source, config,
+            settings_path=settings_storage.get_settings_path(),
+            floorplans_path=settings_storage.get_floorplans_path(),
+            floorplans_dir=settings_storage.get_floorplans_dir(),
+        )
         if ok:
             QMessageBox.information(self, t("settings_backup_group"),
                                     f"✓  {t('msg_backup_ok')}\n{path}")
+            self._on_restore_refresh()
         else:
             QMessageBox.warning(self, t("settings_backup_group"),
                                 f"⚠  {t('msg_backup_fail')}\n{err}")
+
+    # ------------------------------------------------------------------
+    # R-1 — Restore handlers
+    # ------------------------------------------------------------------
+
+    def _on_restore_refresh(self):
+        """Ververs de lijst van beschikbare backups."""
+        self._ddl_restore.clear()
+        config = {
+            "network_path": self._txt_path.text().strip(),
+        }
+        backups = backup_service.list_backups(config)
+        if not backups:
+            self._ddl_restore.setEnabled(False)
+            self._btn_restore_now.setEnabled(False)
+            return
+        self._ddl_restore.setEnabled(True)
+        self._btn_restore_now.setEnabled(True)
+        for b in backups:
+            self._ddl_restore.addItem(b["timestamp"], userData=b)
+
+    def _on_restore_now(self):
+        """Herstel de geselecteerde backup naar lokale bestanden."""
+        idx = self._ddl_restore.currentIndex()
+        if idx < 0:
+            QMessageBox.warning(self, t("settings_restore_group"),
+                                t("settings_restore_no_sel"))
+            return
+
+        targets = []
+        if self._chk_restore_data.isChecked():
+            targets.append("network_data")
+        if self._chk_restore_settings.isChecked():
+            targets.append("settings")
+        if self._chk_restore_fp_json.isChecked():
+            targets.append("floorplans_json")
+        if self._chk_restore_fp_dir.isChecked():
+            targets.append("floorplans_dir")
+
+        if not targets:
+            QMessageBox.warning(self, t("settings_restore_group"),
+                                t("settings_restore_no_target"))
+            return
+
+        backup_entry = self._ddl_restore.itemData(idx)
+        ts = backup_entry.get("timestamp", "?")
+
+        onderdelen = []
+        if "network_data"    in targets: onderdelen.append(t("settings_restore_item_data"))
+        if "settings"        in targets: onderdelen.append(t("settings_restore_item_settings"))
+        if "floorplans_json" in targets: onderdelen.append(t("settings_restore_item_fp_json"))
+        if "floorplans_dir"  in targets: onderdelen.append(t("settings_restore_item_fp_dir"))
+
+        msg = t("settings_restore_confirm_msg").format(
+            ts=ts, items="\n  • ".join(onderdelen)
+        )
+        reply = QMessageBox.question(
+            self, t("settings_restore_confirm_title"), msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        ok, err = backup_service.restore_backup(
+            backup_entry=backup_entry,
+            targets=targets,
+            network_data_dest=settings_storage.get_network_data_path(),
+            settings_dest=settings_storage.get_settings_path(),
+            floorplans_dest=settings_storage.get_floorplans_path(),
+            floorplans_dir_dest=settings_storage.get_floorplans_dir(),
+        )
+
+        if not ok:
+            QMessageBox.critical(self, t("settings_restore_failed"),
+                                 f"⚠  {t('settings_restore_failed')}:\n\n{err}")
+            return
+
+        QMessageBox.information(
+            self, t("settings_restore_ok_title"),
+            t("settings_restore_ok_msg").format(ts=ts)
+        )
+        from PySide6.QtWidgets import QApplication
+        QApplication.quit()
 
     # ------------------------------------------------------------------
     # Tabblad: Wandpunt locaties — 1.7.0
@@ -867,6 +1011,105 @@ class SettingsWindow(QDialog):
         self._refresh_loc_list(0)
 
     # ------------------------------------------------------------------
+    # Tabblad: SVG Labels — 1.9.0
+    # ------------------------------------------------------------------
+
+    def _build_svg_labels_tab(self) -> QWidget:
+        tab    = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        hint = QLabel(
+            "Prefixen die herkend worden als wandpunt in SVG bestanden.\n"
+            "Bv. M, WO, WAP, D — labels zoals M1, WAP03, D20 worden dan als klikpunt getoond."
+        )
+        hint.setObjectName("secondary")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        list_row = QHBoxLayout()
+        self._prefix_list = QListWidget()
+        self._prefix_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._prefix_list.currentRowChanged.connect(self._on_prefix_row_changed)
+        list_row.addWidget(self._prefix_list, stretch=1)
+
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(4)
+        btn_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._btn_prefix_add = QPushButton("＋  " + t("btn_add"))
+        self._btn_prefix_del = QPushButton("🗑  " + t("ctx_delete"))
+        for btn in (self._btn_prefix_add, self._btn_prefix_del):
+            btn.setMinimumWidth(110)
+            btn_col.addWidget(btn)
+        self._btn_prefix_add.clicked.connect(self._on_prefix_add)
+        self._btn_prefix_del.clicked.connect(self._on_prefix_delete)
+        list_row.addLayout(btn_col)
+        layout.addLayout(list_row)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(sep)
+
+        restore_row = QHBoxLayout()
+        restore_row.addStretch()
+        btn_restore = QPushButton("↺  " + t("settings_loc_restore"))
+        btn_restore.clicked.connect(self._on_prefix_restore)
+        restore_row.addWidget(btn_restore)
+        layout.addLayout(restore_row)
+        return tab
+
+    def _refresh_prefix_list(self, select_idx: int = -1):
+        self._prefix_list.clear()
+        for p in self._svg_prefixes:
+            self._prefix_list.addItem(QListWidgetItem(p))
+        if select_idx >= 0 and select_idx < self._prefix_list.count():
+            self._prefix_list.setCurrentRow(select_idx)
+        self._on_prefix_row_changed(self._prefix_list.currentRow())
+
+    def _on_prefix_row_changed(self, row: int):
+        self._btn_prefix_del.setEnabled(row >= 0)
+
+    def _on_prefix_add(self):
+        from PySide6.QtWidgets import QInputDialog
+        val, ok = QInputDialog.getText(self, "SVG Label Prefix", "Prefix (bv. M, WAP, D):")
+        if not ok or not val.strip():
+            return
+        prefix = val.strip().upper()
+        if prefix in self._svg_prefixes:
+            QMessageBox.warning(self, "SVG Labels", f"Prefix '{prefix}' bestaat al.")
+            return
+        self._svg_prefixes.append(prefix)
+        self._refresh_prefix_list(len(self._svg_prefixes) - 1)
+
+    def _on_prefix_delete(self):
+        row = self._prefix_list.currentRow()
+        if row < 0:
+            return
+        prefix = self._svg_prefixes[row]
+        reply = QMessageBox.question(
+            self, t("menu_delete"),
+            f"{t('msg_confirm_delete')}\n\n{prefix}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._svg_prefixes.pop(row)
+        self._refresh_prefix_list(max(0, row - 1))
+
+    def _on_prefix_restore(self):
+        reply = QMessageBox.question(
+            self, "SVG Labels",
+            "Standaard prefixen herstellen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from app.helpers.settings_storage import _DEFAULT_OUTLET_LABEL_PREFIXES
+        self._svg_prefixes = list(_DEFAULT_OUTLET_LABEL_PREFIXES)
+        self._refresh_prefix_list(0)
+
+    # ------------------------------------------------------------------
     # Opslaan
     # ------------------------------------------------------------------
 
@@ -913,6 +1156,7 @@ class SettingsWindow(QDialog):
         settings_storage.save_endpoint_types(self._ep_types)
         settings_storage.save_device_types(self._dev_types)
         settings_storage.save_outlet_locations(self._loc_types)
+        settings_storage.save_outlet_label_prefixes(self._svg_prefixes)
 
         if lang_changed:
             i18n.set_language(new_lang)

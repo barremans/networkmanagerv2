@@ -1,106 +1,111 @@
-# Networkmap Creator — Openstaande werkpunten v5
-
-# Networkmap Creator — Openstaande werkpunten v8
+# Networkmap Creator — Openstaande werkpunten v13
 
 ## Legende
-- 🔴 Bug
-- 🟠 Functionele verbetering (hoge prioriteit)
-- 🟡 Visuele verbetering
-- 🔵 Export
-- ⚪ Later / security
-- 🟣 Nieuw
-- ✅ Opgelost
-- ⏸ Op hold
+- 🔴 Bug  |  🟠 Hoge prioriteit  |  🟡 Visueel  |  🔵 Export  |  ⚪ Later  |  🟣 Nieuw  |  ✅ Opgelost  |  ⏸ Hold
 
 ---
 
-## 1. Bugs
-
-| ID | Omschrijving | Bestand(en) | Status |
-|---|---|---|---|
-| B2 | Cross-rack poort inkleuring (Qt render timing) | `rack_view.py`, `main_window.py` | ⏸ Uitgesteld |
-| B6 | Rack device bewerken — positie niet aanpasbaar | `place_device_dialog.py`, `main_window.py` | ✅ Opgelost |
-| B7 | Instellingen menu dubbel | `main_window.py` | ✅ Opgelost |
-| B8 | Cross-side port highlight (front↔back patchpanel) | `tracing.py`, `rack_view.py`, `main_window.py` | ⏸ Op hold |
-| B9 | Backup mislukt na verloop van tijd | `backup_service.py` | ✅ Opgelost |
-| B10 | Backup neemt settings niet mee (endpoint types, device types, outlet locations) | `backup_service.py`, `settings_storage.py` | 🔴 Open — volgende stap |
-
----
-
-## 2. Functionele verbeteringen
-
-| ID | Omschrijving | Bestand(en) | Status |
-|---|---|---|---|
-| F5 | Read-only modus | meerdere | ✅ Opgelost |
-| F6 | Tracing per device groeperen in wandpuntenview | `wall_outlet_view.py` | 🟠 Open |
-| F7 | Rack verplaatsen naar andere ruimte | `main_window.py`, `rack_dialog.py` | 🟠 Open |
-| F8 | Volgorde wandpunt locaties bepalen in overzicht | `wall_outlet_view.py` | 🟠 Open |
-
----
-
-## 3. Visuele verbeteringen
-
-| ID | Omschrijving | Bestand(en) | Status |
-|---|---|---|---|
-| V1 | Wandpunt popup dubbel icoon in settings | `settings_window.py` | 🟡 Open |
-| V2 | Custom gekleurde devices minder zichtbaar | `rack_view.py`, `main.qss` | 🟡 Open |
-| V3 | Extra ruimte tussen devices in rack | `rack_view.py`, `place_device_dialog.py` | 🟡 Open |
-| V4 | Afbeeldingexport rack te lang | export module | 🟡 Open |
-| V5 | Wandpunten visueel groeperen per locatie | `wall_outlet_view.py` | ✅ Opgelost v1.4.0 |
-
----
-
-## 4. Export
+## Bugs
 
 | ID | Omschrijving | Status |
 |---|---|---|
-| E1 | Word-export uitbreiden | 🔵 Open |
-| E2 | Tekstuele rack-export | 🔵 Open |
-| E3 | Afbeeldingexport rack compacter | 🔵 Open |
+| B2 | Cross-rack poort inkleuring | ⏸ Uitgesteld |
+| B8 | Cross-side port highlight (front↔back) | ⏸ Op hold |
+| B-BACKUP | Backup live omgeving via Intune | ✅ backup_service 1.4.6 |
 
 ---
 
-## 5. Security
+## Grondplannen (G)
 
 | ID | Omschrijving | Status |
 |---|---|---|
-| S1 | MFA via AD | ⚪ Later |
+| G1-G11 | SVG grondplan module volledig werkend | ✅ |
+| G-OPEN-1 | M8 verwijderen uit bestaande floorplans.json | ⏸ Hold |
+| G-OPEN-2 | Notities + naam tonen in Info tab zijpaneel FloorplanView | ✅ floorplan_view 1.12.0 |
+| G-OPEN-3 | Koppeling verwijderen via rechtsklik overlay | ✅ floorplan_view 1.11.0 |
+| G-OPEN-4 | SVG label preview bij importeren in FloorplanDialog | ⏸ Hold |
+| G-OPEN-5 | SVG vervangen/updaten voor bestaand grondplan | ✅ floorplan_service 1.5.0 |
+| G-OPEN-6 | Verouderde mappings automatisch opkuisen bij SVG update | ✅ floorplan_service 1.5.0 |
+| G-OPEN-7 | Bulk koppeling SVG punten ↔ wandpunten via tabel | ⏸ Hold |
+| G-OPEN-8 | Grondplan exporteren als PNG/PDF met overlays | 🔵 Open |
+| G-OPEN-9 | Grondplan meenemen in Word export | 🔵 Open |
+| G-SVG-BUG | foreignObject tekst linksboven (draw.io SVG) | ⏸ Workaround: gebruik Plain SVG export |
+| G-SVG-FIX | light-dark() zwarte vlakken + label prefixen | ✅ floorplan_svg_service 1.6.0 |
+
+**SVG werkwijze:**
+1. Teken in draw.io
+2. Open in Inkscape → id's toewijzen aan wandpunt elementen
+3. Exporteer als **Plain SVG** (File → Save As → Plain SVG)
+4. Importeer in app → labels worden automatisch gedetecteerd
 
 ---
 
-## 6. Overig
+## Backup verbeteringen (B-NEW)
 
 | ID | Omschrijving | Status |
 |---|---|---|
-| O1 | CSV import | 🟣 Open |
+| B-NEW-1 | `floorplans.json` meenemen in backup | ✅ backup_service 1.4.6 |
+| B-NEW-2 | SVG bestanden map (`floorplans/`) meenemen in backup | ✅ backup_service 1.4.6 |
+
+**Belangrijke noot:**
+- Backup pad moet een **submap** zijn, bv. `\\server\share\Bck` — niet de root share zelf
+- Root share geeft `FileNotFoundError` bij `mkdir()` op Windows UNC
 
 ---
 
-## 7. SVG Tekeningen
+## Restore (nieuw)
 
 | ID | Omschrijving | Status |
 |---|---|---|
-| G1 | Grondplan opladen + linken aan ruimte | 🟣 Open |
-| G2 | Grondplan bekijken in applicatie | 🟣 Open |
+| R-1 | Backup herstellen vanuit history naar lokale data | 🟠 Open — volgende chat |
 
 ---
 
-## Aanbevolen volgorde
+## Functionele verbeteringen (F)
 
-1. **B10** — Backup settings mee nemen *(volgende stap)*
-2. **F7** — Rack verplaatsen naar andere ruimte
-3. **F8** — Volgorde wandpunt locaties
-4. **V1 + V2 + V3** — Visuele fixes
-5. **F6** — Tracing per device groeperen
-6. **E1 + E2 + E3** — Export
-7. **G1 + G2** — SVG grondplannen
-8. **O1** — CSV import
-9. **S1** — MFA/AD
-10. **B8** — Cross-side highlight herbekijken
-11. **B2** — Cross-rack highlight
+| ID | Omschrijving | Status |
+|---|---|---|
+| F5 | Read-only modus | ✅ |
+| F6 | Sort_id per wandpunt | ✅ |
+| F7 | Rack verplaatsen | ✅ |
+| F8 | Volgorde wandpunt locaties | ✅ |
 
-# Bugs - Extra
-1. bestaande grondplan kunnen wissen
-2. wandpunt eindapparaat kunnen aan maken zonder dat je een nieuw wandpunt moet maken
-3. wandpunt locaties aan een site kunnen koppelen om zo DDL keuzes te beperken
+---
 
+## Visuele verbeteringen (V)
+
+| ID | Omschrijving | Status |
+|---|---|---|
+| V1 | Wandpunt popup dubbel icoon | ✅ |
+| V2 | Custom gekleurde devices tekstzichtbaarheid | ⏸ Op hold |
+| V3 | Extra ruimte tussen devices in rack | ✅ |
+| V5 | Wandpunten groeperen per locatie | ✅ |
+
+---
+
+## Wandpunten (W)
+
+| ID | Omschrijving | Status |
+|---|---|---|
+| W1 | Eindapparaat aanmaken vanuit wandpunt | ✅ |
+| W2 | Wandpunt locaties koppelen aan site | ⏸ Op hold |
+
+---
+
+## Export / Import / Overig
+
+| ID | Omschrijving | Status |
+|---|---|---|
+| E1-E3 | Export uitbreiden | 🔵 Open |
+| O1 | CSV import | ⏸ Hold |
+| S1 | MFA/AD | ⚪ Later |
+
+---
+
+## Aanbevolen volgorde nieuwe chat
+
+1. **R-1** — Backup restore functionaliteit
+2. **E1-E3** — Export uitbreiden
+3. **G-OPEN-8/9** — Grondplan exporteren als PNG/PDF + Word
+4. **V2** — Custom device kleur tekstzichtbaarheid (on hold)
+5. **B2/B8** — Cross-rack/cross-side highlight (on hold)

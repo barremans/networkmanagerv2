@@ -2,12 +2,22 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.8.0
+# Version: 1.12.0
 # Author:  Barremans
-# Changes: 1.8.0 — Witte achtergrond voor SVG viewer (ongeacht app thema)
-#                   Overlays: voller (alpha 160, rand 2.5px) voor donker thema
-#                   Validatie: waarschuwing voor verouderde mappings (niet in SVG)
-#          1.7.0 — Fallback M1..M8 verwijderd, kleuren donker thema
+# Changes: 1.12.0 — G-OPEN-2: Info tab in zijpaneel — naam + notities van het grondplan
+#                   _tab_info met _lbl_info_name en _txt_info_notes (readonly)
+#                   _refresh_info() aangeroepen vanuit _refresh_sidepanel() en _refresh_from_storage()
+#          1.11.0 — G-OPEN-3: rechtsklik op overlay → contextmenu "Koppeling verwijderen"
+#                    Alleen zichtbaar bij gekoppeld punt + niet in read-only modus
+#          1.10.0 — SVG foreignObject bug opgelost
+#                    Draw.io exporteert M-labels als <foreignObject> zonder x/y.
+#                    Qt rendert foreignObject als tekst op (0,0) linksboven.
+#                    Fix: _load_svg laadt gecleande SVG via temp-bestand
+#                    (foreignObjects gestript via floorplan_svg_service.get_cleaned_svg_text)
+#          1.9.0 — Vals label fix: overlay alleen aanmaken als positie bekend
+#                   Naam + notities tonen in titelbalk
+#                   _refresh_from_storage: geen nieuwe overlays voor onbekende punten
+#          1.8.0 — Witte achtergrond, overlay alpha, verouderde mappings validatie
 #                   _OverlayItem: klikbare cirkel op SVG coördinaten
 #                   showEvent: fit-to-screen betrouwbaar bij eerste toon
 #                   _refresh_sidepanel bug: "Geen grondplan" tekst vervangen
@@ -41,10 +51,14 @@
 # Ze kan later veilig vanuit MainWindow geopend worden.
 # =============================================================================
 
+import os
+import tempfile
+
 from PySide6.QtCore import Qt, Signal, QRectF
 from PySide6.QtGui import QAction, QPainter, QBrush, QColor, QPen, QFont
 from PySide6.QtSvgWidgets import QGraphicsSvgItem
 from PySide6.QtWidgets import (
+    QFormLayout,
     QFrame,
     QGraphicsEllipseItem,
     QGraphicsScene,
@@ -90,13 +104,14 @@ class _OverlayItem(QGraphicsEllipseItem):
     - Cursor verandert naar hand bij hover
     """
 
-    def __init__(self, label: str, x: float, y: float, callback, parent=None):
+    def __init__(self, label: str, x: float, y: float, callback, unmap_callback=None, parent=None):
         r = _OVERLAY_R
         super().__init__(x - r, y - r, r * 2, r * 2, parent)
-        self._label    = label
-        self._callback = callback
-        self._mapped   = False
-        self._selected = False
+        self._label          = label
+        self._callback       = callback
+        self._unmap_callback = unmap_callback  # G-OPEN-3: rechtsklik verwijderen
+        self._mapped         = False
+        self._selected       = False
 
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -138,6 +153,11 @@ class _OverlayItem(QGraphicsEllipseItem):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._callback(self._label)
+            event.accept()
+        elif event.button() == Qt.MouseButton.RightButton:
+            # G-OPEN-3: contextmenu alleen voor gekoppelde punten
+            if self._mapped and self._unmap_callback:
+                self._unmap_callback(self._label)
             event.accept()
         else:
             super().mousePressEvent(event)
@@ -248,7 +268,11 @@ class FloorplanView(QWidget):
         viewer_layout.setContentsMargins(12, 12, 6, 12)
         viewer_layout.setSpacing(6)
 
-        self._title_label = QLabel(t("title_floorplan_view"))
+        # Titel: naam + locatie indien beschikbaar
+        name = self._floorplan.get("name", "") or ""
+        loc  = self._floorplan.get("outlet_location_key", "") or ""
+        title_txt = name if name else (loc if loc else t("title_floorplan_view"))
+        self._title_label = QLabel(title_txt)
         self._title_label.setObjectName("secondary")
         viewer_layout.addWidget(self._title_label)
 
@@ -343,10 +367,28 @@ class FloorplanView(QWidget):
         self._validation_list = QListWidget()
         val_layout.addWidget(self._validation_list)
 
-        self._tabs.addTab(self._tab_selection, t("floorplan_tab_selection"))
-        self._tabs.addTab(self._tab_mapping, t("floorplan_tab_mapping"))
-        self._tabs.addTab(self._tab_trace, t("floorplan_tab_trace"))
+        # Tab 5: info (G-OPEN-2)
+        self._tab_info = QWidget()
+        info_layout = QFormLayout(self._tab_info)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+        info_layout.setSpacing(8)
+
+        self._lbl_info_name = QLabel("-")
+        self._lbl_info_name.setWordWrap(True)
+
+        self._txt_info_notes = QTextEdit()
+        self._txt_info_notes.setReadOnly(True)
+        self._txt_info_notes.setMinimumHeight(80)
+        self._txt_info_notes.setPlaceholderText("-")
+
+        info_layout.addRow(f"{t('label_name')}:", self._lbl_info_name)
+        info_layout.addRow(f"{t('label_notes')}:", self._txt_info_notes)
+
+        self._tabs.addTab(self._tab_selection,  t("floorplan_tab_selection"))
+        self._tabs.addTab(self._tab_mapping,    t("floorplan_tab_mapping"))
+        self._tabs.addTab(self._tab_trace,      t("floorplan_tab_trace"))
         self._tabs.addTab(self._tab_validation, t("floorplan_tab_validation"))
+        self._tabs.addTab(self._tab_info,       t("floorplan_tab_info"))
 
         side_layout.addWidget(self._tabs, 1)
 
@@ -370,6 +412,7 @@ class FloorplanView(QWidget):
         self._detected_svg_points = []
         self._overlay_items = {}
         self._fit_done = False
+        self._svg_temp_file = None  # bewaar referentie zodat temp-bestand niet te vroeg verwijderd wordt
 
         svg_path = floorplan_service.get_svg_path(self._floorplan)
 
@@ -378,7 +421,25 @@ class FloorplanView(QWidget):
             self._refresh_validation()
             return
 
-        self._svg_item = QGraphicsSvgItem(str(svg_path))
+        # Strip <foreignObject> elementen vóór rendering.
+        # Draw.io exporteert M-labels als <foreignObject width="100%" height="100%">
+        # zonder x/y positie. Qt rendert deze als tekst op (0,0) linksboven.
+        # De <switch> bevat ook een <image> fallback — die wordt correct gebruikt
+        # nadat foreignObject verwijderd is.
+        cleaned_svg = floorplan_svg_service.get_cleaned_svg_text(svg_path)
+        if cleaned_svg:
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=".svg", delete=False, mode="w", encoding="utf-8"
+            )
+            tmp.write(cleaned_svg)
+            tmp.flush()
+            tmp.close()
+            self._svg_temp_file = tmp.name
+            render_path = tmp.name
+        else:
+            render_path = str(svg_path)
+
+        self._svg_item = QGraphicsSvgItem(render_path)
         self._scene.addItem(self._svg_item)
         self._scene.setSceneRect(self._svg_item.boundingRect())
 
@@ -391,6 +452,7 @@ class FloorplanView(QWidget):
             overlay = _OverlayItem(
                 label=label, x=x, y=y,
                 callback=self._on_overlay_clicked,
+                unmap_callback=self._on_overlay_unmap,
             )
             overlay.set_mapped(label in mappings)
             self._scene.addItem(overlay)
@@ -405,10 +467,39 @@ class FloorplanView(QWidget):
             self._on_fit()
             self._fit_done = True
 
+    def closeEvent(self, event):
+        """Ruim temp-bestand op bij sluiten van de view."""
+        super().closeEvent(event)
+        self._cleanup_temp_svg()
+
+    def _cleanup_temp_svg(self):
+        """Verwijder het tijdelijk gecleande SVG bestand indien aanwezig."""
+        tmp = getattr(self, "_svg_temp_file", None)
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            self._svg_temp_file = None
+
     def _on_overlay_clicked(self, label: str):
         """Overlay aangeklikt — selecteer punt en switch naar mapping tab."""
         self.set_selected_svg_point(label)
         self._tabs.setCurrentWidget(self._tab_mapping)
+
+    def _on_overlay_unmap(self, label: str):
+        """
+        G-OPEN-3: rechtsklik op gekoppelde overlay → koppeling direct verwijderen.
+        Alleen actief als niet in read-only modus.
+        """
+        if settings_storage.get_read_only_mode():
+            return
+        floorplan_service.remove_mapping(self._floorplan["id"], label)
+        if self._selected_svg_point == label:
+            self._selected_outlet_id = None
+        self._refresh_from_storage()
+        if self._selected_svg_point == label:
+            self._refresh_sidepanel()
 
     # ------------------------------------------------------------------
     # Publieke API
@@ -546,16 +637,24 @@ class FloorplanView(QWidget):
         """
         Laad de meest recente floorplan-data opnieuw in vanuit storage.
         Zo blijven mappings synchroon na dialoog-acties.
+        Overlay kleuren bijwerken — geen nieuwe overlays aanmaken voor
+        verouderde mappings zonder bekende SVG-positie (vals label fix).
         """
         latest = floorplan_service.get_floorplan(self._floorplan.get("id", ""))
         if latest:
             self._floorplan = latest
 
-        # Overlay kleuren bijwerken
+        # Overlay kleuren bijwerken — ALLEEN voor bekende posities
         mappings = self._floorplan.get("mappings", {})
         for label, overlay in self._overlay_items.items():
             overlay.set_mapped(label in mappings)
             overlay.set_selected(label == self._selected_svg_point)
+
+        # Naam bijwerken indien aanwezig
+        name = self._floorplan.get("name", "") or ""
+        loc  = self._floorplan.get("outlet_location_key", "") or ""
+        title_txt = name if name else (loc if loc else t("title_floorplan_view"))
+        self._title_label.setText(title_txt)
 
         self._refresh_validation()
         self._refresh_sidepanel()
@@ -583,6 +682,21 @@ class FloorplanView(QWidget):
             self._trace_info.setPlainText(f"{t('label_wall_outlet')}: {outlet_txt}")
         else:
             self._trace_info.setPlainText(t("trace_no_connection"))
+
+        self._refresh_info()
+
+    def _refresh_info(self):
+        """G-OPEN-2 — Naam en notities van het huidige grondplan tonen in de Info tab."""
+        if not self._floorplan:
+            self._lbl_info_name.setText("-")
+            self._txt_info_notes.setPlainText("")
+            return
+
+        name  = self._floorplan.get("name", "") or ""
+        notes = self._floorplan.get("description", "") or ""
+
+        self._lbl_info_name.setText(name if name else "-")
+        self._txt_info_notes.setPlainText(notes)
 
     def _refresh_validation(self):
         self._validation_list.clear()

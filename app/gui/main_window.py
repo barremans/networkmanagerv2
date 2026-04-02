@@ -2,9 +2,17 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.37.0
+# Version: 1.40.0
 # Author:  Barremans
-# Changes: 1.37.0 — G1/G2/G3: Grondplannen volledig geïntegreerd
+# Changes: 1.40.0 — G-OPEN-2: floorplan_changed signaal van FloorplanManageDialog
+#                   gekoppeld aan FloorplanView._refresh_from_storage()
+#                   zodat Info tab live ververst bij opslaan in beheer-dialoog
+#          1.39.0 — B-NEW-1/2: _save_and_backup uitgebreid met
+#                   floorplans_path + floorplans_dir parameters
+#                   zodat floorplans.json + SVG map meegenomen worden in backup
+#                   _on_outlet_endpoint_requested handler toegevoegd
+#                   Eindapparaat aanmaken/bewerken vanuit wandpunt kaartje
+#          1.37.0 — G1/G2/G3: Grondplannen volledig geïntegreerd
 #                   Menu: Nieuw, Bekijk (met site-filter + DDL), Beheren
 #                   Context menu op wandpunt locatie: Bekijk grondplan
 #                   _show_floorplan_view: setParent ipv deleteLater (consistent)
@@ -820,6 +828,38 @@ class MainWindow(QMainWindow):
                         })
                         return
 
+    def _on_outlet_endpoint_requested(self, outlet_id: str):
+        """
+        W1: Eindapparaat toevoegen/bewerken vanuit WallOutletView
+        (rechtsklik of detail popup knop).
+        Opent WallOutletDialog gefocust op het eindapparaat gedeelte.
+        """
+        if settings_storage.get_read_only_mode():
+            return
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo["id"] == outlet_id:
+                        endpoints = self._data.get("endpoints", [])
+                        dlg = WallOutletDialog(
+                            parent=self,
+                            room_id=room["id"],
+                            endpoints=endpoints,
+                            outlet=wo,
+                            existing_outlets=room.get("wall_outlets", []),
+                        )
+                        if dlg.exec() and dlg.get_result():
+                            self._data["endpoints"] = dlg.get_endpoints_result()
+                            wo.update(dlg.get_result())
+                            self._save_and_backup()
+                            self._populate_tree()
+                            if isinstance(self._current_view, WallOutletView):
+                                self._current_view.refresh(self._data)
+                            self.set_status(
+                                f"✓  {t('label_wall_outlet')} '{wo['name']}' bijgewerkt."
+                            )
+                        return
+
     def _delete_wall_outlet(self, data: dict):
         """Wandpunt verwijderen via context menu."""
         if settings_storage.get_read_only_mode():          # F5
@@ -1009,6 +1049,7 @@ class MainWindow(QMainWindow):
                                      mode="room", parent=self._mid_frame)
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
         outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
+        outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -1023,6 +1064,7 @@ class MainWindow(QMainWindow):
                                      mode="site", parent=self._mid_frame)
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
         outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
+        outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -2265,11 +2307,16 @@ class MainWindow(QMainWindow):
     def _on_floorplan_manage(self):
         """G3 — Grondplannen beheren (naam, site, locatie, verwijderen)."""
         from app.gui.dialogs.floorplan_manage_dialog import FloorplanManageDialog
+        from app.gui.floorplan_view import FloorplanView
         dlg = FloorplanManageDialog(parent=self, data=self._data)
+        # Live refresh: signaal direct doorsturen naar open FloorplanView
+        def _on_fp_changed(fp_id: str):
+            if isinstance(self._current_view, FloorplanView):
+                self._current_view._refresh_from_storage()
+        dlg.floorplan_changed.connect(_on_fp_changed)
         dlg.exec()
-        # Als huidige view een grondplan is: herlaad na mogelijke wijzigingen
+        # Na sluiten: nog eens verversen bij eventuele verwijderingen
         if dlg.has_changes():
-            from app.gui.floorplan_view import FloorplanView
             if isinstance(self._current_view, FloorplanView):
                 self._current_view._refresh_from_storage()
 
@@ -2824,7 +2871,9 @@ class MainWindow(QMainWindow):
             source = settings_storage.get_network_data_path()
             ok, err = backup_service.create_backup(
                 source, backup_cfg,
-                settings_path=settings_storage.get_settings_path()  # B10
+                settings_path=settings_storage.get_settings_path(),      # B10
+                floorplans_path=settings_storage.get_floorplans_path(),  # B-NEW-1
+                floorplans_dir=settings_storage.get_floorplans_dir(),    # B-NEW-2
             )
             if ok:
                 log_info(f"Backup aangemaakt naar: {network_path}")

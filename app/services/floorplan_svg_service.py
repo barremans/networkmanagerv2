@@ -2,9 +2,19 @@
 # Networkmap_Creator
 # File:    app/services/floorplan_svg_service.py
 # Role:    SVG analyse voor floorplans — detectie van puntlabels + posities
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.4.0 — Correcte positie-detectie voor draw.io SVG:
+# Changes: 1.6.0 — light-dark() CSS fix: Qt begrijpt deze CSS Level 5 functie niet
+#                   → vervangen door eerste waarde (lichte variant) voor witte achtergrond
+#                   SVG label prefixen dynamisch vanuit settings_storage
+#          1.5.2 — WAP prefix + recursieve bugfix
+#                   Draw.io exporteert M-labels als <foreignObject width="100%" height="100%">
+#                   Qt's SVG renderer begrijpt foreignObject niet en rendert de tekst
+#                   op positie (0,0) linksboven — zichtbaar als "M1 M2 M3..." label bug.
+#                   De <switch> bevat ook een <image> fallback voor SVG renderers.
+#                   Fix: verwijder foreignObject zodat Qt de image fallback gebruikt.
+#                   get_cleaned_svg_text() publieke helper voor floorplan_view.py
+#          1.4.0 — Correcte positie-detectie voor draw.io SVG:
 #                   g elementen met id="M1" etc. bevatten echte SVG coördinaten
 #                   _find_svg_g_labels() leest rect/image positie uit g subtree
 #                   Geen mxGeometry conversie meer nodig voor draw.io exports
@@ -23,21 +33,36 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
-# Regex patronen
+# Regex patronen — dynamisch opgebouwd vanuit settings
 # ---------------------------------------------------------------------------
 
-# Labels: M1, M2, M12, WO1, WO-1, WP1 — GEEN C-suffix varianten (M1C)
-# M1C is het wandcontact-symbool, niet het wandpunt zelf
-_POINT_LABEL_RE = re.compile(
-    r"^(?:M|WO|WP)\d+$",
-    re.IGNORECASE,
-)
+def _build_label_regexes():
+    """
+    Bouw de label regex patronen op vanuit settings_storage.
+    Fallback naar hardcoded defaults als settings niet beschikbaar zijn.
+    """
+    try:
+        from app.helpers.settings_storage import load_outlet_label_prefixes
+        prefixes = load_outlet_label_prefixes()
+    except Exception:
+        prefixes = ["M", "WO", "WP", "WAP"]
 
-# Ruimer patroon voor tekst-scan (inclusief C-suffix, later gefilterd)
-_TEXT_TOKEN_RE = re.compile(
-    r"\b(?:M|WO|WP)[-_]?[A-Z0-9]+\b",
-    re.IGNORECASE,
-)
+    prefix_pattern = "|".join(re.escape(p) for p in prefixes)
+
+    point_re = re.compile(
+        rf"^(?:{prefix_pattern})\d+$",
+        re.IGNORECASE,
+    )
+    token_re = re.compile(
+        rf"\b(?:{prefix_pattern})[-_]?[A-Z0-9]+\b",
+        re.IGNORECASE,
+    )
+    return point_re, token_re
+
+
+def _get_label_regexes():
+    """Geeft de huidige label regex patronen terug (herberekend bij elke aanroep)."""
+    return _build_label_regexes()
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +80,83 @@ def load_svg_text(svg_path: str | Path) -> str:
             return ""
     except Exception:
         return ""
+
+
+def get_cleaned_svg_text(svg_path: str | Path) -> str:
+    """
+    Laad SVG tekst en pas twee fixes toe voor Qt rendering:
+    1. Verwijder alle <foreignObject> elementen (draw.io label bug)
+    2. Vervang light-dark() CSS functie door de lichte waarde
+       Qt begrijpt light-dark() niet en toont alles zwart op witte achtergrond
+    """
+    raw = load_svg_text(svg_path)
+    if not raw:
+        return raw
+    cleaned = _strip_foreign_objects(raw)
+    cleaned = _fix_light_dark(cleaned)
+    return cleaned
+
+
+def _strip_foreign_objects(svg_text: str) -> str:
+    """Verwijder alle <foreignObject>...</foreignObject> blokken."""
+    return re.sub(
+        r"<foreignObject\b[^>]*>.*?</foreignObject\s*>",
+        "",
+        svg_text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+
+
+def _fix_light_dark(svg_text: str) -> str:
+    """
+    Vervang light-dark(licht, donker) door de lichte waarde.
+    Qt's SVG renderer ondersteunt deze CSS Level 5 functie niet.
+    De SVG heeft een witte achtergrond → lichte variant is correct.
+
+    Ondersteunt geneste haakjes zoals rgb() en var().
+      light-dark(#ffffff, var(--ge-dark-color, #121212))  →  #ffffff
+      light-dark(rgb(0, 0, 0), rgb(255, 255, 255))        →  rgb(0, 0, 0)
+    """
+    result = []
+    i = 0
+    pattern = re.compile(r'light-dark\(', re.IGNORECASE)
+
+    while i < len(svg_text):
+        m = pattern.search(svg_text, i)
+        if not m:
+            result.append(svg_text[i:])
+            break
+
+        result.append(svg_text[i:m.start()])
+        pos = m.end()
+        depth = 1
+        first_arg_end = None
+        close_pos = pos
+
+        while pos < len(svg_text) and depth > 0:
+            ch = svg_text[pos]
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+                if depth == 0:
+                    close_pos = pos
+                    if first_arg_end is None:
+                        first_arg_end = pos
+                    break
+            elif ch == ',' and depth == 1:
+                if first_arg_end is None:
+                    first_arg_end = pos
+            pos += 1
+
+        if first_arg_end is not None:
+            result.append(svg_text[m.end():first_arg_end].strip())
+        else:
+            result.append(svg_text[m.start():close_pos + 1])
+
+        i = close_pos + 1  # sla sluitende ) van light-dark() over
+
+    return "".join(result)
 
 
 def detect_point_labels(svg_path: str | Path) -> list[str]:
@@ -273,7 +375,7 @@ def _collect_svg_text_positions(
                 result[label] = (x, y)
 
     for child in elem:
-        _collect_svg_text_positions(child, cx, cy, offset_x, offset_y)
+        _collect_svg_text_positions(child, result, cx, cy)
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +400,8 @@ def _extract_candidate_labels_from_element(elem: ET.Element) -> set[str]:
 
 def _extract_candidate_labels_from_text(text: str) -> set[str]:
     found: set[str] = set()
-    for token in _TEXT_TOKEN_RE.findall(text or ""):
+    _, token_re = _get_label_regexes()
+    for token in token_re.findall(text or ""):
         norm = _normalize_point_label(token)
         if _is_point_label(norm):
             found.add(norm)
@@ -329,7 +432,8 @@ def _normalize_point_label(label: str) -> str:
 def _is_point_label(label: str) -> bool:
     if not label or len(label) < 2:
         return False
-    return _POINT_LABEL_RE.match(label) is not None
+    point_re, _ = _get_label_regexes()
+    return point_re.match(label) is not None
 
 
 def _parse_transform_offset(transform: str) -> tuple[float, float]:

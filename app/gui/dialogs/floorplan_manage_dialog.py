@@ -2,9 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_manage_dialog.py
 # Role:    Dialoog — grondplan beheren (naam, site, locatie, verwijderen)
-# Version: 1.0.1
+# Version: 1.2.0
 # Author:  Barremans
-# Changes: 1.0.1 — Fix: currentRowChanged → itemSelectionChanged (PySide6 API)
+# Changes: 1.2.0 — G-OPEN-5/6: knop "SVG vervangen" naast SVG label
+#                  roept floorplan_service.replace_svg() aan
+#                  toont melding met verwijderde verouderde koppelingen
+#                  floorplan_changed signaal wordt ook na SVG-wissel geëmit
+#          1.1.0 — floorplan_changed signaal toegevoegd
+#                  wordt geëmit direct na opslaan zodat FloorplanView live kan verversen
+#          1.0.1 — Fix: currentRowChanged → itemSelectionChanged (PySide6 API)
 #          1.0.0 — Initiële versie
 #                   Tabel met alle geldige grondplannen
 #                   Bewerken: naam, beschrijving, site, wandpunt locatie
@@ -12,7 +18,7 @@
 #                   Read-only compatibel
 # =============================================================================
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -43,6 +49,8 @@ class FloorplanManageDialog(QDialog):
     Links: tabel met alle grondplannen
     Rechts: bewerkformulier voor geselecteerd grondplan
     """
+
+    floorplan_changed = Signal(str)  # floorplan_id — emitted na elke opslag
 
     def __init__(self, parent=None, data: dict | None = None):
         super().__init__(parent)
@@ -142,10 +150,22 @@ class FloorplanManageDialog(QDialog):
         self._cmb_location = QComboBox()
         form.addRow(t("settings_tab_outlet_locations") + ":", self._cmb_location)
 
-        # SVG bestand (readonly info)
+        # SVG bestand (readonly info) + vervang knop
+        svg_row = QHBoxLayout()
+        svg_row.setContentsMargins(0, 0, 0, 0)
+        svg_row.setSpacing(6)
         self._lbl_svg = QLabel("-")
         self._lbl_svg.setObjectName("secondary")
-        form.addRow(t("label_floorplan_svg") + ":", self._lbl_svg)
+        self._btn_replace_svg = QPushButton("📂 " + t("btn_browse"))
+        self._btn_replace_svg.setFixedWidth(90)
+        self._btn_replace_svg.clicked.connect(self._on_replace_svg)
+        self._btn_replace_svg.setEnabled(False)
+        svg_row.addWidget(self._lbl_svg, 1)
+        svg_row.addWidget(self._btn_replace_svg)
+
+        svg_widget = QWidget()
+        svg_widget.setLayout(svg_row)
+        form.addRow(t("label_floorplan_svg") + ":", svg_widget)
 
         right_layout.addLayout(form)
         right_layout.addStretch(1)
@@ -247,6 +267,50 @@ class FloorplanManageDialog(QDialog):
                 not settings_storage.get_read_only_mode()
             )
 
+    def _on_replace_svg(self):
+        """G-OPEN-5/6 — Vervang SVG bestand van geselecteerd grondplan."""
+        if not self._selected_fp or settings_storage.get_read_only_mode():
+            return
+
+        from PySide6.QtWidgets import QFileDialog
+        last_folder = settings_storage.get_last_folder("floorplan_svg") or ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("label_floorplan_svg"), last_folder, "SVG (*.svg)"
+        )
+        if not path:
+            return
+
+        from pathlib import Path as _Path
+        settings_storage.set_last_folder("floorplan_svg", str(_Path(path).parent))
+
+        from app.services import floorplan_service
+        fp_id = self._selected_fp.get("id", "")
+        ok, err, removed = floorplan_service.replace_svg(fp_id, path)
+
+        if not ok:
+            QMessageBox.warning(self, self.windowTitle(), f"SVG vervangen mislukt:\n{err}")
+            return
+
+        # Toon resultaat
+        msg = t("msg_backup_ok") if hasattr(self, "_dummy") else "SVG vervangen."
+        if removed:
+            msg = f"SVG vervangen.\n\n⚠ {len(removed)} verouderde koppeling(en) verwijderd:\n{', '.join(removed)}"
+        else:
+            msg = "SVG vervangen. Alle bestaande koppelingen zijn nog geldig."
+
+        QMessageBox.information(self, self.windowTitle(), msg)
+
+        self._changed = True
+        self.floorplan_changed.emit(fp_id)
+        self._load_data()
+
+        # Herselect hetzelfde grondplan
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == fp_id:
+                self._table.selectRow(row)
+                break
+
     def _on_site_changed(self, idx: int):
         """Bij site wissel: herlaad wandpunt locaties DDL."""
         self._populate_location_ddl()
@@ -283,6 +347,7 @@ class FloorplanManageDialog(QDialog):
             outlet_location_key = loc_key,
         )
         self._changed = True
+        self.floorplan_changed.emit(fp_id)
 
         # Herlaad tabel
         self._load_data()
@@ -346,7 +411,8 @@ class FloorplanManageDialog(QDialog):
 
     def _set_form_enabled(self, enabled: bool):
         for w in [self._edit_name, self._edit_desc,
-                  self._cmb_site, self._cmb_location, self._btn_save]:
+                  self._cmb_site, self._cmb_location,
+                  self._btn_save, self._btn_replace_svg]:
             w.setEnabled(enabled)
         if not enabled:
             self._edit_name.clear()
@@ -359,6 +425,7 @@ class FloorplanManageDialog(QDialog):
         if settings_storage.get_read_only_mode():
             self._btn_save.setEnabled(False)
             self._btn_delete.setEnabled(False)
+            self._btn_replace_svg.setEnabled(False)
             self._edit_name.setReadOnly(True)
             self._edit_desc.setReadOnly(True)
             self._cmb_site.setEnabled(False)

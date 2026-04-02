@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.15.0
+# Version: 1.17.0
 # Author:  Barremans
-# Changes: F1 — msg_connect_cancelled
+# Changes: 1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
+#          F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
 #          F3 — settings_group_language, settings_group_datasource,
 #               settings_ds_*, err_ds_path_required
@@ -23,6 +24,7 @@
 #          1.13.0 — G4: floorplan vertalingen toegevoegd (NL + EN)
 #          1.14.0 — G4: floorplan SVG detectie/waarschuwing vertalingen toegevoegd
 #          1.15.0 — G4: floorplan_action_fit en floorplan_validation_ok toegevoegd
+#          1.17.0 — R-1: settings_restore_* sleutels toegevoegd (NL + EN)
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -265,6 +267,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "floorplan_tab_mapping":         "Koppelingen",
         "floorplan_tab_trace":           "Trace",
         "floorplan_tab_validation":      "Validatie",
+        "floorplan_tab_info":            "Info",
         "floorplan_mapping_svg_point":   "SVG punt",
         "floorplan_mapping_outlet":      "Wandpunt",
         "floorplan_mapping_assign":      "Koppelen",
@@ -361,6 +364,23 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_backup_max":      "Maximum aantal backups:",
         "settings_backup_now":      "💾  Nu backup maken",
         "settings_backup_test":     "Test",
+        # R-1 — Restore
+        "settings_restore_group":       "Herstel vanuit backup",
+        "settings_restore_hint":        "Kies een backup uit de geschiedenis en selecteer wat je wilt herstellen. De app herstart automatisch na het herstellen.",
+        "settings_restore_placeholder": "— selecteer backup —",
+        "settings_restore_refresh":     "Lijst verversen",
+        "settings_restore_btn":         "⬇  Herstel geselecteerde backup",
+        "settings_restore_no_sel":      "Selecteer eerst een backup.",
+        "settings_restore_no_target":   "Selecteer minimaal één onderdeel om te herstellen.",
+        "settings_restore_confirm_title": "Herstel bevestigen",
+        "settings_restore_confirm_msg": "Backup van {ts} herstellen?\n\nTe herstellen:\n  • {items}\n\nDe huidige lokale bestanden worden overschreven.\nDe app herstart automatisch na het herstellen.",
+        "settings_restore_failed":      "Herstel mislukt",
+        "settings_restore_ok_title":    "Herstel geslaagd",
+        "settings_restore_ok_msg":      "✓  Backup van {ts} succesvol hersteld.\n\nDe applicatie wordt nu afgesloten.\nStart de app opnieuw op om de herstelde data te laden.",
+        "settings_restore_item_data":   "network_data.json",
+        "settings_restore_item_settings": "settings.json",
+        "settings_restore_item_fp_json": "floorplans.json",
+        "settings_restore_item_fp_dir": "SVG bestanden",
         "settings_unit_height":     "Rack unit hoogte:",
         "settings_unit_hint":       "Wijzigingen zijn zichtbaar na herstart.",
         "settings_export_folder":             "Standaard exportmap",
@@ -792,6 +812,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "floorplan_tab_mapping":         "Mappings",
         "floorplan_tab_trace":           "Trace",
         "floorplan_tab_validation":      "Validation",
+        "floorplan_tab_info":            "Info",
         "floorplan_mapping_svg_point":   "SVG point",
         "floorplan_mapping_outlet":      "Wall outlet",
         "floorplan_mapping_assign":      "Assign",
@@ -888,6 +909,23 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_backup_max":      "Maximum number of backups:",
         "settings_backup_now":      "💾  Backup now",
         "settings_backup_test":     "Test",
+        # R-1 — Restore
+        "settings_restore_group":       "Restore from backup",
+        "settings_restore_hint":        "Choose a backup from the history and select what you want to restore. The app will restart automatically after restoring.",
+        "settings_restore_placeholder": "— select backup —",
+        "settings_restore_refresh":     "Refresh list",
+        "settings_restore_btn":         "⬇  Restore selected backup",
+        "settings_restore_no_sel":      "Please select a backup first.",
+        "settings_restore_no_target":   "Select at least one item to restore.",
+        "settings_restore_confirm_title": "Confirm restore",
+        "settings_restore_confirm_msg": "Restore backup from {ts}?\n\nTo restore:\n  • {items}\n\nCurrent local files will be overwritten.\nThe app will restart automatically after restoring.",
+        "settings_restore_failed":      "Restore failed",
+        "settings_restore_ok_title":    "Restore successful",
+        "settings_restore_ok_msg":      "✓  Backup from {ts} restored successfully.\n\nThe application will now close.\nRestart the app to load the restored data.",
+        "settings_restore_item_data":   "network_data.json",
+        "settings_restore_item_settings": "settings.json",
+        "settings_restore_item_fp_json": "floorplans.json",
+        "settings_restore_item_fp_dir": "SVG files",
         "settings_unit_height":     "Rack unit height:",
         "settings_unit_hint":       "Changes are visible after restart.",
         "settings_export_folder":             "Default Export Folder",

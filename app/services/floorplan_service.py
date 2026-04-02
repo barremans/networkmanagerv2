@@ -2,9 +2,14 @@
 # Networkmap_Creator
 # File:    app/services/floorplan_service.py
 # Role:    Floorplan beheer — SVG opslag, JSON metadata
-# Version: 1.3.0
+# Version: 1.5.0
 # Author:  Barremans
-# Changes: 1.3.0 — update_floorplan_meta() toegevoegd voor naam + beschrijving
+# Changes: 1.5.0 — G-OPEN-5/6: replace_svg() toegevoegd
+#                  vervangt SVG bestand + updatet svg_file in JSON
+#                  verwijdert automatisch verouderde mappings (G-OPEN-6)
+#                  via floorplan_svg_service.detect_point_labels()
+#          1.4.0 — create_floorplan: naam + description parameters toegevoegd
+#          1.3.0 — update_floorplan_meta() toegevoegd
 #          1.2.0 — outlet_location_key ipv room_id
 #                   backward compatible lezen van bestaande room_id data
 #                   helpers toegevoegd voor locatie-gebaseerde lookup
@@ -96,41 +101,111 @@ def create_floorplan(
     svg_source: str,
     outlet_location_key: str = "",
     room_id: str = "",
+    name: str = "",
+    description: str = "",
 ) -> dict:
     """
     Maak nieuw floorplan aan.
-
-    Nieuwe structuur:
-        site_id + outlet_location_key
-
-    Backward compatibility:
-        room_id blijft optioneel bewaard als oudere code dat nog doorgeeft.
     """
     data = load_floorplans()
 
     fid = f"fp_{uuid.uuid4().hex[:8]}"
 
-    svg_src = Path(svg_source)
+    svg_src  = Path(svg_source)
     dest_dir = _get_floorplans_dir()
-
     dest_name = f"{fid}_{svg_src.name}"
     dest_path = dest_dir / dest_name
 
     shutil.copy2(svg_src, dest_path)
 
     floorplan = {
-        "id": fid,
-        "site_id": site_id,
+        "id":                  fid,
+        "site_id":             site_id,
         "outlet_location_key": outlet_location_key,
-        "room_id": room_id,   # legacy / optioneel
-        "svg_file": dest_name,
-        "mappings": {},       # SVG point -> outlet_id
+        "room_id":             room_id,        # legacy / optioneel
+        "name":                name,
+        "description":         description,
+        "svg_file":            dest_name,
+        "mappings":            {},
     }
 
     data["floorplans"].append(floorplan)
     save_floorplans(data)
 
     return floorplan
+
+
+def replace_svg(floorplan_id: str, new_svg_source: str) -> tuple[bool, str, list[str]]:
+    """
+    G-OPEN-5/6 — Vervang het SVG bestand van een bestaand grondplan.
+
+    Stappen:
+    1. Kopieer nieuwe SVG naar de floorplans map met een nieuw bestandsnaam
+    2. Verwijder het oude SVG bestand
+    3. Update svg_file in floorplans.json
+    4. Verwijder mappings waarvan het SVG punt niet meer bestaat (G-OPEN-6)
+
+    Parameters:
+        floorplan_id    — id van het te updaten grondplan
+        new_svg_source  — volledig pad naar het nieuwe SVG bestand
+
+    Returns:
+        (True,  "",    removed_mappings)  bij succes
+        (False, fout,  [])               bij fout
+        removed_mappings: lijst van SVG punt labels waarvan de mapping verwijderd werd
+    """
+    from app.services import floorplan_svg_service
+
+    data = load_floorplans()
+    floorplan = None
+    for fp in data["floorplans"]:
+        if fp.get("id") == floorplan_id:
+            floorplan = fp
+            break
+
+    if not floorplan:
+        return False, f"Grondplan niet gevonden: {floorplan_id}", []
+
+    src = Path(new_svg_source)
+    if not src.exists() or not src.is_file():
+        return False, f"Bestand niet gevonden: {new_svg_source}", []
+
+    dest_dir  = _get_floorplans_dir()
+    old_name  = floorplan.get("svg_file", "")
+    new_name  = f"{floorplan_id}_{src.name}"
+    dest_path = dest_dir / new_name
+
+    try:
+        shutil.copy2(src, dest_path)
+    except Exception as e:
+        return False, str(e), []
+
+    # Verwijder oud SVG bestand (alleen als naam verschilt)
+    if old_name and old_name != new_name:
+        old_path = dest_dir / old_name
+        if old_path.exists():
+            try:
+                old_path.unlink()
+            except OSError:
+                pass
+
+    # Update svg_file in JSON
+    floorplan["svg_file"] = new_name
+
+    # G-OPEN-6 — verwijder verouderde mappings
+    removed: list[str] = []
+    try:
+        new_labels = set(floorplan_svg_service.detect_point_labels(str(dest_path)))
+        mappings   = floorplan.get("mappings", {})
+        stale      = [pt for pt in list(mappings.keys()) if pt not in new_labels]
+        for pt in stale:
+            del mappings[pt]
+            removed.append(pt)
+    except Exception:
+        pass  # detectie mislukt → mappings ongemoeid laten
+
+    save_floorplans(data)
+    return True, "", removed
 
 
 def delete_floorplan(floorplan_id: str):

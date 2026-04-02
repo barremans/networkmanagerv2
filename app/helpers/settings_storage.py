@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.10.0
+# Version: 1.11.0
 # Author:  Barremans
-# Changes: G4 — floorplan opslag helpers toegevoegd
+# Changes: 1.11.0 — SVG label prefixen configureerbaar via settings
+#                   _DEFAULT_OUTLET_LABEL_PREFIXES, load/save_outlet_label_prefixes
+#          1.10.0 — floorplan opslag helpers
 #               get_floorplans_path(), get_floorplans_dir()
 #               last_folders["floorplan_svg"] toegevoegd
 #          F5 — read_only_mode toegevoegd aan _DEFAULT_SETTINGS
@@ -164,6 +166,9 @@ _DEFAULT_OUTLET_LOCATIONS = [
     {"key": "other",    "label_nl": "Ander",    "label_en": "Other"},
 ]
 
+# Ingebouwde SVG label prefixen voor wandpunten — configureerbaar
+_DEFAULT_OUTLET_LABEL_PREFIXES = ["M", "WO", "WP", "WAP"]
+
 # Fallback defaults bij ontbrekend of corrupt settings.json
 _DEFAULT_SETTINGS = {
     "app_version": "1.0",
@@ -192,6 +197,7 @@ _DEFAULT_SETTINGS = {
     "endpoint_types": _DEFAULT_ENDPOINT_TYPES,
     "device_types": _DEFAULT_DEVICE_TYPES,
     "outlet_locations": _DEFAULT_OUTLET_LOCATIONS,
+    "outlet_label_prefixes": _DEFAULT_OUTLET_LABEL_PREFIXES,
     # F3 — netwerkdata locatie
     "network_data": {
         "use_network_path": False,
@@ -501,6 +507,24 @@ def get_outlet_location_label(key: str, lang: str = "nl") -> str:
         if loc.get("key") == key:
             return loc.get(f"label_{lang}", loc.get("label_nl", key))
     return key
+
+
+# ---------------------------------------------------------------------------
+# SVG label prefixen voor wandpunten (configureerbaar)
+# ---------------------------------------------------------------------------
+
+def load_outlet_label_prefixes() -> list[str]:
+    """Geeft de lijst van SVG label prefixen terug (bv. ['M', 'WO', 'WAP'])."""
+    settings = load_settings()
+    prefixes = settings.get("outlet_label_prefixes")
+    if not isinstance(prefixes, list) or len(prefixes) == 0:
+        return list(_DEFAULT_OUTLET_LABEL_PREFIXES)
+    return [str(p).strip().upper() for p in prefixes if str(p).strip()]
+
+
+def save_outlet_label_prefixes(prefixes: list[str]) -> bool:
+    cleaned = [str(p).strip().upper() for p in prefixes if str(p).strip()]
+    return save_setting("outlet_label_prefixes", cleaned)
 
 
 # ---------------------------------------------------------------------------

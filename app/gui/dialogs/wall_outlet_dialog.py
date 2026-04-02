@@ -2,18 +2,17 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
-# Changes: 1.3.0 — duplicaat-check: naam uniek per ruimte verplichten
-#          1.4.0 — VLAN veld: DDL uit vlan_config
-#          1.5.0 — Uppercase invoer: naam en locatie automatisch naar hoofdletters
+# Changes: 1.7.0 — F6: sort_id veld toegevoegd — numerieke sorteervolgorde per locatiegroep
+#                  Optioneel veld, niet ingevuld = 0 (achteraan bij sortering)
 #          1.6.0 — Locatie gewijzigd van vrij tekstveld naar configureerbare keuzelijst
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QTextEdit, QPushButton,
-    QMessageBox, QFrame, QLabel
+    QMessageBox, QFrame, QLabel, QSpinBox
 )
 from app.helpers.i18n import t
 from app.services.vlan_service import load_vlans
@@ -86,12 +85,19 @@ class WallOutletDialog(QDialog):
         self._notes    = QTextEdit()
         self._notes.setFixedHeight(56)
 
+        # Sorteervolgorde — numeriek, optioneel (0 = niet ingesteld → achteraan)
+        self._sort_id = QSpinBox()
+        self._sort_id.setRange(0, 9999)
+        self._sort_id.setSpecialValueText("—")   # 0 toont als "—"
+        self._sort_id.setToolTip("Sorteervolgorde binnen locatiegroep (0 = achteraan)")
+
         # VLAN DDL
         self._ddl_vlan = _build_vlan_ddl()
 
         form.addRow(t("label_name")     + " *:", self._name)
         form.addRow(t("label_location") + ":",   self._ddl_location)
         form.addRow("VLAN:",                     self._ddl_vlan)
+        form.addRow("Volgorde:",                 self._sort_id)
         form.addRow(t("label_notes")    + ":",   self._notes)
         layout.addLayout(form)
 
@@ -239,6 +245,7 @@ class WallOutletDialog(QDialog):
         if idx >= 0:
             self._ddl_location.setCurrentIndex(idx)
         self._notes.setPlainText(self._outlet.get("notes", ""))
+        self._sort_id.setValue(int(self._outlet.get("sort_id", 0)))
 
         # VLAN
         current_vlan = self._outlet.get("vlan")
@@ -290,6 +297,7 @@ class WallOutletDialog(QDialog):
             "location_description": self._ddl_location.currentData() or "",
             "endpoint_id":          self._ddl_ep.currentData() or "",
             "notes":                self._notes.toPlainText().strip(),
+            "sort_id":              self._sort_id.value(),
         }
         if vlan_val is not None:
             self._result["vlan"] = int(vlan_val)

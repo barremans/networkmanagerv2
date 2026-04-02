@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_dialog.py
 # Role:    Dialoog — nieuw grondplan koppelen aan site en wandpunt locatie
-# Version: 1.4.0
+# Version: 1.5.0
 # Author:  Barremans
-# Changes: 1.4.0 — bugfix: keuze gewijzigd van rooms naar Wandpunt locaties
+# Changes: 1.5.0 — Naam en notities velden toegevoegd
+#          1.4.0 — bugfix: outlet_locations ipv rooms
 #                   gebruikt settings_storage.load_outlet_locations()
 #                   slaat outlet_location_key op i.p.v. room_id
 #                   bestaande floorplan-check nu op site + locatie
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QTextEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -114,6 +116,17 @@ class FloorplanDialog(QDialog):
         self._lbl_detect_info = QLabel(t("msg_floorplan_detected_zero"))
         self._lbl_detect_info.setObjectName("secondary")
         form.addRow("", self._lbl_detect_info)
+
+        # Naam (optioneel)
+        self._edit_name = QLineEdit()
+        self._edit_name.setPlaceholderText(t("label_name") + " (optioneel)")
+        form.addRow(f"{t('label_name')}:", self._edit_name)
+
+        # Notities (optioneel)
+        self._edit_notes = QTextEdit()
+        self._edit_notes.setFixedHeight(50)
+        self._edit_notes.setPlaceholderText(t("label_notes") + " (optioneel)")
+        form.addRow(f"{t('label_notes')}:", self._edit_notes)
 
         # Site
         self._cmb_site = QComboBox()
@@ -248,9 +261,11 @@ class FloorplanDialog(QDialog):
             self._analyze_svg(svg_path, show_warning=False)
 
         created = floorplan_service.create_floorplan(
-            site_id=site_id,
-            outlet_location_key=outlet_location_key,
-            svg_source=svg_path,
+            site_id             = site_id,
+            outlet_location_key = outlet_location_key,
+            svg_source          = svg_path,
+            name                = self._edit_name.text().strip(),
+            description         = self._edit_notes.toPlainText().strip(),
         )
 
         self._result = created
