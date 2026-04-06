@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.17.0
+# Version: 1.20.0
 # Author:  Barremans
 # Changes: 1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
 #          F1 — msg_connect_cancelled
@@ -25,6 +25,11 @@
 #          1.14.0 — G4: floorplan SVG detectie/waarschuwing vertalingen toegevoegd
 #          1.15.0 — G4: floorplan_action_fit en floorplan_validation_ok toegevoegd
 #          1.17.0 — R-1: settings_restore_* sleutels toegevoegd (NL + EN)
+#          1.18.0 — E2: menu_export_rack_md, msg_rack_md_*, rack_export_* (NL + EN)
+#          1.19.0 — Import/Export/Backup vlan: msg_import_invalid_dir,
+#                   settings_restore_item_vlan (NL + EN)
+#          1.20.0 — import_mode_replace_desc, import_mode_merge_desc,
+#                   msg_import_replace_restart (NL + EN)
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -48,6 +53,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "menu_export_image":        "Exporteer afbeelding",
         "menu_export_pdf":          "Exporteer PDF",
         "menu_export_report":       "Rapport (Word)",
+        "menu_export_rack_md":      "📄  Rack export (Markdown)",
         "menu_settings":            "Instellingen",
 
         # Floorplans — G4
@@ -212,6 +218,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_pdf_export_failed":    "PDF opslaan mislukt",
         "msg_report_exported":      "Rapport opgeslagen",
         "msg_report_export_failed": "Rapport opslaan mislukt",
+        "msg_rack_md_exported":      "Rack export opgeslagen",
+        "msg_rack_md_export_failed": "Rack export mislukt",
 
         # Floorplan statusberichten — G4
         "msg_floorplan_created":        "Grondplan toegevoegd.",
@@ -282,6 +290,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "import_mode_replace":      "Vervangen",
         "import_mode_merge":        "Samenvoegen",
         "import_mode_label":        "Importmodus",
+        "import_mode_replace_desc": "Vervangen — volledige map inlezen (herstel)",
+        "import_mode_merge_desc":   "Samenvoegen — nieuwe objecten toevoegen (JSON)",
+        "msg_import_replace_restart": "Import succesvol. De applicatie wordt nu afgesloten.\nStart de app opnieuw op om de herstelde data te laden.",
         "export_filename_prefix":   "networkmap_export",
 
         # Export renderer — kolommen
@@ -334,6 +345,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_export_failed":        "Export mislukt.",
         "msg_import_replace_done":  "Import succesvol (vervangen).",
         "msg_import_merge_done":    "Import succesvol — {added} toegevoegd, {skipped} overgeslagen.",
+        "msg_import_invalid_dir":   "Geen geldige export-map. Selecteer een map met network_data.json.",
         "msg_path_ok":              "Pad bereikbaar en beschrijfbaar.",
         "msg_language_applied":     "Taalwijziging direct toegepast.",
 
@@ -381,6 +393,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_restore_item_settings": "settings.json",
         "settings_restore_item_fp_json": "floorplans.json",
         "settings_restore_item_fp_dir": "SVG bestanden",
+        "settings_restore_item_vlan":   "vlan_config.json",
         "settings_unit_height":     "Rack unit hoogte:",
         "settings_unit_hint":       "Wijzigingen zijn zichtbaar na herstart.",
         "settings_export_folder":             "Standaard exportmap",
@@ -572,6 +585,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_access_hint":          "In read-only modus zijn aanmaken, bewerken en verwijderen uitgeschakeld. Schakel R/W in via Instellingen.",
         "access_mode_readonly_tooltip":  "Read-only — bewerken is uitgeschakeld",
         "access_mode_rw_tooltip":        "Lezen en schrijven — bewerken is ingeschakeld",
+
+        # E2 — Rack export dialog
+        "rack_export_dialog_title": "Rack export (Markdown)",
+        "rack_export_hint":         "Kies het bereik van de export. Elk rack wordt visueel weergegeven met poorten, verbindingen en VLAN.",
+        "rack_export_scope_group":  "Bereik",
+        "rack_export_scope_all":    "Alle sites en racks",
+        "rack_export_scope_site":   "Één site — alle racks",
+        "rack_export_scope_rack":   "Één specifiek rack",
+        "rack_export_select_site":  "Site",
+        "rack_export_select_rack":  "Rack",
+        "rack_export_btn_export":   "Exporteren",
     },
 
     # -------------------------------------------------------------------------
@@ -593,6 +617,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "menu_export_image":        "Export image",
         "menu_export_pdf":          "Export PDF",
         "menu_export_report":       "Report (Word)",
+        "menu_export_rack_md":      "📄  Rack export (Markdown)",
         "menu_settings":            "Settings",
 
         # Floorplans — G4
@@ -757,6 +782,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_pdf_export_failed":    "Failed to save PDF",
         "msg_report_exported":      "Report saved",
         "msg_report_export_failed": "Failed to save report",
+        "msg_rack_md_exported":      "Rack export saved",
+        "msg_rack_md_export_failed": "Rack export failed",
 
         # Floorplan statusberichten — G4
         "msg_floorplan_created":        "Floorplan added.",
@@ -827,6 +854,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "import_mode_replace":      "Replace",
         "import_mode_merge":        "Merge",
         "import_mode_label":        "Import Mode",
+        "import_mode_replace_desc": "Replace — import full folder (restore)",
+        "import_mode_merge_desc":   "Merge — add new objects (JSON)",
+        "msg_import_replace_restart": "Import successful. The application will now close.\nRestart the app to load the restored data.",
         "export_filename_prefix":   "networkmap_export",
 
         # Export renderer — kolommen
@@ -879,6 +909,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_export_failed":        "Export failed.",
         "msg_import_replace_done":  "Import successful (replaced).",
         "msg_import_merge_done":    "Import successful — {added} added, {skipped} skipped.",
+        "msg_import_invalid_dir":   "Not a valid export folder. Select a folder containing network_data.json.",
         "msg_path_ok":              "Path is accessible and writable.",
         "msg_language_applied":     "Language change applied immediately.",
 
@@ -926,6 +957,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_restore_item_settings": "settings.json",
         "settings_restore_item_fp_json": "floorplans.json",
         "settings_restore_item_fp_dir": "SVG files",
+        "settings_restore_item_vlan":   "vlan_config.json",
         "settings_unit_height":     "Rack unit height:",
         "settings_unit_hint":       "Changes are visible after restart.",
         "settings_export_folder":             "Default Export Folder",
@@ -1117,6 +1149,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_access_hint":          "In read-only mode, creating, editing and deleting are disabled. Enable R/W in Settings.",
         "access_mode_readonly_tooltip":  "Read-only — editing is disabled",
         "access_mode_rw_tooltip":        "Read/Write — editing is enabled",
+
+        # E2 — Rack export dialog
+        "rack_export_dialog_title": "Rack export (Markdown)",
+        "rack_export_hint":         "Choose the scope of the export. Each rack is displayed visually with ports, connections and VLAN.",
+        "rack_export_scope_group":  "Scope",
+        "rack_export_scope_all":    "All sites and racks",
+        "rack_export_scope_site":   "One site — all racks",
+        "rack_export_scope_rack":   "One specific rack",
+        "rack_export_select_site":  "Site",
+        "rack_export_select_rack":  "Rack",
+        "rack_export_btn_export":   "Export",
     },
 }
 

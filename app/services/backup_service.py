@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/backup_service.py
 # Role:    Backup beheer — GEEN Qt imports
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #          1.1.0 — F3: has_changes_since_last_backup()
@@ -18,6 +18,7 @@
 #                  op UNC-submappen gooit mkdir() FileNotFoundError als map al bestaat
 #          1.5.0 — R-1: restore_backup() uitgebreid — per-onderdeel herstel
 #                  (network_data, settings, floorplans.json, SVG-map)
+#          1.6.0 — vlan_config.json meenemen in backup én restore
 # =============================================================================
 
 import json
@@ -263,30 +264,22 @@ def create_backup(
     settings_path: str | None = None,
     floorplans_path: str | None = None,
     floorplans_dir: str | None = None,
+    vlan_path: str | None = None,
 ) -> tuple[bool, str]:
     """
     Maakt een backup van network_data.json naar de geconfigureerde netwerkmap.
 
     Parameters:
         source_path     — volledig pad naar de lokale network_data.json
-        config          — backup sectie uit settings.json:
-                          {
-                            "enabled":      bool,
-                            "network_path": str,
-                            "keep_history": bool,
-                            "max_backups":  int
-                          }
-        settings_path   — optioneel: pad naar settings.json (B10)
-        floorplans_path — optioneel: pad naar floorplans.json (B-NEW-1)
-        floorplans_dir  — optioneel: pad naar SVG bestanden map (B-NEW-2)
+        config          — backup sectie uit settings.json
+        settings_path   — optioneel: pad naar settings.json
+        floorplans_path — optioneel: pad naar floorplans.json
+        floorplans_dir  — optioneel: pad naar SVG bestanden map
+        vlan_path       — optioneel: pad naar vlan_config.json
 
     Returns:
         (True,  "")           bij succes
         (False, foutmelding)  bij fout
-
-    B9 — shutil.copy2 vervangt door _copy_with_retry():
-         bij tijdelijke lock of netwerkverlies wordt tot 3x opnieuw geprobeerd.
-    B-NEW-1/2 — floorplans.json + SVG map worden ook meegekopieerd indien opgegeven.
     """
     if not config.get("enabled", False):
         return True, ""   # backup uitgeschakeld — geen fout
@@ -332,6 +325,16 @@ def create_backup(
                 ok, err = _copy_dir_with_retry(fd, dest_fp_dir)
                 if not ok:
                     return False, f"floorplans map backup mislukt: {err}"
+            # Niet aanwezig → overslaan
+
+        # 1.6.0 — vlan_config.json meekopieren indien opgegeven
+        if vlan_path:
+            vp = Path(vlan_path)
+            if vp.is_file():
+                dest_vlan = dest_dir / "vlan_config.json"
+                ok, err = _copy_with_retry(vlan_path, dest_vlan)
+                if not ok:
+                    return False, f"vlan_config.json backup mislukt: {err}"
             # Niet aanwezig → overslaan
 
         # History backup met timestamp
@@ -396,24 +399,14 @@ def restore_backup(
     settings_dest: str | None = None,
     floorplans_dest: str | None = None,
     floorplans_dir_dest: str | None = None,
+    vlan_dest: str | None = None,
 ) -> tuple[bool, str]:
     """
     R-1 — Herstelt een backup naar de lokale bestanden.
 
-    Parameters:
-        backup_entry       — dict uit list_backups(): {"filename", "timestamp", "path"}
-                             Het pad verwijst naar network_data_<ts>.json in history/.
-                             De andere bestanden liggen in de bovenliggende backup-map.
-        targets            — lijst van te herstellen onderdelen:
-                             "network_data", "settings", "floorplans_json", "floorplans_dir"
-        network_data_dest  — volledig pad naar lokale network_data.json
-        settings_dest      — volledig pad naar lokale settings.json (optioneel)
-        floorplans_dest    — volledig pad naar lokale floorplans.json (optioneel)
-        floorplans_dir_dest— volledig pad naar lokale floorplans/ map (optioneel)
-
-    Returns:
-        (True,  "")           bij succes
-        (False, foutmelding)  bij fout
+    targets kan bevatten:
+        "network_data", "settings", "floorplans_json",
+        "floorplans_dir", "vlan"
     """
     if not backup_entry or not targets:
         return False, "Geen backup of doelbestanden opgegeven."
@@ -459,6 +452,15 @@ def restore_backup(
                 errors.append(f"floorplans/ map: {err}")
         else:
             errors.append("floorplans/ map niet aanwezig in backup.")
+
+    if "vlan" in targets and vlan_dest:
+        src = backup_root / "vlan_config.json"
+        if src.is_file():
+            ok, err = _copy_with_retry(str(src), Path(vlan_dest))
+            if not ok:
+                errors.append(f"vlan_config.json: {err}")
+        else:
+            errors.append("vlan_config.json niet aanwezig in backup.")
 
     if errors:
         return False, "\n".join(errors)

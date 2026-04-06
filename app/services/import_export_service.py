@@ -2,27 +2,111 @@
 # Networkmap_Creator
 # File:    app/services/import_export_service.py
 # Role:    JSON import en export — GEEN Qt imports
-# Version: 1.0.0
+# Version: 2.0.0
 # Author:  Barremans
+# Changes: 1.0.0 — Initiële versie
+#          2.0.0 — Export uitgebreid naar map (network_data + settings +
+#                  floorplans.json + floorplans/ + vlan_config.json)
+#                  Import replace: volledige map inlezen
+#                  Import merge: blijft werken op network_data.json alleen
+#                  suggested_dirname() toegevoegd
 # =============================================================================
 
 import json
+import os
 import shutil
 from datetime import date
 from pathlib import Path
 
 REQUIRED_KEYS = ["version", "sites", "devices", "ports", "endpoints", "connections"]
 
+# Vaste bestandsnamen binnen een export-map
+_FILE_NETWORK   = "network_data.json"
+_FILE_SETTINGS  = "settings.json"
+_FILE_FLOORPLAN = "floorplans.json"
+_DIR_FLOORPLAN  = "floorplans"
+_FILE_VLAN      = "vlan_config.json"
+
+
+# ------------------------------------------------------------------
+# Paden helpers
+# ------------------------------------------------------------------
+
+def _get_paths() -> dict:
+    """Geeft alle relevante lokale paden terug via settings_storage."""
+    from app.helpers import settings_storage
+    return {
+        "network":        settings_storage.get_network_data_path(),
+        "settings":       settings_storage.get_settings_path(),
+        "floorplans":     settings_storage.get_floorplans_path(),
+        "floorplans_dir": settings_storage.get_floorplans_dir(),
+        "vlan":           settings_storage.get_vlan_config_path(),
+    }
+
 
 # ------------------------------------------------------------------
 # Export
 # ------------------------------------------------------------------
 
+def export_to_dir(dest_dir: str) -> tuple[bool, str]:
+    """
+    Exporteert alle data naar een map:
+        <dest_dir>/
+            network_data.json
+            settings.json
+            floorplans.json
+            floorplans/
+            vlan_config.json
+
+    Returns (True, "") bij succes, (False, foutmelding) bij fout.
+    """
+    try:
+        paths = _get_paths()
+        d = Path(dest_dir)
+        d.mkdir(parents=True, exist_ok=True)
+
+        # network_data.json
+        src = Path(paths["network"])
+        if src.is_file():
+            shutil.copy2(src, d / _FILE_NETWORK)
+
+        # settings.json
+        src = Path(paths["settings"])
+        if src.is_file():
+            shutil.copy2(src, d / _FILE_SETTINGS)
+
+        # floorplans.json
+        src = Path(paths["floorplans"])
+        if src.is_file():
+            shutil.copy2(src, d / _FILE_FLOORPLAN)
+
+        # floorplans/ map
+        src = Path(paths["floorplans_dir"])
+        if src.is_dir():
+            dst_fp = d / _DIR_FLOORPLAN
+            if dst_fp.exists():
+                shutil.rmtree(dst_fp)
+            shutil.copytree(src, dst_fp)
+
+        # vlan_config.json
+        src = Path(paths["vlan"])
+        if src.is_file():
+            shutil.copy2(src, d / _FILE_VLAN)
+
+        return True, ""
+    except Exception as e:
+        import traceback
+        return False, traceback.format_exc()
+
+
+def suggested_dirname() -> str:
+    """Geeft een suggestie voor de exportmapnaam."""
+    return f"networkmap_export_{date.today().isoformat()}"
+
+
+# Achterwaartse compatibiliteit — export_to_file blijft werken
 def export_to_file(data: dict, filepath: str) -> bool:
-    """
-    Exporteert de volledige network_data naar een gekozen bestandslocatie.
-    Returns True bij succes, False bij fout.
-    """
+    """Legacy: exporteert alleen network_data naar één JSON bestand."""
     try:
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,7 +118,7 @@ def export_to_file(data: dict, filepath: str) -> bool:
 
 
 def suggested_filename() -> str:
-    """Geeft een suggestie voor de exportbestandsnaam."""
+    """Legacy: suggestie voor enkelvoudige JSON export."""
     return f"networkmap_export_{date.today().isoformat()}.json"
 
 
@@ -44,7 +128,7 @@ def suggested_filename() -> str:
 
 def validate(data: dict) -> tuple[bool, str]:
     """
-    Valideert een geïmporteerd data dict.
+    Valideert een geïmporteerd network_data dict.
     Returns (True, "") bij geldig, (False, reden) bij ongeldig.
     """
     for key in REQUIRED_KEYS:
@@ -57,9 +141,65 @@ def validate(data: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def is_export_dir(path: str) -> bool:
+    """Geeft True als de map een geldige export-map is (bevat network_data.json)."""
+    return (Path(path) / _FILE_NETWORK).is_file()
+
+
+def import_replace_dir(src_dir: str) -> tuple[bool, str]:
+    """
+    Herstelt een volledige export-map naar de lokale installatie.
+    Kopieert: network_data.json, settings.json, floorplans.json,
+              floorplans/, vlan_config.json — wat aanwezig is.
+
+    Returns (True, "") bij succes, (False, foutmelding) bij fout.
+    """
+    try:
+        paths = _get_paths()
+        d = Path(src_dir)
+
+        if not d.is_dir():
+            return False, f"Map niet gevonden: {src_dir}"
+        if not (d / _FILE_NETWORK).is_file():
+            return False, f"Geen geldige export-map: network_data.json ontbreekt in {src_dir}"
+
+        # network_data.json — valideren voor kopiëren
+        with open(d / _FILE_NETWORK, encoding="utf-8") as f:
+            nd = json.load(f)
+        ok, reason = validate(nd)
+        if not ok:
+            return False, f"network_data.json ongeldig: {reason}"
+
+        shutil.copy2(d / _FILE_NETWORK, paths["network"])
+
+        src = d / _FILE_SETTINGS
+        if src.is_file():
+            shutil.copy2(src, paths["settings"])
+
+        src = d / _FILE_FLOORPLAN
+        if src.is_file():
+            shutil.copy2(src, paths["floorplans"])
+
+        src = d / _DIR_FLOORPLAN
+        if src.is_dir():
+            dst = Path(paths["floorplans_dir"])
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+
+        src = d / _FILE_VLAN
+        if src.is_file():
+            shutil.copy2(src, paths["vlan"])
+
+        return True, ""
+    except Exception:
+        import traceback
+        return False, traceback.format_exc()
+
+
 def import_replace(filepath: str) -> tuple[dict | None, str]:
     """
-    Laadt een JSON bestand en vervangt de huidige data volledig.
+    Legacy: laadt een enkelvoudig JSON bestand en vervangt network_data.
     Returns (data, "") bij succes, (None, foutmelding) bij fout.
     """
     try:
@@ -77,12 +217,11 @@ def import_replace(filepath: str) -> tuple[dict | None, str]:
 
 def import_merge(filepath: str, current: dict) -> tuple[dict | None, str, dict]:
     """
-    Laadt een JSON bestand en voegt objecten samen met de huidige data.
+    Laadt een JSON bestand en voegt network_data samen met de huidige data.
     Bestaande IDs worden overgeslagen.
 
     Returns (merged_data, "", stats) bij succes,
             (None, foutmelding, {}) bij fout.
-
     stats = {"added": int, "skipped": int}
     """
     try:
@@ -99,13 +238,10 @@ def import_merge(filepath: str, current: dict) -> tuple[dict | None, str, dict]:
     added   = 0
     skipped = 0
 
-    # Bouw sets van bestaande IDs
     existing_ids = _collect_all_ids(current)
-
     merged = {k: list(v) if isinstance(v, list) else v
               for k, v in current.items()}
 
-    # Voeg lijsten samen, sla bestaande IDs over
     for key in ("devices", "ports", "endpoints", "connections"):
         for obj in incoming.get(key, []):
             obj_id = obj.get("id", "")
@@ -116,7 +252,6 @@ def import_merge(filepath: str, current: dict) -> tuple[dict | None, str, dict]:
                 existing_ids.add(obj_id)
                 added += 1
 
-    # Sites samenvoegen — recursief per site/room/rack
     for inc_site in incoming.get("sites", []):
         site_id = inc_site.get("id", "")
         existing_site = next(
@@ -126,7 +261,6 @@ def import_merge(filepath: str, current: dict) -> tuple[dict | None, str, dict]:
             merged.setdefault("sites", []).append(inc_site)
             added += 1
         else:
-            # Site bestaat al — ruimtes samenvoegen
             for inc_room in inc_site.get("rooms", []):
                 room_id = inc_room.get("id", "")
                 ex_room = next(
@@ -137,7 +271,6 @@ def import_merge(filepath: str, current: dict) -> tuple[dict | None, str, dict]:
                     existing_site.setdefault("rooms", []).append(inc_room)
                     added += 1
                 else:
-                    # Ruimte bestaat — racks samenvoegen
                     for inc_rack in inc_room.get("racks", []):
                         rack_id = inc_rack.get("id", "")
                         ex_rack = next(
@@ -149,7 +282,6 @@ def import_merge(filepath: str, current: dict) -> tuple[dict | None, str, dict]:
                             added += 1
                         else:
                             skipped += 1
-                    # Wandpunten samenvoegen
                     for wo in inc_room.get("wall_outlets", []):
                         if wo.get("id") not in existing_ids:
                             ex_room.setdefault("wall_outlets", []).append(wo)
@@ -161,7 +293,6 @@ def import_merge(filepath: str, current: dict) -> tuple[dict | None, str, dict]:
 
 
 def _collect_all_ids(data: dict) -> set:
-    """Verzamelt alle IDs uit de huidige data voor conflict-detectie."""
     ids = set()
     for key in ("devices", "ports", "endpoints", "connections"):
         for obj in data.get(key, []):

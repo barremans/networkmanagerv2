@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.11.0
+# Version: 1.12.0
 # Author:  Barremans
-# Changes: 1.11.0 — SVG label prefixen configureerbaar via settings
+# Changes: 1.12.0 — get_vlan_config_path(): volgt network_data.json pad
+#                   zodat vlan_config.json gedeeld wordt via netwerkshare
+#          1.11.0 — SVG label prefixen configureerbaar via settings
 #                   _DEFAULT_OUTLET_LABEL_PREFIXES, load/save_outlet_label_prefixes
 #          1.10.0 — floorplan opslag helpers
 #               get_floorplans_path(), get_floorplans_dir()
@@ -450,6 +452,19 @@ def get_floorplans_dir() -> str:
     _ensure_data_dir()
     os.makedirs(_FLOORPLANS_DIR, exist_ok=True)
     return _FLOORPLANS_DIR
+
+
+def get_vlan_config_path() -> str:
+    """
+    Geeft het pad naar vlan_config.json terug.
+    Volgt network_data.json — als de app via een netwerk-pad draait,
+    staat vlan_config.json in dezelfde map als network_data.json.
+    Zo zijn VLAN-definities gedeeld tussen alle gebruikers van dezelfde share.
+    """
+    return os.path.join(
+        os.path.dirname(get_network_data_path()),
+        "vlan_config.json"
+    )
 
 
 # ---------------------------------------------------------------------------

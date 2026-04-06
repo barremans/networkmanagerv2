@@ -3,15 +3,10 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.10.0
+# Version: 1.11.0
 # Author:  Barremans
-# Changes: 1.9.2 — B-BACKUP: _on_test_path toont Windows gebruikerscontext in succesmelding
-#          1.9.1 — Bugfix: _on_backup_now() geeft nu settings_path, floorplans_path
-#                  en floorplans_dir mee aan create_backup() — waren vergeten
-#          1.9.0 — Tabblad "SVG Labels" met configureerbare wandpunt prefix lijst
-#          1.8.0 — Tabblad "Wandpunt locaties" met CRUD (configureerbare lijst)
-#          1.10.0 — R-1: restore-sectie in backup tabblad
-#                   _on_restore_refresh() + _on_restore_now() + herstart via QApplication.quit()
+# Changes: 1.10.0 — R-1: restore-sectie in backup tabblad
+#          1.11.0 — vlan_config.json checkbox toegevoegd aan restore
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -248,9 +243,11 @@ class SettingsWindow(QDialog):
         self._chk_restore_settings = QCheckBox(t("settings_restore_item_settings"))
         self._chk_restore_fp_json  = QCheckBox(t("settings_restore_item_fp_json"))
         self._chk_restore_fp_dir   = QCheckBox(t("settings_restore_item_fp_dir"))
+        self._chk_restore_vlan     = QCheckBox(t("settings_restore_item_vlan"))
         self._chk_restore_data.setChecked(True)
         for chk in (self._chk_restore_data, self._chk_restore_settings,
-                    self._chk_restore_fp_json, self._chk_restore_fp_dir):
+                    self._chk_restore_fp_json, self._chk_restore_fp_dir,
+                    self._chk_restore_vlan):
             chk_row.addWidget(chk)
         chk_row.addStretch()
         grp_restore_layout.addLayout(chk_row)
@@ -778,6 +775,7 @@ class SettingsWindow(QDialog):
             settings_path=settings_storage.get_settings_path(),
             floorplans_path=settings_storage.get_floorplans_path(),
             floorplans_dir=settings_storage.get_floorplans_dir(),
+            vlan_path=self._get_vlan_path(),
         )
         if ok:
             QMessageBox.information(self, t("settings_backup_group"),
@@ -790,6 +788,14 @@ class SettingsWindow(QDialog):
     # ------------------------------------------------------------------
     # R-1 — Restore handlers
     # ------------------------------------------------------------------
+
+    def _get_vlan_path(self) -> str:
+        """Geeft het pad naar vlan_config.json terug via settings_storage."""
+        try:
+            from app.helpers import settings_storage
+            return settings_storage.get_vlan_config_path()
+        except Exception:
+            return ""
 
     def _on_restore_refresh(self):
         """Ververs de lijst van beschikbare backups."""
@@ -824,6 +830,8 @@ class SettingsWindow(QDialog):
             targets.append("floorplans_json")
         if self._chk_restore_fp_dir.isChecked():
             targets.append("floorplans_dir")
+        if self._chk_restore_vlan.isChecked():
+            targets.append("vlan")
 
         if not targets:
             QMessageBox.warning(self, t("settings_restore_group"),
@@ -838,6 +846,7 @@ class SettingsWindow(QDialog):
         if "settings"        in targets: onderdelen.append(t("settings_restore_item_settings"))
         if "floorplans_json" in targets: onderdelen.append(t("settings_restore_item_fp_json"))
         if "floorplans_dir"  in targets: onderdelen.append(t("settings_restore_item_fp_dir"))
+        if "vlan"            in targets: onderdelen.append(t("settings_restore_item_vlan"))
 
         msg = t("settings_restore_confirm_msg").format(
             ts=ts, items="\n  • ".join(onderdelen)
@@ -856,6 +865,7 @@ class SettingsWindow(QDialog):
             settings_dest=settings_storage.get_settings_path(),
             floorplans_dest=settings_storage.get_floorplans_path(),
             floorplans_dir_dest=settings_storage.get_floorplans_dir(),
+            vlan_dest=self._get_vlan_path(),
         )
 
         if not ok:

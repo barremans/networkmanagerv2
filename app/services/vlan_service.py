@@ -2,29 +2,26 @@
 # Networkmap_Creator
 # File:    app/services/vlan_service.py
 # Role:    VLAN definities laden/opslaan + trace-propagatie
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
+#          1.1.0 — _config_path() vervangen door settings_storage.get_vlan_config_path()
+#                  vlan_config.json volgt nu network_data.json (lokaal of netwerkshare)
 # =============================================================================
 
 import json
 import os
 from app.services import tracing
 
-_VLAN_CONFIG_PATH = None   # wordt gezet via init()
-
 
 def _config_path() -> str:
-    global _VLAN_CONFIG_PATH
-    if _VLAN_CONFIG_PATH:
-        return _VLAN_CONFIG_PATH
-    # Naast network_data.json — zelfde map
-    try:
-        from app.helpers import settings_storage
-        base = os.path.dirname(settings_storage.get_network_data_path())
-    except Exception:
-        base = os.path.expanduser("~")
-    return os.path.join(base, "vlan_config.json")
+    """
+    Geeft het pad naar vlan_config.json terug.
+    Delegeert naar settings_storage.get_vlan_config_path() zodat het pad
+    altijd synchroon loopt met network_data.json (lokaal of netwerkshare).
+    """
+    from app.helpers import settings_storage
+    return settings_storage.get_vlan_config_path()
 
 
 # ---------------------------------------------------------------------------

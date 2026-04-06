@@ -2,9 +2,18 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.40.0
+# Version: 1.42.0
 # Author:  Barremans
-# Changes: 1.40.0 — G-OPEN-2: floorplan_changed signaal van FloorplanManageDialog
+# Changes: 1.42.0 — Export: map-gebaseerd (network_data+settings+floorplans+vlan)
+#                   Import replace: map inlezen + herstart
+#                   Import merge: blijft JSON-gebaseerd
+#                   Backup: vlan_config.json toegevoegd overal
+#                   _get_vlan_path() module-level helper
+#          1.41.0 — E2: Markdown rack-export
+#                   Menu Rapporteren → Rack export (MD)
+#                   RackExportDialog: scope alles/site/rack
+#                   rack_export_md service gekoppeld
+#          1.40.0 — G-OPEN-2: floorplan_changed signaal van FloorplanManageDialog
 #                   gekoppeld aan FloorplanView._refresh_from_storage()
 #                   zodat Info tab live ververst bij opslaan in beheer-dialoog
 #          1.39.0 — B-NEW-1/2: _save_and_backup uitgebreid met
@@ -108,11 +117,21 @@ from app.services import tracing
 from app.services import search_service
 from app.services import import_export_service
 from app.services import backup_service
+
+
+def _get_vlan_path() -> str:
+    """Geeft het pad naar vlan_config.json terug via settings_storage."""
+    try:
+        from app.helpers import settings_storage
+        return settings_storage.get_vlan_config_path()
+    except Exception:
+        return ""
 from app.services import sync_service
 from app.services import floorplan_service          # G1/G2
 from app.services.logger import log_info, log_warning, log_error
 from app.services import export_renderer
 from app.services import report_generator
+from app.services import rack_export_md
 from app.gui.bug_report_dialog import BugReportDialog
 from app.gui.dialogs.device_info_dialog import DeviceInfoDialog
 from app.gui.dialogs.port_dialog import PortDialog
@@ -215,6 +234,9 @@ class MainWindow(QMainWindow):
 
         act_word_report = self._menu_report.addAction(t("menu_export_report"))
         act_word_report.triggered.connect(self._on_export_report)
+
+        act_md_export = self._menu_report.addAction(t("menu_export_rack_md"))
+        act_md_export.triggered.connect(self._on_export_rack_md)
 
         self._menu_report.addSeparator()
 
@@ -2429,30 +2451,28 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_export(self):
-        from PySide6.QtWidgets import QFileDialog
         import os
-        suggested = import_export_service.suggested_filename()
-        last = get_last_folder("export_json")
-        if last:
-            suggested = os.path.join(last, os.path.basename(suggested))
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, t("menu_export"), suggested,
-            "JSON bestanden (*.json)"
+        from PySide6.QtWidgets import QFileDialog
+
+        last = get_last_folder("export_json") or self._export_folder()
+        dest = QFileDialog.getExistingDirectory(
+            self, t("menu_export"), last or ""
         )
-        if not filepath:
+        if not dest:
             return
-        try:
-            ok = import_export_service.export_to_file(self._data, filepath)
-            if ok:
-                set_last_folder("export_json", os.path.dirname(filepath))
-                log_info(f"Export naar: {filepath}")
-                self.set_status(f"✓  {t('msg_exported_to')} {filepath}")
-            else:
-                log_warning(f"Export mislukt: {filepath}")
-                self.set_status(f"⚠  {t('msg_export_failed')}")
-        except Exception as e:
-            log_error("Export fout", e)
-            self.set_status(f"⚠  {t('msg_export_failed')}")
+
+        suggested  = import_export_service.suggested_dirname()
+        export_dir = os.path.join(dest, suggested)
+
+        ok, err = import_export_service.export_to_dir(export_dir)
+        if ok:
+            set_last_folder("export_json", dest)
+            log_info(f"Export naar map: {export_dir}")
+            self.set_status(f"✓  {t('msg_exported_to')} {export_dir}")
+            os.startfile(export_dir)
+        else:
+            log_warning(f"Export mislukt: {err}")
+            self.set_status(f"⚠  {t('msg_export_failed')}: {err}")
 
     def _on_export_image(self):
         if not self._current_view:
@@ -2542,6 +2562,45 @@ class MainWindow(QMainWindow):
             log_warning(f"Rapport export mislukt: {err}")
             self.set_status(f"⚠  {t('msg_report_export_failed')}: {err}")
 
+    def _on_export_rack_md(self):
+        """E2 — Tekstuele rack-export naar Markdown."""
+        import datetime, os
+        from PySide6.QtWidgets import QFileDialog
+        from app.gui.dialogs.rack_export_dialog import RackExportDialog
+
+        dlg = RackExportDialog(self._data, parent=self)
+        if not dlg.exec():
+            return
+
+        datum     = datetime.date.today().strftime("%Y%m%d")
+        suggested = f"rack_export_{datum}.md"
+        start_dir = get_last_folder("export_rack_md") or self._export_folder()
+        if start_dir:
+            suggested = os.path.join(start_dir, suggested)
+
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, t("menu_export_rack_md"), suggested,
+            "Markdown (*.md)"
+        )
+        if not filepath:
+            return
+
+        ok, err = rack_export_md.export_md(
+            self._data,
+            filepath,
+            scope=dlg.scope,
+            site_id=dlg.site_id,
+            rack_id=dlg.rack_id,
+        )
+        if ok:
+            set_last_folder("export_rack_md", os.path.dirname(filepath))
+            log_info(f"Rack MD export: {filepath}")
+            self.set_status(f"✓  {t('msg_rack_md_exported')}: {filepath}")
+            os.startfile(filepath)
+        else:
+            log_warning(f"Rack MD export mislukt: {err}")
+            self.set_status(f"⚠  {t('msg_rack_md_export_failed')}: {err}")
+
     def _resolve_export_context(self, datum: str, ext: str):
         if isinstance(self._current_view, RackView):
             rack = self._current_view._rack
@@ -2579,22 +2638,14 @@ class MainWindow(QMainWindow):
         return self._settings.get("ui", {}).get("export_folder", "")
 
     def _on_import(self):
-        from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog
         import os
-        last = get_last_folder("import_json")
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, t("menu_import"), last,
-            "JSON bestanden (*.json)"
-        )
-        if not filepath:
-            return
-        set_last_folder("import_json", os.path.dirname(filepath))
+        from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog
 
         modus, ok = QInputDialog.getItem(
             self, t("menu_import"),
             t("import_mode_label") + ":",
-            [f"{t('import_mode_merge')} — nieuwe objecten toevoegen",
-             f"{t('import_mode_replace')}  — huidige data overschrijven"],
+            [t("import_mode_replace_desc"),
+             t("import_mode_merge_desc")],
             0, False
         )
         if not ok:
@@ -2602,7 +2653,23 @@ class MainWindow(QMainWindow):
 
         try:
             from app.services.data_integrity import validate_and_repair
+
             if t("import_mode_replace") in modus:
+                # --- Replace: map kiezen ---
+                last = get_last_folder("import_json") or self._export_folder()
+                src_dir = QFileDialog.getExistingDirectory(
+                    self, t("menu_import"), last or ""
+                )
+                if not src_dir:
+                    return
+
+                if not import_export_service.is_export_dir(src_dir):
+                    QMessageBox.warning(
+                        self, t("menu_import"),
+                        t("msg_import_invalid_dir")
+                    )
+                    return
+
                 reply = QMessageBox.warning(
                     self, t("menu_import"),
                     t("msg_confirm_delete"),
@@ -2610,21 +2677,34 @@ class MainWindow(QMainWindow):
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
-                data, err = import_export_service.import_replace(filepath)
-                if data is None:
+
+                ok_imp, err = import_export_service.import_replace_dir(src_dir)
+                if not ok_imp:
                     log_warning(f"Import replace mislukt: {err}")
                     self.set_status(f"⚠  {t('msg_import_fail')}: {err}")
                     return
-                self._data = data
-                self._data, _repaired, _rapport = validate_and_repair(self._data)
-                if _repaired:
-                    for regel in _rapport:
-                        log_info(f"[data_integrity] {regel}")
-                self._save_and_backup()
-                self._populate_tree()
-                log_info(f"Import replace: {filepath}")
-                self.set_status(f"✓  {t('msg_import_replace_done')}")
+
+                set_last_folder("import_json", os.path.dirname(src_dir))
+                log_info(f"Import replace (map): {src_dir}")
+                QMessageBox.information(
+                    self, t("menu_import"),
+                    f"✓  {t('msg_import_replace_done')}\n\n"
+                    f"{t('msg_import_replace_restart')}"
+                )
+                from PySide6.QtWidgets import QApplication
+                QApplication.quit()
+
             else:
+                # --- Merge: JSON bestand kiezen ---
+                last = get_last_folder("import_json")
+                filepath, _ = QFileDialog.getOpenFileName(
+                    self, t("menu_import"), last or "",
+                    "JSON bestanden (*.json)"
+                )
+                if not filepath:
+                    return
+                set_last_folder("import_json", os.path.dirname(filepath))
+
                 data, err, stats = import_export_service.import_merge(
                     filepath, self._data
                 )
@@ -2871,9 +2951,10 @@ class MainWindow(QMainWindow):
             source = settings_storage.get_network_data_path()
             ok, err = backup_service.create_backup(
                 source, backup_cfg,
-                settings_path=settings_storage.get_settings_path(),      # B10
-                floorplans_path=settings_storage.get_floorplans_path(),  # B-NEW-1
-                floorplans_dir=settings_storage.get_floorplans_dir(),    # B-NEW-2
+                settings_path=settings_storage.get_settings_path(),
+                floorplans_path=settings_storage.get_floorplans_path(),
+                floorplans_dir=settings_storage.get_floorplans_dir(),
+                vlan_path=_get_vlan_path(),
             )
             if ok:
                 log_info(f"Backup aangemaakt naar: {network_path}")
@@ -2983,7 +3064,10 @@ class MainWindow(QMainWindow):
                     source = settings_storage.get_network_data_path()
                     ok, err = backup_service.create_backup(
                         source, backup_cfg,
-                        settings_path=settings_storage.get_settings_path()  # B10
+                        settings_path=settings_storage.get_settings_path(),
+                        floorplans_path=settings_storage.get_floorplans_path(),
+                        floorplans_dir=settings_storage.get_floorplans_dir(),
+                        vlan_path=_get_vlan_path(),
                     )
                     if ok:
                         log_info("Backup bij afsluiten aangemaakt.")
