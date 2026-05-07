@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.20.0
+# Version: 1.21.0
 # Author:  Barremans
 # Changes: 1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
 #          F1 — msg_connect_cancelled
@@ -30,6 +30,10 @@
 #                   settings_restore_item_vlan (NL + EN)
 #          1.20.0 — import_mode_replace_desc, import_mode_merge_desc,
 #                   msg_import_replace_restart (NL + EN)
+#          1.21.0 — Direct endpoint: ctx_connect_endpoint_direct,
+#                   ctx_disconnect_endpoint_direct, msg_endpoint_direct_*,
+#                   endpoint_location, endpoint_location_placeholder,
+#                   wall_outlet_group_direct, report_section_direct_endpoints (NL + EN)
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -488,6 +492,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Poort context menu + verbinding met wandpunt
         "ctx_connect_to_outlet":        "🌐  Verbinden met wandpunt...",
         "ctx_disconnect_port":          "✂  Verbinding verwijderen",
+        "ctx_connect_endpoint_direct":  "🖥  Direct eindapparaat koppelen",
+        "ctx_disconnect_endpoint_direct": "🖥  Eindapparaat loskoppelen",
+        "msg_endpoint_direct_connected": "Eindapparaat gekoppeld aan poort.",
+        "msg_endpoint_direct_removed":  "Directe eindapparaat-koppeling verwijderd.",
+        "endpoint_location":            "Locatie",
+        "endpoint_location_placeholder": "bv. Boven deur magazijn",
+        "wall_outlet_group_direct":     "🖥  Direct verbonden",
+        "report_section_direct_endpoints": "Direct verbonden apparaten",
         "dlg_connect_outlet_title":     "Poort verbinden met wandpunt",
         "err_no_outlet_selected":       "Selecteer eerst een wandpunt.",
         "warn_outlet_already_connected": "Dit wandpunt is al verbonden. Toch doorgaan?",
@@ -1052,6 +1064,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Port context menu + connect to outlet
         "ctx_connect_to_outlet":        "🌐  Connect to wall outlet...",
         "ctx_disconnect_port":          "✂  Remove connection",
+        "ctx_connect_endpoint_direct":  "🖥  Connect direct endpoint",
+        "ctx_disconnect_endpoint_direct": "🖥  Disconnect endpoint",
+        "msg_endpoint_direct_connected": "Endpoint connected to port.",
+        "msg_endpoint_direct_removed":  "Direct endpoint connection removed.",
+        "endpoint_location":            "Location",
+        "endpoint_location_placeholder": "e.g. Above warehouse door",
+        "wall_outlet_group_direct":     "🖥  Directly connected",
+        "report_section_direct_endpoints": "Directly connected devices",
         "dlg_connect_outlet_title":     "Connect port to wall outlet",
         "err_no_outlet_selected":       "Please select a wall outlet first.",
         "warn_outlet_already_connected": "This wall outlet is already connected. Continue anyway?",

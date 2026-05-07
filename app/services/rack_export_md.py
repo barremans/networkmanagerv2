@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/rack_export_md.py
 # Role:    Tekstuele rack-export naar Markdown — E2
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
 # Changes: 1.0.0 — E2: initiële versie
 #          1.1.0 — Volledige tracing via tracing.py; wandpunt-sectie per site
@@ -10,6 +10,8 @@
 #                  VOOR-verbinding eerst, ACHTER-verbinding (wandpunt) daarna
 #                  Geen inspringing-cascade meer voor PP — twee platte pijlen
 #                  Niet-PP poorten: inspringing-cascade zoals voorheen
+#          1.3.0 — Direct endpoint: _conn_dest() herkent to_type=="endpoint"
+#                  _render_outlets_site() uitgebreid met "Direct verbonden" subsectie
 # =============================================================================
 
 from __future__ import annotations
@@ -370,6 +372,48 @@ def _render_outlets_site(data: dict, idx: dict, site: dict) -> list[str]:
 
     if not any_outlet:
         lines.append("*Geen wandpunten geconfigureerd.*")
+        lines.append("")
+
+    # 1.3.0 — Direct verbonden endpoints (port -> endpoint, binnen deze site)
+    site_device_ids = {
+        slot.get("device_id")
+        for room in site.get("rooms", [])
+        for rack in room.get("racks", [])
+        for slot in rack.get("slots", [])
+        if slot.get("device_id")
+    }
+    direct_conns = [
+        c for c in data.get("connections", [])
+        if c.get("to_type") == "endpoint" or c.get("from_type") == "endpoint"
+    ]
+    # Filter op verbindingen waarbij de poort tot deze site behoort
+    site_direct = []
+    for conn in direct_conns:
+        if conn.get("to_type") == "endpoint":
+            ep_id, port_id = conn["to_id"], conn["from_id"]
+        else:
+            ep_id, port_id = conn["from_id"], conn["to_id"]
+        port = idx["port"].get(port_id, {})
+        if port.get("device_id") not in site_device_ids:
+            continue
+        ep  = idx["ep"].get(ep_id)
+        dev = idx["dev"].get(port.get("device_id", ""), {})
+        if ep:
+            site_direct.append((ep, dev, port, conn))
+
+    if site_direct:
+        lines.append("### 🖥 Direct verbonden")
+        lines.append("")
+        lines.append("| Naam | Type | Locatie | Poort | Kabeltype |")
+        lines.append("|---|---|---|---|---|")
+        for ep, dev, port, conn in sorted(site_direct, key=lambda x: x[0].get("name", "")):
+            port_label = (f"{dev.get('name','?')} / {port.get('name','?')}"
+                          if dev else port.get("name", "?"))
+            lines.append(
+                f"| {ep.get('name','?')} | {ep.get('type','—')} | "
+                f"{ep.get('location','—')} | {port_label} | "
+                f"{conn.get('cable_type','—')} |"
+            )
         lines.append("")
 
     return lines

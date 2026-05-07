@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.25.0
+# Version: 1.26.0
 # Author:  Barremans
-# Changes: 1.25.0 — V3: vaste ruimte tussen devices via _DEVICE_GAP constante
+# Changes: 1.26.0 — Direct endpoint: poort-widget toont 🖥-label en aparte
+#                   objectName "port-endpoint" voor gele kleur (zelfde als verbonden)
+#                   direct_endpoint_ports set doorgegeven door _populate
+#          1.25.0 — V3: vaste ruimte tussen devices via _DEVICE_GAP constante
 #          1.24.0 — Fix switch nummering bij 2+ rijen (bv. 48 poorts switch):
 #                   correct interleaved per blok van ports_per_row
 #                   (1,3..23 | 2,4..24 | 25,27..47 | 26,28..48)
@@ -225,11 +228,16 @@ class RackView(QWidget):
             port_map.setdefault(p["device_id"], []).append(p)
 
         connected_ports = set()
+        direct_endpoint_ports = set()   # 1.26.0 — port → endpoint directe verbinding
         for conn in self._data.get("connections", []):
             if conn["from_type"] == "port":
                 connected_ports.add(conn["from_id"])
+                if conn.get("to_type") == "endpoint":
+                    direct_endpoint_ports.add(conn["from_id"])
             if conn["to_type"] == "port":
                 connected_ports.add(conn["to_id"])
+                if conn.get("from_type") == "endpoint":
+                    direct_endpoint_ports.add(conn["to_id"])
 
         u = 1
         while u <= total_u:
@@ -241,7 +249,8 @@ class RackView(QWidget):
                     bl.addWidget(self._build_device_row(
                         u, device, height, slot,
                         port_map.get(device["id"], []),
-                        connected_ports
+                        connected_ports,
+                        direct_endpoint_ports,
                     ))
                     bl.addSpacing(_DEVICE_GAP)   # V3: vaste ruimte na elk device
                     u += height
@@ -285,7 +294,8 @@ class RackView(QWidget):
         layout.addWidget(spacer)
         return row
 
-    def _build_device_row(self, u_num, device, height, slot, ports, connected_ports):
+    def _build_device_row(self, u_num, device, height, slot, ports, connected_ports,
+                          direct_endpoint_ports: set | None = None):
         dev_type    = device.get("type", "unknown")
         heeft_front = device.get("front_ports", 0) > 0
         heeft_back  = device.get("back_ports",  0) > 0
@@ -331,7 +341,8 @@ class RackView(QWidget):
                 copper_ports = [p for p in front_ports if p["number"] <= total_front]
                 sfp_ports_l  = [p for p in front_ports if p["number"] > total_front]
                 copper_block = self._build_port_block(
-                    copper_ports, "front", total_front, connected_ports, ppr, dev_type, device_name)
+                    copper_ports, "front", total_front, connected_ports, ppr, dev_type,
+                    device_name, direct_endpoint_ports)
                 sfp_block = self._build_sfp_block(
                     sfp_ports_l, sfp_count, total_front, connected_ports, device_name)
                 layout.addWidget(copper_block)
@@ -342,7 +353,8 @@ class RackView(QWidget):
                 layout.addWidget(sfp_block)
             else:
                 layout.addWidget(self._build_port_block(
-                    front_ports, "front", total_front, connected_ports, ppr, dev_type, device_name))
+                    front_ports, "front", total_front, connected_ports, ppr, dev_type,
+                    device_name, direct_endpoint_ports))
 
         # Naam gecentreerd in de resterende ruimte
         lw = QWidget()
@@ -367,7 +379,8 @@ class RackView(QWidget):
         # ACHTER-poorten — direct naast naambord rechts, geen stretch erna
         if heeft_back:
             layout.addWidget(self._build_port_block(
-                back_ports, "back", device["back_ports"], connected_ports, ppr, dev_type, device_name))
+                back_ports, "back", device["back_ports"], connected_ports, ppr, dev_type,
+                device_name, direct_endpoint_ports))
 
         return row
 
@@ -396,7 +409,8 @@ class RackView(QWidget):
     def _build_port_block(self, ports, side, total, connected_ports,
                           ports_per_row: int = _MAX_PORTS_ROW,
                           dev_type: str = "",
-                          device_name: str = ""):
+                          device_name: str = "",
+                          direct_endpoint_ports: set | None = None):
         container = QWidget()
         container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         grid = QVBoxLayout(container)
@@ -441,9 +455,13 @@ class RackView(QWidget):
                 port    = port_by_num.get(num)
                 port_id = port["id"] if port else None
                 is_connected = port_id and port_id in connected_ports
+                is_direct_ep = port_id and direct_endpoint_ports and port_id in direct_endpoint_ports
 
-                # Achterpoort verbonden krijgt aparte objectName voor ronde shape
-                if is_connected:
+                # Direct endpoint krijgt zelfde gele kleur als verbonden,
+                # maar aparte objectName voor eventuele stijl-differentiatie
+                if is_direct_ep:
+                    obj_name = "port-connected-back" if side == "back" else "port-connected"
+                elif is_connected:
                     obj_name = "port-connected-back" if side == "back" else "port-connected"
                 else:
                     obj_name = f"port-{side}"
@@ -456,7 +474,22 @@ class RackView(QWidget):
                 if port_id:
                     self._port_widgets[port_id] = btn
                     port_name = port.get("name", f"Port {num}")
-                    status    = "🔗 Verbonden" if is_connected else "○ Vrij"
+                    if is_direct_ep:
+                        # Zoek endpoint naam voor tooltip
+                        ep_conn = next(
+                            (c for c in self._data.get("connections", [])
+                             if (c.get("from_id") == port_id and c.get("to_type") == "endpoint") or
+                                (c.get("to_id")   == port_id and c.get("from_type") == "endpoint")),
+                            None
+                        )
+                        ep_name = ""
+                        if ep_conn:
+                            ep_id = ep_conn["to_id"] if ep_conn.get("to_type") == "endpoint" else ep_conn["from_id"]
+                            ep = next((e for e in self._data.get("endpoints", []) if e["id"] == ep_id), None)
+                            ep_name = ep.get("name", ep_id) if ep else ep_id
+                        status = f"🖥 {ep_name}" if ep_name else "🖥 Direct endpoint"
+                    else:
+                        status = "🔗 Verbonden" if is_connected else "○ Vrij"
                     tip_parts = []
                     if device_name:
                         tip_parts.append(device_name)
@@ -584,6 +617,7 @@ class RackView(QWidget):
                         is_sfp = True
                 side = p.get("side", "front")
                 if connected:
+                    # Direct endpoint of wandpunt — zelfde gele kleur
                     obj = "port-connected-back" if side == "back" else "port-connected"
                 elif is_sfp:
                     obj = "port-sfp"

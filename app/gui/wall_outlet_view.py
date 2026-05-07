@@ -2,9 +2,14 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.7.0
+# Version: 1.8.1
 # Author:  Barremans
-# Changes: 1.7.0 — W1: eindapparaat aanmaken/bewerken vanuit wandpunt
+# Changes: 1.8.1 — Visuele scheiding voor "Direct verbonden" sectie (HR lijn)
+#                  Rechtsklik op endpoint-kaartje: bewerken via outlet_endpoint_edit
+#          1.8.0 — Direct endpoint: nieuwe sectie "🖥 Direct verbonden" onderaan
+#                  _build_direct_endpoints_section() + _build_endpoint_card()
+#                  Toont alle endpoints met een directe port→endpoint verbinding
+#          1.7.0 — W1: eindapparaat aanmaken/bewerken vanuit wandpunt
 #                  outlet_endpoint_requested signaal + rechtsklik + detail popup knop
 #          1.6.0 — F6: sortering binnen locatiegroep op sort_id
 #                  Wandpunten zonder sort_id (0) komen achteraan binnen groep
@@ -53,6 +58,7 @@ class WallOutletView(QWidget):
     outlet_clicked = Signal(str)
     outlet_edit_requested = Signal(str)       # rechtsklik → bewerken
     outlet_endpoint_requested = Signal(str)   # W1: eindapparaat toevoegen/bewerken
+    endpoint_edit_requested = Signal(str)     # 1.8.1: rechtsklik endpoint-kaartje → bewerken
 
     # ------------------------------------------------------------------
     # Constructor — room- of site-modus
@@ -68,7 +74,7 @@ class WallOutletView(QWidget):
         """
         super().__init__(parent)
         self._mode = mode
-        if mode == "site":
+        if mode == "site" or mode == "direct":
             self._site = room_or_site
             self._room = None
         else:
@@ -99,6 +105,11 @@ class WallOutletView(QWidget):
                 f"🌐  {t('site_outlets_title')}  —  {self._site['name']}"
             )
             all_outlets = self._collect_site_outlets()
+        elif self._mode == "direct":
+            title_text = (
+                f"🖥  {t('wall_outlet_group_direct')}  —  {self._site['name']}"
+            )
+            all_outlets = []
         else:
             title_text = (
                 f"🌐  {t('title_wall_outlets')}  —  "
@@ -111,9 +122,12 @@ class WallOutletView(QWidget):
 
         title_lbl = QLabel(title_text)
         title_lbl.setObjectName("rack_title")
-        count_lbl = QLabel(
-            f"{len(all_outlets)}  {t('tree_wall_outlets').lower()}"
-        )
+        if self._mode == "direct":
+            count_lbl = QLabel("")
+        else:
+            count_lbl = QLabel(
+                f"{len(all_outlets)}  {t('tree_wall_outlets').lower()}"
+            )
         count_lbl.setObjectName("secondary")
         count_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         title_layout.addWidget(title_lbl)
@@ -132,7 +146,10 @@ class WallOutletView(QWidget):
 
         ep_map = {e["id"]: e for e in self._data.get("endpoints", [])}
 
-        if not all_outlets:
+        if self._mode == "direct":
+            # Geen wandpunten tonen — alleen direct verbonden sectie
+            pass
+        elif not all_outlets:
             empty_lbl = QLabel(
                 t("site_outlets_empty") if self._mode == "site"
                 else t("tree_no_endpoint")
@@ -174,6 +191,9 @@ class WallOutletView(QWidget):
                 # Opvullen laatste rij met stretch zodat kaartjes links blijven
                 if row_layout is not None:
                     row_layout.addStretch()
+
+        # 1.8.0 — Direct verbonden endpoints sectie
+        self._build_direct_endpoints_section(body_layout)
 
         body_layout.addStretch()
         scroll.setWidget(body)
@@ -362,6 +382,177 @@ class WallOutletView(QWidget):
             return f"🖥  {first_ep['label']}"
         else:
             return f"○  {t('site_outlets_no_connection')}"
+
+    # ------------------------------------------------------------------
+    # Direct verbonden endpoints sectie (1.8.0)
+    # ------------------------------------------------------------------
+
+    def _build_direct_endpoints_section(self, body_layout: QVBoxLayout):
+        """
+        1.8.0 — Toont alle endpoints die rechtstreeks verbonden zijn aan een
+        switch-poort (port → endpoint, zonder wandpunt).
+        Sectie wordt alleen getoond als er minstens één zulke verbinding bestaat.
+        """
+        # Verzamel alle directe port→endpoint verbindingen
+        direct_conns = [
+            c for c in self._data.get("connections", [])
+            if c.get("to_type") == "endpoint" or c.get("from_type") == "endpoint"
+        ]
+        if not direct_conns:
+            return
+
+        ep_map   = {e["id"]: e for e in self._data.get("endpoints", [])}
+        port_map = {p["id"]: p for p in self._data.get("ports", [])}
+        dev_map  = {d["id"]: d for d in self._data.get("devices", [])}
+
+        # Bepaal welke device_ids relevant zijn voor de huidige modus
+        if self._mode == "room":
+            # Alleen devices in de racks van deze ruimte
+            allowed_device_ids = {
+                slot.get("device_id")
+                for rack in self._room.get("racks", [])
+                for slot in rack.get("slots", [])
+                if slot.get("device_id")
+            }
+        elif self._mode in ("site", "direct"):
+            # Alle devices in alle ruimtes van deze site
+            allowed_device_ids = {
+                slot.get("device_id")
+                for room in self._site.get("rooms", [])
+                for rack in room.get("racks", [])
+                for slot in rack.get("slots", [])
+                if slot.get("device_id")
+            }
+        else:
+            allowed_device_ids = None  # geen filter
+
+        # Bouw lijst van (endpoint, port, device) tuples
+        items = []
+        for conn in direct_conns:
+            if conn.get("to_type") == "endpoint":
+                ep_id   = conn["to_id"]
+                port_id = conn["from_id"]
+            else:
+                ep_id   = conn["from_id"]
+                port_id = conn["to_id"]
+            ep   = ep_map.get(ep_id)
+            port = port_map.get(port_id)
+            dev  = dev_map.get(port["device_id"]) if port else None
+            # Filter op ruimte/site
+            if allowed_device_ids is not None:
+                if not port or port.get("device_id") not in allowed_device_ids:
+                    continue
+            if ep:
+                items.append((ep, port, dev))
+
+        if not items:
+            return
+
+        # Visuele scheiding boven de sectie — alleen in room/site modus
+        if self._mode != "direct":
+            separator = QFrame()
+            separator.setFrameShape(QFrame.Shape.HLine)
+            separator.setStyleSheet("color: rgba(255,255,255,0.15); margin: 8px 0;")
+            body_layout.addWidget(separator)
+
+        # Sectieheader — weglaten in direct modus (titel staat al in de title bar)
+        if self._mode != "direct":
+            header = QFrame()
+            header.setObjectName("outlet_group_header")
+            header.setStyleSheet(
+                "QFrame#outlet_group_header {"
+                "  background-color: rgba(255,255,255,0.05);"
+                "  border-left: 3px solid #2196f3;"
+                "  border-radius: 2px;"
+                "  padding: 2px 6px;"
+                "}"
+            )
+            header_layout = QHBoxLayout(header)
+            header_layout.setContentsMargins(8, 4, 8, 4)
+            header_layout.setSpacing(8)
+            hdr_lbl = QLabel(t("wall_outlet_group_direct"))
+            hdr_lbl.setObjectName("rack_title")
+            hdr_lbl.setStyleSheet("font-size: 12px; font-weight: bold;")
+            cnt_lbl = QLabel(f"{len(items)}")
+            cnt_lbl.setObjectName("secondary")
+            cnt_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            header_layout.addWidget(hdr_lbl)
+            header_layout.addStretch()
+            header_layout.addWidget(cnt_lbl)
+            body_layout.addWidget(header)
+
+        # Kaartjes in rijen van 4
+        col_count = 3 if self._mode == "site" else 4
+        row_widget = None
+        row_layout = None
+        for idx, (ep, port, dev) in enumerate(items):
+            if idx % col_count == 0:
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(8)
+                row_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+                body_layout.addWidget(row_widget)
+            card = self._build_endpoint_card(ep, port, dev)
+            row_layout.addWidget(card)
+        if row_layout is not None:
+            row_layout.addStretch()
+
+    def _build_endpoint_card(self, ep: dict, port: dict | None,
+                              dev: dict | None) -> QFrame:
+        """
+        1.8.0 — Kaartje voor een direct verbonden endpoint.
+        1.8.1 — Rechtsklik opent contextmenu met Bewerken.
+        """
+        card = QFrame()
+        card.setObjectName("wall-outlet")
+        card.setFixedSize(160, 90)
+        card.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(2)
+
+        # Naam
+        name_lbl = QLabel(f"🖥  {ep.get('name', '?')}")
+        name_lbl.setObjectName("outlet-label")
+        layout.addWidget(name_lbl)
+
+        # Locatie (optioneel)
+        loc = ep.get("location", "")
+        if loc:
+            loc_lbl = QLabel(loc)
+            loc_lbl.setObjectName("secondary")
+            loc_lbl.setWordWrap(True)
+            layout.addWidget(loc_lbl)
+
+        layout.addStretch()
+
+        # Verbonden poort
+        if port and dev:
+            port_lbl = QLabel(
+                f"⬡  {dev.get('name', '?')} — {port.get('name', '?')}"
+                f" ({port.get('side', '').upper()})"
+            )
+        elif port:
+            port_lbl = QLabel(f"⬡  {port.get('name', '?')}")
+        else:
+            port_lbl = QLabel(f"○  {t('site_outlets_no_connection')}")
+        port_lbl.setObjectName("secondary")
+        port_lbl.setWordWrap(True)
+        layout.addWidget(port_lbl)
+
+        # Rechtsklik — contextmenu Bewerken
+        ep_id = ep["id"]
+        def _on_context(event, eid=ep_id):
+            menu = QMenu(self)
+            act_edit = menu.addAction("✏  " + t("ctx_edit"))
+            action = menu.exec(QCursor.pos())
+            if action == act_edit:
+                self.endpoint_edit_requested.emit(eid)
+        card.contextMenuEvent = _on_context
+
+        return card
 
     # ------------------------------------------------------------------
     # Klik handler

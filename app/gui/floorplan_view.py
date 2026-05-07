@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.12.0
+# Version: 1.13.0
 # Author:  Barremans
-# Changes: 1.12.0 — G-OPEN-2: Info tab in zijpaneel — naam + notities van het grondplan
+# Changes: 1.13.0 — Direct endpoint: overlay blauw (#2196f3) voor ep: mappings
+#                   _resolve_outlet_name uitgebreid voor endpoints
+#                   set_selected_svg_point: ep: prefix herkend
+#                   _on_trace_clicked: trace via port voor direct endpoint
+#          1.12.0 — G-OPEN-2: Info tab in zijpaneel — naam + notities van het grondplan
 #                   _tab_info met _lbl_info_name en _txt_info_notes (readonly)
 #                   _refresh_info() aangeroepen vanuit _refresh_sidepanel() en _refresh_from_storage()
 #          1.11.0 — G-OPEN-3: rechtsklik op overlay → contextmenu "Koppeling verwijderen"
@@ -86,11 +90,12 @@ from app.services import tracing
 from app.gui.dialogs.floorplan_mapping_dialog import FloorplanMappingDialog
 
 
-_OVERLAY_R      = 7
-_COLOR_MAPPED   = QColor("#4caf7d")   # groen
-_COLOR_UNMAPPED = QColor("#f0a030")   # amber
-_COLOR_SELECTED = QColor("#e040fb")   # paars
-_PEN_WIDTH      = 2.5
+_OVERLAY_R        = 7
+_COLOR_MAPPED     = QColor("#4caf7d")   # groen — wandpunt
+_COLOR_UNMAPPED   = QColor("#f0a030")   # amber — ongekoppeld
+_COLOR_SELECTED   = QColor("#e040fb")   # paars — geselecteerd
+_COLOR_ENDPOINT   = QColor("#2196f3")   # blauw — direct endpoint
+_PEN_WIDTH        = 2.5
 
 
 class _OverlayItem(QGraphicsEllipseItem):
@@ -136,13 +141,21 @@ class _OverlayItem(QGraphicsEllipseItem):
         self._mapped = mapped
         self._update_style()
 
+    def set_endpoint_type(self, is_endpoint: bool):
+        """1.13.0 — Markeer overlay als direct endpoint (blauw)."""
+        self._is_endpoint = is_endpoint
+        self._update_style()
+
     def set_selected(self, selected: bool):
         self._selected = selected
         self._update_style()
 
     def _update_style(self):
+        is_ep = getattr(self, "_is_endpoint", False)
         color = _COLOR_SELECTED if self._selected else (
-            _COLOR_MAPPED if self._mapped else _COLOR_UNMAPPED
+            _COLOR_ENDPOINT if (self._mapped and is_ep) else (
+                _COLOR_MAPPED if self._mapped else _COLOR_UNMAPPED
+            )
         )
         fill = QColor(color)
         fill.setAlpha(160)
@@ -454,7 +467,9 @@ class FloorplanView(QWidget):
                 callback=self._on_overlay_clicked,
                 unmap_callback=self._on_overlay_unmap,
             )
-            overlay.set_mapped(label in mappings)
+            mapped_val = mappings.get(label, "")
+            overlay.set_mapped(bool(mapped_val))
+            overlay.set_endpoint_type(mapped_val.startswith("ep:"))
             self._scene.addItem(overlay)
             self._overlay_items[label] = overlay
 
@@ -514,9 +529,14 @@ class FloorplanView(QWidget):
         self._selected_outlet_id = None
 
         if svg_point:
-            self._selected_outlet_id = floorplan_service.get_mapping(
+            mapped_val = floorplan_service.get_mapping(
                 self._floorplan["id"], svg_point,
             )
+            # ep: prefix = direct endpoint, anders wandpunt
+            if mapped_val and mapped_val.startswith("ep:"):
+                self._selected_outlet_id = mapped_val  # bewaar als "ep:ep_xxx"
+            else:
+                self._selected_outlet_id = mapped_val  # wandpunt ID of None
             if svg_point in self._overlay_items:
                 self._overlay_items[svg_point].set_selected(True)
 
@@ -586,7 +606,23 @@ class FloorplanView(QWidget):
             self._trace_info.setPlainText(t("trace_no_connection"))
             return
 
-        steps = tracing.trace_from_wall_outlet(self._data, self._selected_outlet_id)
+        # Direct endpoint: trace via de verbonden poort
+        if self._selected_outlet_id.startswith("ep:"):
+            ep_id = self._selected_outlet_id[3:]
+            # Zoek de poort die verbonden is met dit endpoint
+            conn = next(
+                (c for c in self._data.get("connections", [])
+                 if (c.get("to_type") == "endpoint" and c["to_id"] == ep_id) or
+                    (c.get("from_type") == "endpoint" and c["from_id"] == ep_id)),
+                None
+            )
+            if conn:
+                port_id = conn["from_id"] if conn.get("to_type") == "endpoint" else conn["to_id"]
+                steps = tracing.trace_from_port(self._data, port_id)
+            else:
+                steps = []
+        else:
+            steps = tracing.trace_from_wall_outlet(self._data, self._selected_outlet_id)
 
         if not steps:
             self._trace_info.setPlainText(t("trace_no_connection"))
@@ -594,8 +630,8 @@ class FloorplanView(QWidget):
 
         lines = []
         for step in steps:
-            label = step.get("label", "?")
-            obj_type = step.get("obj_type", "")
+            label      = step.get("label", "?")
+            obj_type   = step.get("obj_type", "")
             cable_type = step.get("cable_type", "")
             if cable_type:
                 lines.append(f"[{obj_type}] {label}  ({cable_type})")
@@ -603,7 +639,8 @@ class FloorplanView(QWidget):
                 lines.append(f"[{obj_type}] {label}")
 
         self._trace_info.setPlainText("\n".join(lines))
-        self.trace_requested.emit(self._selected_outlet_id)
+        if not self._selected_outlet_id.startswith("ep:"):
+            self.trace_requested.emit(self._selected_outlet_id)
 
     def _on_view_context_menu(self, pos):
         menu = QMenu(self)
@@ -647,7 +684,9 @@ class FloorplanView(QWidget):
         # Overlay kleuren bijwerken — ALLEEN voor bekende posities
         mappings = self._floorplan.get("mappings", {})
         for label, overlay in self._overlay_items.items():
-            overlay.set_mapped(label in mappings)
+            mapped_val = mappings.get(label, "")
+            overlay.set_mapped(bool(mapped_val))
+            overlay.set_endpoint_type(mapped_val.startswith("ep:"))
             overlay.set_selected(label == self._selected_svg_point)
 
         # Naam bijwerken indien aanwezig
@@ -762,6 +801,14 @@ class FloorplanView(QWidget):
         if not outlet_id:
             return None
 
+        # Direct endpoint
+        if outlet_id.startswith("ep:"):
+            ep_id = outlet_id[3:]
+            ep = next((e for e in self._data.get("endpoints", [])
+                       if e["id"] == ep_id), None)
+            return f"🖥  {ep.get('name', ep_id)}" if ep else ep_id
+
+        # Wandpunt
         for site in self._data.get("sites", []):
             for room in site.get("rooms", []):
                 for outlet in room.get("wall_outlets", []):

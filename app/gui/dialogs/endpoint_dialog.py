@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/endpoint_dialog.py
 # Role:    Endpoint aanmaken en bewerken
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
 # Changes: 1.3.0 — S/N (serienummer) veld toegevoegd
+#          1.4.0 — location veld toegevoegd (optioneel, voor direct endpoint)
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -49,17 +50,20 @@ class EndpointDialog(QDialog):
         self._serial = QLineEdit()
         self._brand  = QLineEdit()
         self._model  = QLineEdit()
-        self._notes  = QTextEdit()
+        self._notes    = QTextEdit()
         self._notes.setFixedHeight(60)
+        self._location = QLineEdit()
+        self._location.setPlaceholderText(t("endpoint_location_placeholder"))
 
-        form.addRow(t("label_name")   + " *:", self._name)
-        form.addRow(t("label_type")   + ":",   self._ddl_type)
-        form.addRow(t("label_ip")     + ":",   self._ip)
-        form.addRow(t("label_mac")    + ":",   self._mac)
-        form.addRow(t("label_serial") + ":",   self._serial)
-        form.addRow(t("label_brand")  + ":",   self._brand)
-        form.addRow(t("label_model")  + ":",   self._model)
-        form.addRow(t("label_notes")  + ":",   self._notes)
+        form.addRow(t("label_name")        + " *:", self._name)
+        form.addRow(t("label_type")        + ":",   self._ddl_type)
+        form.addRow(t("label_ip")          + ":",   self._ip)
+        form.addRow(t("label_mac")         + ":",   self._mac)
+        form.addRow(t("label_serial")      + ":",   self._serial)
+        form.addRow(t("label_brand")       + ":",   self._brand)
+        form.addRow(t("label_model")       + ":",   self._model)
+        form.addRow(t("endpoint_location") + ":",   self._location)
+        form.addRow(t("label_notes")       + ":",   self._notes)
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
@@ -85,6 +89,7 @@ class EndpointDialog(QDialog):
         self._brand.setText(self._endpoint.get("brand", ""))
         self._model.setText(self._endpoint.get("model", ""))
         self._notes.setPlainText(self._endpoint.get("notes", ""))
+        self._location.setText(self._endpoint.get("location", ""))
 
     def _on_save(self):
         name = self._name.text().strip()
@@ -92,15 +97,16 @@ class EndpointDialog(QDialog):
             QMessageBox.warning(self, t("label_endpoint"), t("err_field_required"))
             return
         self._result = {
-            "id":    self._endpoint.get("id", ""),
-            "name":  name,
-            "type":  self._ddl_type.currentData() or "",
-            "ip":     self._ip.text().strip(),
-            "mac":    self._mac.text().strip(),
-            "serial": self._serial.text().strip(),
-            "brand":  self._brand.text().strip(),
-            "model": self._model.text().strip(),
-            "notes": self._notes.toPlainText().strip(),
+            "id":       self._endpoint.get("id", ""),
+            "name":     name,
+            "type":     self._ddl_type.currentData() or "",
+            "ip":       self._ip.text().strip(),
+            "mac":      self._mac.text().strip(),
+            "serial":   self._serial.text().strip(),
+            "brand":    self._brand.text().strip(),
+            "model":    self._model.text().strip(),
+            "location": self._location.text().strip(),
+            "notes":    self._notes.toPlainText().strip(),
         }
         self.accept()
 

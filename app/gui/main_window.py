@@ -2,9 +2,16 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.42.0
+# Version: 1.43.2
 # Author:  Barremans
-# Changes: 1.42.0 — Export: map-gebaseerd (network_data+settings+floorplans+vlan)
+# Changes: 1.43.2 — Direct endpoints zichtbaar in boom per site
+#                   _TYPE_DIRECT_EPS + klik handler → _show_site_outlets_view
+#          1.43.1 — Poort rechtsklik: "Bewerken" bij direct endpoint
+#                   endpoint_edit_requested signaal gekoppeld (room + site modus)
+#                   _on_endpoint_edit_requested handler toegevoegd
+#          1.43.0 — Direct endpoint: rechtsklik poort → koppelen/loskoppelen
+#                   _on_connect_endpoint_direct handler + ConnectEndpointDirectDialog
+#          1.42.0 — Export: map-gebaseerd (network_data+settings+floorplans+vlan)
 #                   Import replace: map inlezen + herstart
 #                   Import merge: blijft JSON-gebaseerd
 #                   Backup: vlan_config.json toegevoegd overal
@@ -156,7 +163,8 @@ _TYPE_ROOM        = "room"
 _TYPE_RACK        = "rack"
 _TYPE_OUTLETS     = "outlets"
 _TYPE_OUTLET      = "outlet"       # individueel wandpunt in boom
-_TYPE_SITE_OUTLETS = "site_outlets" # alle wandpunten van een site (E3)
+_TYPE_SITE_OUTLETS  = "site_outlets"  # alle wandpunten van een site (E3)
+_TYPE_DIRECT_EPS    = "direct_endpoints"  # direct verbonden endpoints (1.43.2)
 
 
 class MainWindow(QMainWindow):
@@ -590,6 +598,59 @@ class MainWindow(QMainWindow):
                         f"{rack['total_units']}U  ·  {used}/{total}U bezet ({pct:.0f}%)  ·  "
                         f"{self._room_status_label(room, site)}")
                     rack_item.setForeground(_COL, QBrush(QColor(color)))
+
+                    # 1.43.2 — Direct verbonden endpoints per rack
+                    rack_device_ids = {
+                        slot.get("device_id")
+                        for slot in rack.get("slots", [])
+                        if slot.get("device_id")   # None uitsluiten
+                    }
+                    ep_map_local   = {e["id"]: e for e in self._data.get("endpoints", [])}
+                    port_map_local = {p["id"]: p for p in self._data.get("ports", [])}
+                    dev_map_local  = {d["id"]: d for d in self._data.get("devices", [])}
+                    rack_direct = []
+                    for conn in self._data.get("connections", []):
+                        if conn.get("to_type") == "endpoint":
+                            port_id = conn["from_id"]
+                            ep_id   = conn["to_id"]
+                        elif conn.get("from_type") == "endpoint":
+                            port_id = conn["to_id"]
+                            ep_id   = conn["from_id"]
+                        else:
+                            continue
+                        port = port_map_local.get(port_id)
+                        if port and port.get("device_id") in rack_device_ids:
+                            ep = ep_map_local.get(ep_id)
+                            if ep:
+                                rack_direct.append(
+                                    (ep, port, dev_map_local.get(port["device_id"]))
+                                )
+                    if rack_direct:
+                        direct_item = QTreeWidgetItem([
+                            f"🖥  {rack['name'].upper()}  —  {t('wall_outlet_group_direct')}  ({len(rack_direct)})"
+                        ])
+                        direct_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                            "type":      _TYPE_DIRECT_EPS,
+                            "site_id":   site["id"],
+                            "rack_name": rack["name"],
+                        })
+                        for ep, port, dev in rack_direct:
+                            ep_item = QTreeWidgetItem(
+                                [f"   🖥  {ep.get('name', ep['id']).upper()}"]
+                            )
+                            ep_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                                "type":    _TYPE_DIRECT_EPS,
+                                "ep_id":   ep["id"],
+                                "site_id": site["id"],
+                            })
+                            port_label = (
+                                f"{dev.get('name','?')} — {port.get('name','?')}"
+                                if dev else port.get("name", "?")
+                            )
+                            ep_item.setToolTip(_COL, port_label)
+                            direct_item.addChild(ep_item)
+                        room_item.addChild(direct_item)
+
                     room_item.addChild(rack_item)
 
                 outlets      = room.get("wall_outlets", [])
@@ -684,6 +745,20 @@ class MainWindow(QMainWindow):
                     f"({len(all_outlets)} {t('tree_wall_outlets').lower()})"
                 )
                 self._show_site_outlets_view(site)
+
+        elif item_type == _TYPE_DIRECT_EPS:
+            site = self._find_site(data["site_id"])
+            rack_name = data.get("rack_name", "")
+            if site:
+                ep_id = data.get("ep_id")
+                if ep_id:
+                    ep = next((e for e in self._data.get("endpoints", [])
+                               if e["id"] == ep_id), None)
+                    if ep:
+                        self.set_status(f"🖥  {ep.get('name', ep_id)}")
+                else:
+                    self.set_status(f"🖥  {t('wall_outlet_group_direct')}  —  {rack_name}")
+                self._show_direct_endpoints_view(site, rack_name)
 
         elif item_type == _TYPE_OUTLETS:
             room = self._find_room(data["room_id"])
@@ -882,6 +957,25 @@ class MainWindow(QMainWindow):
                             )
                         return
 
+    def _on_endpoint_edit_requested(self, ep_id: str):
+        """
+        1.8.1 — Eindapparaat bewerken vanuit endpoint-kaartje in WallOutletView
+        (rechtsklik op direct verbonden endpoint kaartje).
+        """
+        if settings_storage.get_read_only_mode():
+            return
+        ep = next((e for e in self._data.get("endpoints", []) if e["id"] == ep_id), None)
+        if not ep:
+            return
+        dlg = EndpointDialog(parent=self, endpoint=ep)
+        if dlg.exec() and dlg.get_result():
+            result = dlg.get_result()
+            ep.update(result)
+            self._save_and_backup()
+            if isinstance(self._current_view, WallOutletView):
+                self._current_view.refresh(self._data)
+            self.set_status(f"✓  🖥  '{ep.get('name', '')}' bijgewerkt.")
+
     def _delete_wall_outlet(self, data: dict):
         """Wandpunt verwijderen via context menu."""
         if settings_storage.get_read_only_mode():          # F5
@@ -1072,6 +1166,20 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
         outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
+        self._mid_layout.addWidget(outlet_view)
+        self._current_view = outlet_view
+
+    def _show_direct_endpoints_view(self, site: dict, rack_name: str = ""):
+        """Toon alleen de direct verbonden endpoints — eigen view zonder wandpunten."""
+        while self._mid_layout.count():
+            item = self._mid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        outlet_view = WallOutletView(site, None, self._data,
+                                     mode="direct", parent=self._mid_frame)
+        outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -1087,6 +1195,7 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
         outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -1426,18 +1535,40 @@ class MainWindow(QMainWindow):
         if not port or not dev:
             return
 
-        is_connected = any(
-            c for c in self._data.get("connections", [])
-            if c.get("from_id") == port_id or c.get("to_id") == port_id
+        # Zoek bestaande verbinding voor deze poort
+        existing_conn = next(
+            (c for c in self._data.get("connections", [])
+             if c.get("from_id") == port_id or c.get("to_id") == port_id),
+            None
+        )
+        is_connected = existing_conn is not None
+        is_direct_endpoint = (
+            existing_conn is not None and (
+                existing_conn.get("to_type") == "endpoint" or
+                existing_conn.get("from_type") == "endpoint"
+            )
         )
 
         port_label = f"{dev.get('name', '')} — {port.get('name', '')} ({port.get('side','').upper()})"
 
         menu = QMenu(self)
-        act_outlet = menu.addAction(t("ctx_connect_to_outlet"))
+
+        # Wandpunt koppelen alleen tonen als poort vrij is
+        act_outlet = None
+        if not is_connected:
+            act_outlet = menu.addAction(t("ctx_connect_to_outlet"))
+
+        # Direct endpoint: koppelen (vrij) of loskoppelen + bewerken (al direct endpoint)
+        act_endpoint_direct = None
+        act_endpoint_edit   = None
+        if not is_connected:
+            act_endpoint_direct = menu.addAction(t("ctx_connect_endpoint_direct"))
+        elif is_direct_endpoint:
+            act_endpoint_direct = menu.addAction(t("ctx_disconnect_endpoint_direct"))
+            act_endpoint_edit   = menu.addAction("✏  " + t("ctx_edit"))
 
         act_disconnect = None
-        if is_connected:
+        if is_connected and not is_direct_endpoint:
             menu.addSeparator()
             act_disconnect = menu.addAction(t("ctx_disconnect_port"))
 
@@ -1445,7 +1576,7 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if chosen == act_outlet:
+        if act_outlet and chosen == act_outlet:
             dlg = ConnectToOutletDialog(
                 self._data, port_id, port_label, parent=self
             )
@@ -1474,14 +1605,155 @@ class MainWindow(QMainWindow):
                 self._wire_detail.set_trace(steps, port_label, data=self._data)
                 self.set_status(f"✓  {port_label}  ►  🌐  {outlet_name}")
 
-        elif chosen == act_disconnect:
-            conn = next(
-                (c for c in self._data.get("connections", [])
-                 if c.get("from_id") == port_id or c.get("to_id") == port_id),
-                None
-            )
-            if conn:
-                self._on_delete_connection(conn["id"])
+        elif act_endpoint_direct and chosen == act_endpoint_direct:
+            if is_direct_endpoint:
+                # Loskoppelen
+                self._on_delete_connection(existing_conn["id"])
+                self.set_status(t("msg_endpoint_direct_removed"))
+            else:
+                # Koppelen
+                self._on_connect_endpoint_direct(port_id, port_label)
+
+        elif act_endpoint_edit and chosen == act_endpoint_edit:
+            # Bewerken van het direct gekoppelde endpoint
+            ep_id = (existing_conn["to_id"]
+                     if existing_conn.get("to_type") == "endpoint"
+                     else existing_conn["from_id"])
+            self._on_endpoint_edit_requested(ep_id)
+
+        elif act_disconnect and chosen == act_disconnect:
+            if existing_conn:
+                self._on_delete_connection(existing_conn["id"])
+
+    # ------------------------------------------------------------------
+    # Direct endpoint koppelen aan poort
+    # ------------------------------------------------------------------
+
+    def _on_connect_endpoint_direct(self, port_id: str, port_label: str):
+        """
+        Direct endpoint koppelen aan een poort (zonder wandpunt).
+        Toont een dialoog om een bestaand eindapparaat te kiezen of nieuw aan te maken.
+        """
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
+            QComboBox, QLabel, QPushButton, QMessageBox, QFrame
+        )
+
+        endpoints = self._data.get("endpoints", [])
+
+        class ConnectEndpointDirectDialog(QDialog):
+            def __init__(self_, parent=None):
+                super().__init__(parent)
+                self_.setWindowTitle(t("ctx_connect_endpoint_direct"))
+                self_.setMinimumWidth(400)
+                self_.setModal(True)
+                self_._result = None
+                self_._new_endpoint = None
+                self_._build()
+
+            def _build(self_):
+                layout = QVBoxLayout(self_)
+
+                grp = QGroupBox(t("label_endpoint"))
+                form = QFormLayout(grp)
+                self_._ddl = QComboBox()
+                self_._ddl.addItem(f"— {t('label_endpoint')} —", "")
+                for ep in sorted(endpoints, key=lambda e: e.get("name", "")):
+                    self_._ddl.addItem(ep.get("name", ep["id"]), ep["id"])
+                form.addRow(t("label_endpoint") + ":", self_._ddl)
+                layout.addWidget(grp)
+
+                sep = QFrame()
+                sep.setFrameShape(QFrame.Shape.HLine)
+                layout.addWidget(sep)
+
+                btn_new = QPushButton(t("title_new_endpoint"))
+                btn_new.clicked.connect(self_._on_new_endpoint)
+                layout.addWidget(btn_new)
+
+                btn_row = QHBoxLayout()
+                btn_row.addStretch()
+                btn_cancel = QPushButton(t("btn_cancel"))
+                btn_save   = QPushButton(t("btn_save"))
+                btn_save.setDefault(True)
+                btn_cancel.clicked.connect(self_.reject)
+                btn_save.clicked.connect(self_._on_save)
+                btn_row.addWidget(btn_cancel)
+                btn_row.addWidget(btn_save)
+                layout.addLayout(btn_row)
+
+            def _on_new_endpoint(self_):
+                dlg = EndpointDialog(parent=self_)
+                if dlg.exec() and dlg.get_result():
+                    ep = dlg.get_result()
+                    ep["id"] = self._gen_id("ep")
+                    self_._new_endpoint = ep
+                    self_._ddl.addItem(ep.get("name", ep["id"]), ep["id"])
+                    self_._ddl.setCurrentIndex(self_._ddl.count() - 1)
+
+            def _on_save(self_):
+                ep_id = self_._ddl.currentData()
+                if not ep_id:
+                    QMessageBox.warning(self_, t("ctx_connect_endpoint_direct"),
+                                        t("err_field_required"))
+                    return
+                self_._result = ep_id
+                self_.accept()
+
+            def get_result(self_):
+                return self_._result
+
+            def get_new_endpoint(self_):
+                return self_._new_endpoint
+
+        dlg = ConnectEndpointDirectDialog(parent=self)
+        if not dlg.exec():
+            return
+
+        ep_id = dlg.get_result()
+        if not ep_id:
+            return
+
+        # Nieuw endpoint opslaan indien aangemaakt
+        new_ep = dlg.get_new_endpoint()
+        if new_ep:
+            self._data.setdefault("endpoints", []).append(new_ep)
+
+        # Verbinding aanmaken
+        existing_ids = {c["id"] for c in self._data.get("connections", [])}
+        new_conn_id = self._gen_id("conn")
+        while new_conn_id in existing_ids:
+            new_conn_id = self._gen_id("conn")
+
+        conn = {
+            "id":        new_conn_id,
+            "from_id":   port_id,
+            "from_type": "port",
+            "to_id":     ep_id,
+            "to_type":   "endpoint",
+            "cable_type": "utp_cat6",
+            "label":     "",
+            "notes":     "",
+        }
+        self._data.setdefault("connections", []).append(conn)
+        self._save_and_backup()
+
+        ep = next((e for e in self._data.get("endpoints", []) if e["id"] == ep_id), None)
+        ep_name = ep.get("name", ep_id) if ep else ep_id
+
+        log_change(
+            action=ACTION_ADD,
+            entity=ENTITY_CONNECTION,
+            entity_id=conn["id"],
+            label=f"{port_label} → 🖥 {ep_name}",
+            details={"cable_type": conn["cable_type"]}
+        )
+
+        if isinstance(self._current_view, RackView):
+            self._current_view.refresh(self._data)
+        steps = tracing.trace_from_port(self._data, port_id)
+        self._wire_detail.set_trace(steps, port_label, data=self._data)
+        self.set_status(f"✓  {port_label}  ►  🖥  {ep_name}")
 
     # ------------------------------------------------------------------
     # Data opzoeken

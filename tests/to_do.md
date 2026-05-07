@@ -114,4 +114,3 @@
 - Standaard altijd Read only mode, onlock via pssw.
 na herstart applicatie, terug naar read only.
 - backup & restore, vlans meenemen
-- MFA indien connetie met internet , anders met login + pssw

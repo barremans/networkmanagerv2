@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/services/report_generator.py
 # Role:    Word rapport generator (python-docx)
-# Version: 1.2.4
+# Version: 1.3.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initieel: sites, ruimtes, racks, devices, verbindingen
+# Changes: 1.3.0 — Direct endpoint: _conn_label herkent to_type=="endpoint"
+#                  _build_direct_endpoints_section() toegevoegd
+#          1.0.0 — Initieel: sites, ruimtes, racks, devices, verbindingen
 #          1.1.0 — VLAN sectie toegevoegd
 #          1.2.0 — Professionele opmaak: koptekst, inhoudsopgave, samenvatting
 #                  VLAN overzicht per VLAN met poorten + wandpunten
@@ -220,6 +222,10 @@ def _conn_label(data: dict, idx: dict, port_id: str) -> str:
             wo = idx["wo"].get(other_id)
             if wo:
                 return f"🌐 {wo.get('name', other_id)}"
+        elif other_type == "endpoint":
+            ep = idx["ep"].get(other_id)
+            if ep:
+                return f"🖥 {ep.get('name', other_id)}"
     return "—"
 
 # ---------------------------------------------------------------------------
@@ -636,6 +642,86 @@ def _build_outlets_section(doc, data: dict, idx: dict):
 
             _spacer(doc, 6)
 
+        _spacer(doc, 6)
+
+# ---------------------------------------------------------------------------
+# Direct verbonden apparaten sectie
+# ---------------------------------------------------------------------------
+
+def _build_direct_endpoints_section(doc, data: dict, idx: dict):
+    """
+    1.3.0 — Aparte sectie voor endpoints die direct verbonden zijn aan een poort
+    (port → endpoint, zonder wandpunt).
+    """
+    # Verzamel alle directe port→endpoint verbindingen
+    direct_conns = [
+        c for c in data.get("connections", [])
+        if c.get("to_type") == "endpoint" or c.get("from_type") == "endpoint"
+    ]
+    if not direct_conns:
+        return
+
+    _h1(doc, "🖥  Direct verbonden apparaten")
+
+    port_map = idx.get("port", {})
+    dev_map  = idx.get("dev",  {})
+    ep_map   = idx.get("ep",   {})
+
+    # Groepeer per site
+    for site in data.get("sites", []):
+        site_device_ids = {
+            slot.get("device_id")
+            for room in site.get("rooms", [])
+            for rack in room.get("racks", [])
+            for slot in rack.get("slots", [])
+            if slot.get("device_id")
+        }
+        site_rows = []
+        for conn in direct_conns:
+            if conn.get("to_type") == "endpoint":
+                port_id = conn["from_id"]
+                ep_id   = conn["to_id"]
+            else:
+                port_id = conn["to_id"]
+                ep_id   = conn["from_id"]
+            port = port_map.get(port_id)
+            if not port or port.get("device_id") not in site_device_ids:
+                continue
+            ep  = ep_map.get(ep_id)
+            dev = dev_map.get(port.get("device_id", ""))
+            if ep:
+                site_rows.append((ep, port, dev, conn))
+
+        if not site_rows:
+            continue
+
+        _h2(doc, f"📍  {site['name']}")
+
+        W = [3.0, 2.0, 2.5, 2.0, 3.5]
+        tbl = _make_table(doc,
+            ["Naam", "Type", "Locatie", "Kabeltype", "Verbonden poort"],
+            W)
+
+        for ri, (ep, port, dev, conn) in enumerate(
+            sorted(site_rows, key=lambda r: r[0].get("name", ""))
+        ):
+            port_label = (
+                f"{dev.get('name','?')} / {port.get('name','?')} ({port.get('side','?')[0].upper()})"
+                if dev else port.get("name", "?")
+            )
+            cable = conn.get("cable_type", "—") or "—"
+            loc   = ep.get("location", "") or "—"
+            etype = ep.get("type", "") or "—"
+            _add_row(tbl, [
+                ep.get("name", ep.get("id", "?")),
+                etype,
+                loc,
+                cable,
+                port_label,
+            ], W, shade=(ri % 2 == 1))
+
+        _spacer(doc, 6)
+
 # ---------------------------------------------------------------------------
 # Verbindingen sectie
 # ---------------------------------------------------------------------------
@@ -942,11 +1028,15 @@ def render_report_docx(data: dict, filepath: str) -> tuple[bool, str]:
         _build_outlets_section(doc, data, idx)
         doc.add_page_break()
 
-        # 6. Verbindingen
+        # 6. Direct verbonden apparaten
+        _build_direct_endpoints_section(doc, data, idx)
+        doc.add_page_break()
+
+        # 7. Verbindingen
         _build_connections_section(doc, data, idx)
         doc.add_page_break()
 
-        # 7. VLAN overzicht
+        # 8. VLAN overzicht
         _build_vlan_section(doc, data, idx)
 
         doc.save(filepath)

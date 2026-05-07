@@ -2,13 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/vlan_report_view.py
 # Role:    Zijpaneel VLAN rapport — alle poorten per VLAN, over sites/racks
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
-#          1.1.0 — VLAN namen uit vlan_config tonen via vlan_service
-#          1.2.0 — IP adres en subnetmasker tonen in VLAN header indien ingevuld
-#          1.3.0 — B4: VLAN type-mismatch fix — p.get("vlan") kan str of int zijn,
-#                  alle vergelijkingen genormaliseerd via _vlan_eq() helper
+# Changes: 1.4.0 — Direct endpoint: conn_label herkent to_type=="endpoint"
+#                  _add_vlan_direct_endpoints() toegevoegd
+#          1.3.0 — B4: VLAN type-mismatch fix
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -287,6 +285,11 @@ class VlanReportView(QWidget):
                                 for wo in r2.get("wall_outlets", []):
                                     if wo["id"] == other_id:
                                         conn_label = f"  →  🌐 {wo['name']} ({r2['name']})"
+                    elif other_type == "endpoint":
+                        ep = next((e for e in self._data.get("endpoints", [])
+                                   if e["id"] == other_id), None)
+                        if ep:
+                            conn_label = f"  →  🖥 {ep['name']}"
 
                 port_lbl = QLabel(
                     f"    ⬡  {p['name']}  ({side_str})"
@@ -301,6 +304,8 @@ class VlanReportView(QWidget):
 
         # Wandpunten met dit VLAN (indirect via verbonden poort)
         self._add_vlan_outlets(vlan_num, dev_map)
+        # 1.4.0 — Direct verbonden endpoints via VLAN poort
+        self._add_vlan_direct_endpoints(vlan_num)
 
     def _add_vlan_outlets(self, vlan_num: int, dev_map: dict):
         """
@@ -394,6 +399,49 @@ class VlanReportView(QWidget):
             wo_lbl.setTextFormat(Qt.TextFormat.RichText)
             self._content_layout.addWidget(wo_lbl)
 
+    def _add_vlan_direct_endpoints(self, vlan_num: int):
+        """
+        1.4.0 — Toon direct verbonden endpoints waarvan de poort dit VLAN heeft.
+        """
+        vlan_port_ids = {
+            p["id"] for p in self._data.get("ports", [])
+            if _vlan_eq(p.get("vlan"), vlan_num)
+        }
+        ep_map = {e["id"]: e for e in self._data.get("endpoints", [])}
+
+        items = []
+        for conn in self._data.get("connections", []):
+            if conn.get("to_type") == "endpoint":
+                port_id = conn["from_id"]
+                ep_id   = conn["to_id"]
+            elif conn.get("from_type") == "endpoint":
+                port_id = conn["to_id"]
+                ep_id   = conn["from_id"]
+            else:
+                continue
+            if port_id not in vlan_port_ids:
+                continue
+            ep = ep_map.get(ep_id)
+            if ep:
+                items.append(ep)
+
+        if not items:
+            return
+
+        sep = QLabel("  🖥  Direct verbonden (VLAN):")
+        sep.setObjectName("secondary")
+        self._content_layout.addWidget(sep)
+
+        for ep in items:
+            lbl = QLabel(
+                f"    🖥  <b>{ep.get('name', ep['id'])}</b>"
+                f"<span style='color:#888; font-size:10px;'>"
+                f"  {ep.get('location', '')}"
+                f"</span>"
+            )
+            lbl.setTextFormat(Qt.TextFormat.RichText)
+            self._content_layout.addWidget(lbl)
+
     def refresh(self, data: dict):
         self._data = data
-        self._refresh_report()pcadmin@cgk-group.com 
+        self._refresh_report()

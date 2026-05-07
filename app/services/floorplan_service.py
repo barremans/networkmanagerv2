@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/services/floorplan_service.py
 # Role:    Floorplan beheer — SVG opslag, JSON metadata
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.5.0 — G-OPEN-5/6: replace_svg() toegevoegd
+# Changes: 1.6.0 — Direct endpoint: set_mapping accepteert "ep:ep_xxx" waarden
+#                  get_mapped_object() helper: returnt (type, id) tuple
+#                  replace_svg() verwijdert ook verlopen endpoint-mappings
+#          1.5.0 — G-OPEN-5/6: replace_svg() toegevoegd
 #                  vervangt SVG bestand + updatet svg_file in JSON
 #                  verwijdert automatisch verouderde mappings (G-OPEN-6)
 #                  via floorplan_svg_service.detect_point_labels()
@@ -192,7 +195,7 @@ def replace_svg(floorplan_id: str, new_svg_source: str) -> tuple[bool, str, list
     # Update svg_file in JSON
     floorplan["svg_file"] = new_name
 
-    # G-OPEN-6 — verwijder verouderde mappings
+    # G-OPEN-6 — verwijder verouderde mappings (wandpunten én endpoints)
     removed: list[str] = []
     try:
         new_labels = set(floorplan_svg_service.detect_point_labels(str(dest_path)))
@@ -396,10 +399,31 @@ def get_mapping(floorplan_id: str, svg_point: str) -> str | None:
 def get_mapped_outlet_id(floorplan: dict, svg_point: str) -> str | None:
     """
     Helper voor UI code: haal mapping op uit reeds geladen floorplan dict.
+    Geeft alleen wandpunt-IDs terug (geen ep: prefix).
     """
     if not floorplan:
         return None
-    return floorplan.get("mappings", {}).get(svg_point)
+    val = floorplan.get("mappings", {}).get(svg_point)
+    if val and not val.startswith("ep:"):
+        return val
+    return None
+
+
+def get_mapped_object(floorplan: dict, svg_point: str) -> tuple[str, str] | None:
+    """
+    1.6.0 — Geeft (type, id) terug voor een SVG punt mapping.
+    - "outlet_123"   → ("wall_outlet", "outlet_123")
+    - "ep:ep_xxx"    → ("endpoint",    "ep_xxx")
+    - None of leeg   → None
+    """
+    if not floorplan:
+        return None
+    val = floorplan.get("mappings", {}).get(svg_point)
+    if not val:
+        return None
+    if val.startswith("ep:"):
+        return ("endpoint", val[3:])
+    return ("wall_outlet", val)
 
 
 # ---------------------------------------------------------------------------

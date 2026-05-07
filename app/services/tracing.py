@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/tracing.py
 # Role:    Trace berekening — pure logica, GEEN Qt imports
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
 # Changes: 1.1.0 — B8: _is_patchpanel() helper — type check accepteert
 #                       zowel "patch_panel" als "patchpanel" (beide komen
@@ -11,6 +11,8 @@
 #                       interne partner (andere zijde, zelfde nummer) toevoegen
 #                       aan de trace inclusief diens externe verbinding
 #                       (back→wall_outlet zichtbaar bij front klik en vice versa)
+#          1.3.0 — Direct endpoint: _follow() herkent port → endpoint verbinding
+#                       (to_type == "endpoint" of from_type == "endpoint")
 # =============================================================================
 #
 # BELANGRIJK: Dit bestand bevat GEEN Qt imports.
@@ -292,6 +294,26 @@ def _trace_from_port_internal(data: dict, port_id: str,
                 internal = _get_patchpanel_partner(data, port)
                 if internal and internal["id"] not in visited:
                     _follow(internal["id"])
+            return
+
+        # Verbinding naar direct endpoint (port → endpoint)?
+        if conn["from_id"] == current_port_id and conn["to_type"] == "endpoint":
+            ep = _get_endpoint(data, conn["to_id"])
+            if ep:
+                steps.append(_make_step(
+                    obj_type="endpoint",
+                    obj_id=conn["to_id"],
+                    label=ep.get("name", "?"),
+                ))
+            return
+        if conn["to_id"] == current_port_id and conn["from_type"] == "endpoint":
+            ep = _get_endpoint(data, conn["from_id"])
+            if ep:
+                steps.append(_make_step(
+                    obj_type="endpoint",
+                    obj_id=conn["from_id"],
+                    label=ep.get("name", "?"),
+                ))
             return
 
         # Verbinding naar andere poort?
