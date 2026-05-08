@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/backup_service.py
 # Role:    Backup beheer — GEEN Qt imports
-# Version: 1.6.0
+# Version: 1.8.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #          1.1.0 — F3: has_changes_since_last_backup()
@@ -19,6 +19,8 @@
 #          1.5.0 — R-1: restore_backup() uitgebreid — per-onderdeel herstel
 #                  (network_data, settings, floorplans.json, SVG-map)
 #          1.6.0 — vlan_config.json meenemen in backup én restore
+#          1.7.0 — Fix restore UNC WinError 5: unlink() OSError → robocopy fallback
+#          1.8.0 — Fix backup UNC: OSError bij copy2 ook via robocopy fallback
 # =============================================================================
 
 import json
@@ -125,22 +127,28 @@ def _copy_with_retry(src: str, dst: Path) -> tuple[bool, str]:
                 try:
                     dst.unlink()
                 except OSError as unlink_err:
-                    last_err = f"Kan bestaand bestand niet verwijderen: {dst} — {unlink_err}"
+                    # 1.7.0 — WinError 5 (Toegang geweigerd) op UNC → robocopy fallback
+                    ok, err = _copy_via_shell(src, dst)
+                    if ok:
+                        return True, ""
+                    last_err = f"Kan bestaand bestand niet verwijderen: {dst} — {unlink_err} (shell fallback ook mislukt: {err})"
                     if attempt < _RETRY_COUNT:
                         time.sleep(_RETRY_DELAY)
                     continue
             shutil.copy2(src, dst)
             return True, ""
-        except PermissionError:
-            # B-BACKUP — fallback: probeer via shell (ingelogde gebruikerscontext)
-            ok, err = _copy_via_shell(src, dst)
+        except (PermissionError, OSError) as e:
+            # 1.8.0 — OSError vangt ook WinError 5 op die niet als PermissionError aankomt
+            # Altijd robocopy fallback proberen bij schrijfrechtenprobleem op UNC
+            ok, shell_err = _copy_via_shell(src, dst)
             if ok:
                 return True, ""
-            last_err = f"Geen schrijfrechten (gebruiker: {_get_current_user()}), shell fallback ook mislukt: {err}"
+            last_err = (
+                f"Geen schrijfrechten (gebruiker: {_get_current_user()}), "
+                f"shell fallback ook mislukt: {shell_err} (originele fout: {e})"
+            )
         except FileNotFoundError:
             last_err = f"Pad niet gevonden: {dst}"
-        except OSError as e:
-            last_err = f"OSError bij kopiëren naar {dst}: {e}"
         if attempt < _RETRY_COUNT:
             time.sleep(_RETRY_DELAY)
     return False, last_err

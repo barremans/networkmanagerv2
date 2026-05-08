@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.21.0
+# Version: 1.22.0
 # Author:  Barremans
 # Changes: 1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
 #          F1 — msg_connect_cancelled
@@ -31,6 +31,7 @@
 #          1.20.0 — import_mode_replace_desc, import_mode_merge_desc,
 #                   msg_import_replace_restart (NL + EN)
 #          1.21.0 — Direct endpoint: ctx_connect_endpoint_direct,
+#          1.22.0 — ctx_move_port_connection toegevoegd NL + EN
 #                   ctx_disconnect_endpoint_direct, msg_endpoint_direct_*,
 #                   endpoint_location, endpoint_location_placeholder,
 #                   wall_outlet_group_direct, report_section_direct_endpoints (NL + EN)
@@ -96,6 +97,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_rack":               "Rack",
         "label_device":             "Toestel",
         "label_port":               "Poort",
+        "label_connected_port":     "Verbonden poort",
         "label_front":              "Voor",
         "label_back":               "Achter",
         "label_wall_outlet":        "Wandpunt",
@@ -492,6 +494,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Poort context menu + verbinding met wandpunt
         "ctx_connect_to_outlet":        "🌐  Verbinden met wandpunt...",
         "ctx_disconnect_port":          "✂  Verbinding verwijderen",
+        "ctx_move_port_connection":     "⇆  Verbinding verplaatsen",
+        "move_conn_new_port":           "Nieuwe poort",
+        "move_conn_no_free_ports":       "Geen vrije poorten beschikbaar",
+        "move_conn_scope":              "Zoeken in",
+        "move_conn_scope_rack":          "Zelfde rack",
+        "move_conn_scope_room":          "Zelfde ruimte",
+        "move_conn_scope_site":          "Hele site",
+        "move_conn_try_room":            "Probeer \"Zelfde ruimte\"",
+        "move_conn_try_site":            "Probeer \"Hele site\"",
         "ctx_connect_endpoint_direct":  "🖥  Direct eindapparaat koppelen",
         "ctx_disconnect_endpoint_direct": "🖥  Eindapparaat loskoppelen",
         "msg_endpoint_direct_connected": "Eindapparaat gekoppeld aan poort.",
@@ -668,6 +679,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_rack":               "Rack",
         "label_device":             "Device",
         "label_port":               "Port",
+        "label_connected_port":     "Connected port",
         "label_front":              "Front",
         "label_back":               "Back",
         "label_wall_outlet":        "Wall Outlet",
@@ -1064,6 +1076,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Port context menu + connect to outlet
         "ctx_connect_to_outlet":        "🌐  Connect to wall outlet...",
         "ctx_disconnect_port":          "✂  Remove connection",
+        "ctx_move_port_connection":     "⇆  Move connection",
+        "move_conn_new_port":           "New port",
+        "move_conn_no_free_ports":       "No free ports available",
+        "move_conn_scope":              "Search in",
+        "move_conn_scope_rack":          "Same rack",
+        "move_conn_scope_room":          "Same room",
+        "move_conn_scope_site":          "Entire site",
+        "move_conn_try_room":            "Try \"Same room\"",
+        "move_conn_try_site":            "Try \"Entire site\"",
         "ctx_connect_endpoint_direct":  "🖥  Connect direct endpoint",
         "ctx_disconnect_endpoint_direct": "🖥  Disconnect endpoint",
         "msg_endpoint_direct_connected": "Endpoint connected to port.",

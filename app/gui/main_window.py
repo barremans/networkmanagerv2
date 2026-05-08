@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.43.2
+# Version: 1.45.0
 # Author:  Barremans
 # Changes: 1.43.2 — Direct endpoints zichtbaar in boom per site
+#          1.44.0 — Verbinding verplaatsen: ctx_move_port_connection + handler
+#          1.45.0 — closeEvent: geen backup bij read-only of geen wijzigingen
+#                   startup sync: pull geblokkeerd als netwerkbestand leeg/ongeldig
 #                   _TYPE_DIRECT_EPS + klik handler → _show_site_outlets_view
 #          1.43.1 — Poort rechtsklik: "Bewerken" bij direct endpoint
 #                   endpoint_edit_requested signaal gekoppeld (room + site modus)
@@ -1568,8 +1571,10 @@ class MainWindow(QMainWindow):
             act_endpoint_edit   = menu.addAction("✏  " + t("ctx_edit"))
 
         act_disconnect = None
+        act_move_conn  = None
         if is_connected and not is_direct_endpoint:
             menu.addSeparator()
+            act_move_conn  = menu.addAction(t("ctx_move_port_connection"))
             act_disconnect = menu.addAction(t("ctx_disconnect_port"))
 
         chosen = menu.exec(global_pos)
@@ -1620,6 +1625,10 @@ class MainWindow(QMainWindow):
                      if existing_conn.get("to_type") == "endpoint"
                      else existing_conn["from_id"])
             self._on_endpoint_edit_requested(ep_id)
+
+        elif act_move_conn and chosen == act_move_conn:
+            if existing_conn:
+                self._on_move_port_connection(existing_conn, port_id)
 
         elif act_disconnect and chosen == act_disconnect:
             if existing_conn:
@@ -1754,6 +1763,97 @@ class MainWindow(QMainWindow):
         steps = tracing.trace_from_port(self._data, port_id)
         self._wire_detail.set_trace(steps, port_label, data=self._data)
         self.set_status(f"✓  {port_label}  ►  🖥  {ep_name}")
+
+    # ------------------------------------------------------------------
+    # Verbinding verplaatsen naar andere poort
+    # ------------------------------------------------------------------
+
+    def _on_move_port_connection(self, connection: dict, current_port_id: str):
+        """
+        1.44.0 — Verplaats een bestaande verbinding naar een andere vrije poort.
+        De verbinding zelf blijft intact (kabeltype, label, notes, bestemming).
+        Alleen from_id of to_id wordt gewijzigd.
+        """
+        from app.gui.dialogs.move_connection_dialog import MoveConnectionDialog
+
+        dlg = MoveConnectionDialog(
+            parent=self,
+            data=self._data,
+            connection=connection,
+            port_id=current_port_id,
+        )
+        if dlg.exec() != MoveConnectionDialog.DialogCode.Accepted:
+            return
+
+        new_port_id = dlg.get_result_port_id()
+        if not new_port_id:
+            return
+
+        # Poort labels voor logging en statusbalk
+        ports = {p["id"]: p for p in self._data.get("ports", [])}
+        devs  = {d["id"]: d for d in self._data.get("devices", [])}
+
+        def _port_label(pid):
+            p = ports.get(pid, {})
+            d = devs.get(p.get("device_id", ""), {})
+            return f"{d.get('name','?')} — {p.get('name','?')} ({p.get('side','').upper()})"
+
+        old_label = _port_label(current_port_id)
+        new_label = _port_label(new_port_id)
+
+        # Veiligheidscheck — nieuwe poort mag niet al in gebruik zijn
+        already_used = any(
+            c["id"] != connection["id"] and (
+                c.get("from_id") == new_port_id or c.get("to_id") == new_port_id
+            )
+            for c in self._data.get("connections", [])
+        )
+        if already_used:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                t("ctx_move_port_connection"),
+                f"Poort is ondertussen al in gebruik:\n{new_label}"
+            )
+            return
+
+        # Verbinding aanpassen — from_id of to_id vervangen
+        moved = False
+        for conn in self._data.get("connections", []):
+            if conn["id"] == connection["id"]:
+                if conn.get("from_id") == current_port_id:
+                    conn["from_id"] = new_port_id
+                    moved = True
+                elif conn.get("to_id") == current_port_id:
+                    conn["to_id"] = new_port_id
+                    moved = True
+                break
+
+        if not moved:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                t("ctx_move_port_connection"),
+                "Verbinding niet gevonden. Mogelijk al verwijderd."
+            )
+            return
+
+        self._save_and_backup()
+
+        log_change(
+            action=ACTION_EDIT,
+            entity=ENTITY_CONNECTION,
+            entity_id=connection["id"],
+            label=f"Verplaatst: {old_label} → {new_label}",
+            details={"old_port": current_port_id, "new_port": new_port_id}
+        )
+
+        if isinstance(self._current_view, RackView):
+            self._current_view.refresh(self._data)
+
+        steps = tracing.trace_from_port(self._data, new_port_id)
+        self._wire_detail.set_trace(steps, new_label, data=self._data)
+        self.set_status(f"⇆  {old_label}  →  {new_label}")
 
     # ------------------------------------------------------------------
     # Data opzoeken
@@ -3300,22 +3400,32 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """
         F3/F4 — Bij afsluiten: vraag backup als backup ingeschakeld is én:
-        - er wijzigingen zijn geweest deze sessie (_data_modified), OF
-        - er nog nooit een backup bestaat (eerste keer)
-        Altijd enkel als backup.enabled én network_path ingevuld.
+        - er wijzigingen zijn geweest deze sessie (_data_modified)
+        Niet vragen als:
+        - backup.enabled is False
+        - network_path is leeg
+        - read-only modus actief was bij opstarten (niets gewijzigd)
+        - _data_modified is False
+        1.45.0 — read-only check toegevoegd + geen backup als niks gewijzigd
         """
         from PySide6.QtWidgets import QMessageBox
+
+        # Nooit backup vragen in read-only modus
+        if settings_storage.get_read_only_mode():
+            event.accept()
+            return
+
+        # Nooit backup vragen als er niks gewijzigd is
+        if not self._data_modified:
+            event.accept()
+            return
 
         settings   = settings_storage.load_settings()
         backup_cfg = settings.get("backup", {})
         network_path = backup_cfg.get("network_path", "").strip()
 
         if backup_cfg.get("enabled", False) and network_path:
-            # Vraag backup als er wijzigingen zijn, of als er nog nooit een backup bestaat
-            no_backup_yet = backup_service.has_changes_since_last_backup(
-                settings_storage.get_network_data_path(), backup_cfg
-            )
-            if self._data_modified or no_backup_yet:
+            if self._data_modified:
                 msg = QMessageBox(self)
                 msg.setWindowTitle(t("backup_on_exit_title"))
                 msg.setText(t("backup_on_exit_msg"))
@@ -3384,11 +3494,31 @@ class MainWindow(QMainWindow):
         action, success, err = sync_service.sync(local_path, network_dir)
 
         if action == "pull" and success:
-            # Netwerkversie was nieuwer → herlaad data
-            self._data = settings_storage.load_network_data()
-            self._populate_tree()
-            self.set_status(t("sync_pull_done"))
-            log_info(f"Startup sync: pull van {network_dir}")
+            # 1.45.0 — Veiligheidscheck: netwerkbestand moet geldig JSON zijn
+            # met minstens één site of device, anders negeren (leeg bestand)
+            import json as _json
+            network_file = str(network_dir).rstrip("/\\") + "\\network_data.json"
+            _safe_pull = False
+            try:
+                with open(network_file, "r", encoding="utf-8") as _f:
+                    _net_data = _json.load(_f)
+                if isinstance(_net_data, dict) and (
+                    _net_data.get("sites") or _net_data.get("devices")
+                ):
+                    _safe_pull = True
+                else:
+                    log_warning(f"Startup sync: netwerkbestand is leeg of ongeldig — pull geannuleerd")
+                    self.set_status("⚠  Sync: netwerkbestand leeg — lokale data behouden")
+            except Exception as _e:
+                log_warning(f"Startup sync: netwerkbestand niet leesbaar — pull geannuleerd: {_e}")
+                self.set_status("⚠  Sync: netwerkbestand niet leesbaar — lokale data behouden")
+
+            if _safe_pull:
+                # Netwerkversie was nieuwer én geldig → herlaad data
+                self._data = settings_storage.load_network_data()
+                self._populate_tree()
+                self.set_status(t("sync_pull_done"))
+                log_info(f"Startup sync: pull van {network_dir}")
         elif action == "push" and success:
             self.set_status(t("sync_push_done"))
             log_info(f"Startup sync: push naar {network_dir}")

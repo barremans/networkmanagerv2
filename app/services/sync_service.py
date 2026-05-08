@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/services/sync_service.py
 # Role:    Synchronisatie lokaal ↔ netwerk — GEEN Qt imports
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
 # Changes: 1.0.0 — F3: lokaal ↔ netwerk sync op basis van bestandstimestamp
+#          1.1.0 — Fix timestamp na push/pull: mtime gelijkzetten aan bronbestand
+#                  Voorkomt vals pull bij volgende opstart
 #                  check_sync()  → bepaal richting (push/pull/equal/unavailable)
 #                  sync()        → voer sync uit
 #                  get_sync_status_label() → leesbaar statuslabel voor UI
@@ -131,11 +133,22 @@ def _path_accessible(path: str) -> bool:
 
 
 def _safe_copy(src: str, dst: str):
-    """Kopieer via tijdelijk bestand om corruptie te voorkomen bij onderbreking."""
+    """
+    Kopieer via tijdelijk bestand om corruptie te voorkomen bij onderbreking.
+    1.1.0 — Na kopiëren: mtime van dst gelijkzetten aan src zodat timestamps
+    consistent blijven en de volgende sync geen vals pull triggert.
+    """
     tmp = dst + ".tmp"
     try:
         shutil.copy2(src, tmp)
         shutil.move(tmp, dst)
+        # 1.1.0 — Synchroniseer mtime: dst krijgt zelfde timestamp als src
+        # Voorkomt dat netwerkbestand na push nieuwer lijkt dan lokaal
+        try:
+            src_mtime = os.path.getmtime(src)
+            os.utime(dst, (src_mtime, src_mtime))
+        except OSError:
+            pass  # mtime sync mislukt → geen probleem, tolerantie vangt dit op
     except Exception:
         if os.path.exists(tmp):
             try:

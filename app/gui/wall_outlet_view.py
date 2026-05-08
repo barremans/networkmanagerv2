@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.8.1
+# Version: 1.9.0
 # Author:  Barremans
 # Changes: 1.8.1 — Visuele scheiding voor "Direct verbonden" sectie (HR lijn)
 #                  Rechtsklik op endpoint-kaartje: bewerken via outlet_endpoint_edit
@@ -27,7 +27,8 @@
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QScrollArea,
     QVBoxLayout, QHBoxLayout, QSizePolicy,
-    QDialog, QMenu, QFormLayout, QTextBrowser
+    QDialog, QMenu, QFormLayout, QTextBrowser,
+    QPushButton
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
@@ -59,6 +60,7 @@ class WallOutletView(QWidget):
     outlet_edit_requested = Signal(str)       # rechtsklik → bewerken
     outlet_endpoint_requested = Signal(str)   # W1: eindapparaat toevoegen/bewerken
     endpoint_edit_requested = Signal(str)     # 1.8.1: rechtsklik endpoint-kaartje → bewerken
+    endpoint_double_clicked  = Signal(str)     # 1.9.0: dubbelklik endpoint-kaartje → detail popup
 
     # ------------------------------------------------------------------
     # Constructor — room- of site-modus
@@ -552,6 +554,13 @@ class WallOutletView(QWidget):
                 self.endpoint_edit_requested.emit(eid)
         card.contextMenuEvent = _on_context
 
+        # 1.9.0 — Dubbelklik opent detail popup + emit signal
+        def _on_ep_double_click(event, eid=ep_id, _ep=ep, _port=port, _dev=dev):
+            self.endpoint_double_clicked.emit(eid)
+            dlg = _EndpointDetailDialog(_ep, _port, _dev, self._data, parent=self)
+            dlg.exec()
+        card.mouseDoubleClickEvent = _on_ep_double_click
+
         return card
 
     # ------------------------------------------------------------------
@@ -726,3 +735,119 @@ class _OutletDetailDialog(QDialog):
         self.accept()
         if self._on_endpoint_clicked:
             self._on_endpoint_clicked()
+
+# ---------------------------------------------------------------------------
+# Detail popup — dubbelklik op direct endpoint kaartje (1.9.0)
+# ---------------------------------------------------------------------------
+
+class _EndpointDetailDialog(QDialog):
+    """
+    1.9.0 — Toont alle velden van een direct verbonden endpoint in een
+    read-only popup. Verschijnt bij dubbelklik op een endpoint kaartje.
+    """
+
+    def __init__(self, ep: dict, port: dict | None, dev: dict | None,
+                 data: dict, parent=None):
+        super().__init__(parent)
+        self._ep   = ep
+        self._port = port
+        self._dev  = dev
+        self._data = data
+        self._build_ui()
+
+    def _build_ui(self):
+        ep = self._ep
+        self.setWindowTitle(ep.get("name", "Eindapparaat"))
+        self.setModal(True)
+        self.setMinimumWidth(380)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
+
+        def _section(title: str):
+            lbl = QLabel(title)
+            lbl.setObjectName("group-label")
+            lbl.setStyleSheet("font-weight: bold; margin-top: 4px;")
+            return lbl
+
+        def _row(label: str, value: str):
+            lbl = QLabel(f"<b>{label}</b>")
+            lbl.setFixedWidth(110)
+            val = QLabel(value or "—")
+            val.setWordWrap(True)
+            row = QHBoxLayout()
+            row.addWidget(lbl)
+            row.addWidget(val, 1)
+            return row
+
+        # Endpoint sectie
+        root.addWidget(_section(t("label_endpoint")))
+        root.addLayout(_row(t("label_name"),     ep.get("name", "")))
+        from app.helpers.settings_storage import get_endpoint_type_label as _get_ep_type
+        from app.helpers.i18n import get_language as _get_lang
+        ep_type_display = _get_ep_type(ep.get("type", ""), _get_lang()) or ep.get("type", "")
+        root.addLayout(_row(t("label_type"), ep_type_display))
+        root.addLayout(_row(t("endpoint_location"), ep.get("location", "")))
+        if ep.get("ip"):
+            root.addLayout(_row("IP adres:",     ep.get("ip", "")))
+        if ep.get("mac"):
+            root.addLayout(_row("MAC adres:",    ep.get("mac", "")))
+        if ep.get("serial"):
+            root.addLayout(_row("Serienummer:",  ep.get("serial", "")))
+        if ep.get("brand") or ep.get("model"):
+            root.addLayout(_row("Merk / Model:", f"{ep.get('brand','')} {ep.get('model','')}".strip()))
+        if ep.get("notes"):
+            root.addLayout(_row(t("label_notes"), ep.get("notes", "")))
+
+        # Verbonden poort sectie
+        if self._port:
+            root.addWidget(_section(t("label_port")))
+            # Zoek rack + ruimte voor deze poort
+            port_lbl = ""
+            rack_room_lbl = ""
+            if self._dev:
+                dev_id = self._dev.get("id", "")
+                for _site in self._data.get("sites", []):
+                    for _room in _site.get("rooms", []):
+                        for _rack in _room.get("racks", []):
+                            for _slot in _rack.get("slots", []):
+                                if _slot.get("device_id") == dev_id:
+                                    rack_room_lbl = f"{_room.get('name','?')} — {_rack.get('name','?')}"
+                port_lbl = (
+                    f"{self._dev.get('name','?')} — "
+                    f"{self._port.get('name','?')} ({self._port.get('side','').upper()})"
+                )
+            else:
+                port_lbl = f"{self._port.get('name','?')} ({self._port.get('side','').upper()})"
+            if rack_room_lbl:
+                root.addLayout(_row(t("label_location"), rack_room_lbl))
+            root.addLayout(_row(t("label_connected_port"), port_lbl))
+            if self._port.get("vlan"):
+                from app.services.vlan_service import vlan_label
+                root.addLayout(_row("VLAN:", vlan_label(self._port.get("vlan"), self._data)))
+
+        # Trace sectie
+        from app.services import tracing
+        ep_id = ep.get("id", "")
+        # Zoek poort-id voor trace
+        port_id = self._port.get("id") if self._port else None
+        if port_id:
+            steps = tracing.trace_from_port(self._data, port_id)
+            if steps:
+                root.addWidget(_section("Trace"))
+                for step in steps:
+                    lbl = QLabel(f"  →  {step.get('label', '')}")
+                    lbl.setObjectName("secondary")
+                    root.addWidget(lbl)
+
+        root.addStretch()
+
+        # Sluit knop
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_close = QPushButton(t("btn_cancel"))
+        btn_close.clicked.connect(self.accept)
+        btn_row.addWidget(btn_close)
+        root.addLayout(btn_row)
