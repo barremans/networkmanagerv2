@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/tracing.py
 # Role:    Trace berekening — pure logica, GEEN Qt imports
-# Version: 1.3.0
+# Version: 1.7.0
 # Author:  Barremans
 # Changes: 1.1.0 — B8: _is_patchpanel() helper — type check accepteert
 #                       zowel "patch_panel" als "patchpanel" (beide komen
@@ -13,6 +13,22 @@
 #                       (back→wall_outlet zichtbaar bij front klik en vice versa)
 #          1.3.0 — Direct endpoint: _follow() herkent port → endpoint verbinding
 #                       (to_type == "endpoint" of from_type == "endpoint")
+#          1.4.0 — Cross-rack port↔port: _follow() volgt port→port verbinding
+#                       over racks/ruimtes heen. Niet-patchpanel partner wordt
+#                       nu ook correct verder gevolgd (switch port als eindpunt).
+#          1.5.0 — Fix B8+cross-rack: interne patchpanel partner volgt nu ook
+#                       port→port externe verbinding (niet alleen wall_outlet).
+#                       _port_label() uitgebreid met rack/ruimte context via
+#                       _get_port_context() zodat cross-rack poorten ruimte+rack
+#                       tonen in de trace (bv. "OB-COMPRESSOR — INVERTER — SW10 — Port 2 (FRONT)").
+#          1.6.0 — Canonieke volgorde: cross-rack port→port partner wordt PREPENDED
+#                       zodat trace altijd lineair leesbaar is van links naar rechts:
+#                       SW10 → PP_BACK → PP_FRONT → SW9.3
+#                       main_window reversed() werkt hierdoor correct voor alle gevallen.
+#          1.7.0 — Fix: interne partner (PP FRONT) zijn port→port verbinding (SW9.3)
+#                       gaat naar steps (achteraan), niet naar prepend_steps.
+#                       Prepend is exclusief voor de directe externe verbinding van de
+#                       startpoort zelf (SW10 via PP BACK conn).
 # =============================================================================
 #
 # BELANGRIJK: Dit bestand bevat GEEN Qt imports.
@@ -121,6 +137,22 @@ def _get_partner_port(data: dict, port_id: str) -> tuple[dict | None, dict | Non
     return conn, None
 
 
+def _get_port_context(data: dict, port: dict) -> tuple[str, str]:
+    """
+    Geeft (ruimte_naam, rack_naam) terug voor een poort.
+    Zoekt via device_id → slot → rack → ruimte.
+    Retourneert ("", "") als niet gevonden.
+    """
+    device_id = port.get("device_id", "")
+    for site in data.get("sites", []):
+        for room in site.get("rooms", []):
+            for rack in room.get("racks", []):
+                for slot in rack.get("slots", []):
+                    if slot.get("device_id") == device_id:
+                        return room.get("name", ""), rack.get("name", "")
+    return "", ""
+
+
 def _is_patchpanel(device: dict) -> bool:
     """
     B8 — Type check voor patchpanel.
@@ -153,6 +185,23 @@ def _port_label(port: dict, device: dict) -> str:
     """Maak een leesbaar label voor een poort: 'DeviceNaam — PortNaam (SIDE)'."""
     side_str = port["side"].upper()
     return f"{device.get('name', '?')} — {port.get('name', '?')} ({side_str})"
+
+
+def _port_label_with_context(data: dict, port: dict, device: dict) -> str:
+    """
+    Leesbaar label inclusief ruimte + rack context.
+    Formaat: 'Ruimte — Rack — DeviceNaam — PortNaam (SIDE)'
+    Gebruikt voor cross-rack poorten zodat locatie altijd zichtbaar is.
+    """
+    side_str = port["side"].upper()
+    room_name, rack_name = _get_port_context(data, port)
+    parts = []
+    if room_name:
+        parts.append(room_name)
+    if rack_name:
+        parts.append(rack_name)
+    parts.append(device.get("name", "?"))
+    return f"{'  —  '.join(parts)} — {port.get('name', '?')} ({side_str})"
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +259,9 @@ def _trace_from_port_internal(data: dict, port_id: str,
     skip_outlet_id: wall_outlet ID dat niet opnieuw toegevoegd mag worden
                     (gebruikt door trace_from_wall_outlet om lussen te vermijden).
     """
-    steps   : list[dict] = []
-    visited : set[str]   = set()
+    steps         : list[dict] = []
+    prepend_steps : list[dict] = []   # 1.6.0 — cross-rack partners die vóór startpoort horen
+    visited       : set[str]   = set()
     max_steps = 20
 
     def _follow(current_port_id: str):
@@ -266,6 +316,39 @@ def _trace_from_port_internal(data: dict, port_id: str,
                     elif internal_conn["to_id"] == internal["id"] and internal_conn["from_type"] == "wall_outlet":
                         if internal_conn["from_id"] != skip_outlet_id:
                             _follow_wall_outlet(internal_conn["from_id"], internal_cable)
+                    # 1.5.0 — Fix: ook port→port verbinding van interne partner volgen
+                    # 1.6.0 — SW9.3 (via PP FRONT) hoort ACHTERAAN in steps, niet prepend.
+                    #          Prepend is alleen voor de directe externe verbinding van de startpoort.
+                    elif internal_conn["from_id"] == internal["id"] and internal_conn["to_type"] == "port":
+                        int_partner_id = internal_conn["to_id"]
+                        if int_partner_id not in visited:
+                            visited.add(int_partner_id)
+                            int_partner = _get_port(data, int_partner_id)
+                            int_partner_dev = _get_device(data, int_partner["device_id"]) if int_partner else None
+                            if int_partner and int_partner_dev:
+                                steps.append(_make_step(
+                                    obj_type   = "port",
+                                    obj_id     = int_partner_id,
+                                    label      = _port_label_with_context(data, int_partner, int_partner_dev),
+                                    side       = int_partner["side"],
+                                    cable_type = internal_cable,
+                                    port_name  = int_partner.get("name", ""),
+                                ))
+                    elif internal_conn["to_id"] == internal["id"] and internal_conn["from_type"] == "port":
+                        int_partner_id = internal_conn["from_id"]
+                        if int_partner_id not in visited:
+                            visited.add(int_partner_id)
+                            int_partner = _get_port(data, int_partner_id)
+                            int_partner_dev = _get_device(data, int_partner["device_id"]) if int_partner else None
+                            if int_partner and int_partner_dev:
+                                steps.append(_make_step(
+                                    obj_type   = "port",
+                                    obj_id     = int_partner_id,
+                                    label      = _port_label_with_context(data, int_partner, int_partner_dev),
+                                    side       = int_partner["side"],
+                                    cable_type = internal_cable,
+                                    port_name  = int_partner.get("name", ""),
+                                ))
 
         if not conn:
             # Geen externe verbinding — maar als dit een patchpanel poort is,
@@ -333,7 +416,21 @@ def _trace_from_port_internal(data: dict, port_id: str,
                 if internal and internal["id"] not in visited:
                     _follow(internal["id"])
             else:
-                _follow(partner_port["id"])
+                # 1.4.0/1.5.0 — Cross-rack port↔port: niet-patchpanel partner toevoegen.
+                # 1.6.0 — Gaat naar prepend_steps: SW10 hoort VOOR de huidige poort
+                #          zodat canonieke volgorde SW10→PP_BACK→PP_FRONT→SW9.3 is.
+                if partner_device:
+                    visited.add(partner_port["id"])
+                    prepend_steps.insert(0, _make_step(
+                        obj_type   = "port",
+                        obj_id     = partner_port["id"],
+                        label      = _port_label_with_context(data, partner_port, partner_device),
+                        side       = partner_port["side"],
+                        cable_type = cable,
+                        port_name  = partner_port.get("name", ""),
+                    ))
+                else:
+                    _follow(partner_port["id"])
 
     def _follow_wall_outlet(outlet_id: str, cable: str):
         outlet = _get_wall_outlet(data, outlet_id)
@@ -357,7 +454,9 @@ def _trace_from_port_internal(data: dict, port_id: str,
                 ))
 
     _follow(port_id)
-    return steps
+    # 1.6.0 — prepend_steps bevat cross-rack partners die vóór de startpoort horen.
+    # Canonieke volgorde: SW10 → PP_BACK → PP_FRONT → SW9.3
+    return prepend_steps + steps
 
 
 # ---------------------------------------------------------------------------

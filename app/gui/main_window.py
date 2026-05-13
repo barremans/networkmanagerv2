@@ -2,13 +2,22 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.45.0
+# Version: 1.48.0
 # Author:  Barremans
 # Changes: 1.43.2 — Direct endpoints zichtbaar in boom per site
 #          1.44.0 — Verbinding verplaatsen: ctx_move_port_connection + handler
 #          1.45.0 — closeEvent: geen backup bij read-only of geen wijzigingen
 #                   startup sync: pull geblokkeerd als netwerkbestand leeg/ongeldig
 #                   _TYPE_DIRECT_EPS + klik handler → _show_site_outlets_view
+#          1.46.0 — Cross-rack port↔port verbinding: ctx_connect_port_to_port
+#                   + ConnectPortToPortDialog + _on_connect_port_to_port handler
+#                   Context menu toont optie op vrije poorten (voor + achter)
+#          1.47.0 — reversed() fix voor back-poort trace met cross-rack partner:
+#                   reversed() alleen toepassen als eerste trace-stap de startpoort
+#                   zelf is (geen prepend cross-rack stap aanwezig).
+#          1.48.0 — Endpoint detail popup vanuit rack view rechtsklik:
+#                   "ℹ  Detail tonen" bij direct endpoint poorten.
+#                   Gebruikt _EndpointDetailDialog uit wall_outlet_view.
 #          1.43.1 — Poort rechtsklik: "Bewerken" bij direct endpoint
 #                   endpoint_edit_requested signaal gekoppeld (room + site modus)
 #                   _on_endpoint_edit_requested handler toegevoegd
@@ -116,6 +125,7 @@ from app.gui.help_window import HelpWindow
 from app.gui.dialogs.connection_dialog import ConnectionDialog
 from app.gui.dialogs.connection_edit_dialog import ConnectionEditDialog
 from app.gui.dialogs.connect_to_outlet_dialog import ConnectToOutletDialog
+from app.gui.dialogs.connect_port_to_port_dialog import ConnectPortToPortDialog
 from app.gui.dialogs.site_dialog import SiteDialog
 from app.gui.dialogs.room_dialog import RoomDialog
 from app.gui.dialogs.rack_dialog import RackDialog
@@ -1373,7 +1383,15 @@ class MainWindow(QMainWindow):
         # B3 — back poort: trace loopt van aangeklikte poort → wall_outlet → endpoint
         #       display-volgorde moet endpoint → wall_outlet → poort zijn → reversed
         #       front poort: trace loopt al in de juiste richting → geen reversed
-        steps_display = list(reversed(steps)) if side == "back" else steps
+        # 1.47.0 — reversed() NIET toepassen als tracing.py al prepend_steps heeft
+        #          geplaatst (cross-rack partner staat dan al vooraan = canonieke volgorde).
+        #          Detectie: eerste stap is NIET de startpoort → prepend aanwezig → niet reversen.
+        first_step_is_start = (
+            steps and steps[0].get("obj_type") == "port"
+            and steps[0].get("obj_id") == port_id
+        )
+        needs_reverse = (side == "back") and first_step_is_start
+        steps_display = list(reversed(steps)) if needs_reverse else steps
         self._wire_detail.set_trace(steps_display, origin, conn_id=conn_id, data=self._data)
 
         if isinstance(self._current_view, RackView):
@@ -1558,15 +1576,19 @@ class MainWindow(QMainWindow):
 
         # Wandpunt koppelen alleen tonen als poort vrij is
         act_outlet = None
+        act_port_to_port = None
         if not is_connected:
             act_outlet = menu.addAction(t("ctx_connect_to_outlet"))
+            act_port_to_port = menu.addAction(t("ctx_connect_port_to_port"))
 
-        # Direct endpoint: koppelen (vrij) of loskoppelen + bewerken (al direct endpoint)
+        # Direct endpoint: koppelen (vrij) of loskoppelen + bewerken + detail (al direct endpoint)
         act_endpoint_direct = None
         act_endpoint_edit   = None
+        act_endpoint_info   = None
         if not is_connected:
             act_endpoint_direct = menu.addAction(t("ctx_connect_endpoint_direct"))
         elif is_direct_endpoint:
+            act_endpoint_info   = menu.addAction("ℹ  " + t("label_endpoint") + " detail...")
             act_endpoint_direct = menu.addAction(t("ctx_disconnect_endpoint_direct"))
             act_endpoint_edit   = menu.addAction("✏  " + t("ctx_edit"))
 
@@ -1609,6 +1631,16 @@ class MainWindow(QMainWindow):
                 steps = tracing.trace_from_port(self._data, port_id)
                 self._wire_detail.set_trace(steps, port_label, data=self._data)
                 self.set_status(f"✓  {port_label}  ►  🌐  {outlet_name}")
+
+        elif act_port_to_port and chosen == act_port_to_port:
+            self._on_connect_port_to_port(port_id, port_label)
+
+        elif act_endpoint_info and chosen == act_endpoint_info:
+            # 1.48.0 — Detail popup voor direct endpoint
+            ep_id = (existing_conn["to_id"]
+                     if existing_conn.get("to_type") == "endpoint"
+                     else existing_conn["from_id"])
+            self._on_show_endpoint_detail(port_id, ep_id)
 
         elif act_endpoint_direct and chosen == act_endpoint_direct:
             if is_direct_endpoint:
@@ -1763,6 +1795,113 @@ class MainWindow(QMainWindow):
         steps = tracing.trace_from_port(self._data, port_id)
         self._wire_detail.set_trace(steps, port_label, data=self._data)
         self.set_status(f"✓  {port_label}  ►  🖥  {ep_name}")
+
+    # ------------------------------------------------------------------
+    # Endpoint detail popup vanuit rack view (1.48.0)
+    # ------------------------------------------------------------------
+
+    def _on_show_endpoint_detail(self, port_id: str, ep_id: str):
+        """
+        1.48.0 — Toont de _EndpointDetailDialog voor een direct verbonden endpoint.
+        Opgeroepen vanuit rechtsklik context menu op een poort in de rack view.
+        """
+        from app.gui.wall_outlet_view import _EndpointDetailDialog
+
+        ep = next((e for e in self._data.get("endpoints", [])
+                   if e["id"] == ep_id), None)
+        if not ep:
+            return
+
+        port = next((p for p in self._data.get("ports", [])
+                     if p["id"] == port_id), None)
+        dev = next((d for d in self._data.get("devices", [])
+                    if d["id"] == port.get("device_id", "")), None) if port else None
+
+        dlg = _EndpointDetailDialog(
+            ep=ep,
+            port=port,
+            dev=dev,
+            data=self._data,
+            parent=self,
+        )
+        dlg.exec()
+
+    # ------------------------------------------------------------------
+    # Cross-rack poort ↔ poort verbinding
+    # ------------------------------------------------------------------
+
+    def _on_connect_port_to_port(self, port_id: str, port_label: str):
+        """
+        1.46.0 — Verbindt een poort met een andere poort in een ander rack/ruimte.
+        Trapgewijze selectie via ConnectPortToPortDialog.
+        """
+        # Bepaal huidige site/ruimte/rack context van de bronpoort
+        port = next((p for p in self._data.get("ports", [])
+                     if p["id"] == port_id), None)
+        if not port:
+            return
+
+        current_site_id = ""
+        current_room_id = ""
+        current_rack_id = ""
+
+        if port:
+            for site in self._data.get("sites", []):
+                for room in site.get("rooms", []):
+                    for rack in room.get("racks", []):
+                        for slot in rack.get("slots", []):
+                            if slot.get("device_id") == port.get("device_id"):
+                                current_site_id = site["id"]
+                                current_room_id = room["id"]
+                                current_rack_id = rack["id"]
+
+        dlg = ConnectPortToPortDialog(
+            data=self._data,
+            port_id=port_id,
+            port_label=port_label,
+            current_site_id=current_site_id,
+            current_room_id=current_room_id,
+            current_rack_id=current_rack_id,
+            parent=self,
+        )
+        if not dlg.exec() or not dlg.get_result():
+            return
+
+        conn = dlg.get_result()
+        self._data.setdefault("connections", []).append(conn)
+        self._save_and_backup()
+
+        # Doelpoort label opbouwen voor logging + statusbalk
+        target_port = next(
+            (p for p in self._data.get("ports", []) if p["id"] == conn["to_id"]), None
+        )
+        target_dev = next(
+            (d for d in self._data.get("devices", [])
+             if d["id"] == target_port.get("device_id", "")), None
+        ) if target_port else None
+        target_label = (
+            f"{target_dev.get('name','?')} — "
+            f"{target_port.get('name','?')} "
+            f"({target_port.get('side','').upper()})"
+            if target_port and target_dev else conn["to_id"]
+        )
+
+        log_change(
+            action=ACTION_ADD,
+            entity=ENTITY_CONNECTION,
+            entity_id=conn["id"],
+            label=f"{port_label} → 🔌 {target_label}",
+            details={"cable_type": conn["cable_type"]}
+        )
+
+        if isinstance(self._current_view, RackView):
+            self._current_view.refresh(self._data)
+        steps = tracing.trace_from_port(self._data, port_id)
+        self._wire_detail.set_trace(steps, port_label, data=self._data)
+        self.set_status(
+            f"✓  {t('msg_port_to_port_connected')}  "
+            f"{port_label}  ►  🔌  {target_label}"
+        )
 
     # ------------------------------------------------------------------
     # Verbinding verplaatsen naar andere poort

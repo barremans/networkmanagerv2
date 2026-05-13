@@ -2,13 +2,14 @@
 # Networkmap_Creator
 # File:    app/main.py
 # Role:    Entry point — QApplication, QSS laden, taal instellen, MainWindow
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
 # Changes: D   — update check bij opstarten via UpdateChecker
 #          D.1 — update_available_with_url signaal
 #          D.2 — download-knop actief via DownloadDialog
 #          1.2.3 — versie dynamisch uit version.py (fix statusbalk vs Over)
 #          1.3.0 — Azure AD security gate toegevoegd
+#          1.4.0 — Globale uppercase filter voor alle QLineEdit velden
 #                  Online + CGK-APP-L6 → volledige toegang (read/write)
 #                  Online + verkeerde groep → NoAccessDialog + afsluiten
 #                  Offline → poweruser login → read-only modus
@@ -208,6 +209,11 @@ def main():
     app.setApplicationName("Networkmap Creator")
     app.setApplicationVersion(_APP_VERSION)
     app.setOrganizationName("Barremans")
+
+    # 1.4.0 — Globale uppercase filter voor alle QLineEdit velden
+    from app.helpers.uppercase_filter import UpperCaseFilter
+    _uc_filter = UpperCaseFilter(app)
+    app.installEventFilter(_uc_filter)
 
     _init_language()
 

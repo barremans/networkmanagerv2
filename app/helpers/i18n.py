@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.22.0
+# Version: 1.23.0
 # Author:  Barremans
 # Changes: 1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
 #          F1 — msg_connect_cancelled
@@ -35,6 +35,10 @@
 #                   ctx_disconnect_endpoint_direct, msg_endpoint_direct_*,
 #                   endpoint_location, endpoint_location_placeholder,
 #                   wall_outlet_group_direct, report_section_direct_endpoints (NL + EN)
+#          1.23.0 — Cross-rack port↔port verbinding: ctx_connect_port_to_port,
+#                   dlg_connect_port_title, err_no_port_selected,
+#                   warn_port_already_connected, label_target_device,
+#                   label_target_port, msg_port_to_port_connected (NL + EN)
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -514,6 +518,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "dlg_connect_outlet_title":     "Poort verbinden met wandpunt",
         "err_no_outlet_selected":       "Selecteer eerst een wandpunt.",
         "warn_outlet_already_connected": "Dit wandpunt is al verbonden. Toch doorgaan?",
+
+        # Cross-rack port↔port verbinding
+        "ctx_connect_port_to_port":     "🔌  Verbinden met poort...",
+        "dlg_connect_port_title":       "Poort verbinden met poort",
+        "err_no_port_selected":         "Selecteer eerst een doelpoort.",
+        "warn_port_already_connected":  "Deze poort is al verbonden. Toch doorgaan?",
+        "label_target_device":          "Doeltoestel",
+        "label_target_port":            "Doelpoort",
+        "msg_port_to_port_connected":   "Poort-naar-poort verbinding aangemaakt.",
 
         # Cross-rack trace
         "trace_racks":                  "Racks in trace",
@@ -1096,6 +1109,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "dlg_connect_outlet_title":     "Connect port to wall outlet",
         "err_no_outlet_selected":       "Please select a wall outlet first.",
         "warn_outlet_already_connected": "This wall outlet is already connected. Continue anyway?",
+
+        # Cross-rack port↔port connection
+        "ctx_connect_port_to_port":     "🔌  Connect to port...",
+        "dlg_connect_port_title":       "Connect port to port",
+        "err_no_port_selected":         "Please select a target port first.",
+        "warn_port_already_connected":  "This port is already connected. Continue anyway?",
+        "label_target_device":          "Target device",
+        "label_target_port":            "Target port",
+        "msg_port_to_port_connected":   "Port-to-port connection created.",
 
         # Cross-rack trace
         "trace_racks":                  "Racks in trace",
