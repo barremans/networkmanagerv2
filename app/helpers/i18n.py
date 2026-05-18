@@ -527,6 +527,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_target_device":          "Doeltoestel",
         "label_target_port":            "Doelpoort",
         "msg_port_to_port_connected":   "Poort-naar-poort verbinding aangemaakt.",
+        "label_detail":                 "Detail tonen",
 
         # Cross-rack trace
         "trace_racks":                  "Racks in trace",
@@ -1118,6 +1119,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_target_device":          "Target device",
         "label_target_port":            "Target port",
         "msg_port_to_port_connected":   "Port-to-port connection created.",
+        "label_detail":                 "Show detail",
 
         # Cross-rack trace
         "trace_racks":                  "Racks in trace",

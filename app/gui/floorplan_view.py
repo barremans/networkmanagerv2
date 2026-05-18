@@ -2,9 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.13.0
+# Version: 1.15.0
 # Author:  Barremans
-# Changes: 1.13.0 — Direct endpoint: overlay blauw (#2196f3) voor ep: mappings
+# Changes: 1.15.0 — Fix: endpoint lookup in _on_detail_clicked via outlet["endpoint_id"]
+#                   i.p.v. via connections (verkeerde aanpak).
+#          1.14.0 — Detail popup: "ℹ Detail tonen" knop in mapping tab
+#                   Wandpunt → _OutletDetailDialog uit wall_outlet_view
+#                   Eindapparaat → _EndpointDetailDialog uit wall_outlet_view
+#                   FloorplanMappingDialog v1.2.0: endpoint tab toegevoegd
+#          1.13.0 — Direct endpoint: overlay blauw (#2196f3) voor ep: mappings
 #                   _resolve_outlet_name uitgebreid voor endpoints
 #                   set_selected_svg_point: ep: prefix herkend
 #                   _on_trace_clicked: trace via port voor direct endpoint
@@ -351,9 +357,15 @@ class FloorplanView(QWidget):
         self._btn_unmap = QPushButton(t("floorplan_mapping_remove"))
         self._btn_unmap.clicked.connect(self._on_unmap_clicked)
 
+        # 1.14.0 — Detail popup voor gekoppeld object (wandpunt of endpoint)
+        self._btn_detail = QPushButton("ℹ  " + t("label_detail"))
+        self._btn_detail.clicked.connect(self._on_detail_clicked)
+        self._btn_detail.setEnabled(False)
+
         map_layout.addWidget(self._mapping_info)
         map_layout.addWidget(self._btn_map)
         map_layout.addWidget(self._btn_unmap)
+        map_layout.addWidget(self._btn_detail)
         map_layout.addStretch(1)
 
         # Tab 3: trace
@@ -601,6 +613,67 @@ class FloorplanView(QWidget):
         self._refresh_from_storage()
         self._refresh_sidepanel()
 
+    def _on_detail_clicked(self):
+        """
+        1.14.0 — Toon detail popup voor het gekoppelde object:
+        - Wandpunt → _OutletDetailDialog
+        - Eindapparaat → _EndpointDetailDialog
+        """
+        if not self._selected_outlet_id:
+            return
+
+        from app.gui.wall_outlet_view import _OutletDetailDialog, _EndpointDetailDialog
+
+        if self._selected_outlet_id.startswith("ep:"):
+            # Eindapparaat
+            ep_id = self._selected_outlet_id[3:]
+            ep = next((e for e in self._data.get("endpoints", [])
+                       if e["id"] == ep_id), None)
+            if not ep:
+                return
+            # Zoek verbonden poort
+            conn = next(
+                (c for c in self._data.get("connections", [])
+                 if (c.get("to_type") == "endpoint" and c["to_id"] == ep_id) or
+                    (c.get("from_type") == "endpoint" and c["from_id"] == ep_id)),
+                None
+            )
+            port = None
+            dev  = None
+            if conn:
+                port_id = (conn["from_id"] if conn.get("to_type") == "endpoint"
+                           else conn["to_id"])
+                port = next((p for p in self._data.get("ports", [])
+                             if p["id"] == port_id), None)
+                if port:
+                    dev = next((d for d in self._data.get("devices", [])
+                                if d["id"] == port.get("device_id", "")), None)
+            dlg = _EndpointDetailDialog(
+                ep=ep, port=port, dev=dev, data=self._data, parent=self
+            )
+            dlg.exec()
+        else:
+            # Wandpunt — endpoint via outlet["endpoint_id"]
+            outlet_id = self._selected_outlet_id
+            outlet = next(
+                (wo for s in self._data.get("sites", [])
+                 for r in s.get("rooms", [])
+                 for wo in r.get("wall_outlets", [])
+                 if wo["id"] == outlet_id),
+                None
+            )
+            if not outlet:
+                return
+            ep_id    = outlet.get("endpoint_id", "")
+            endpoint = next(
+                (e for e in self._data.get("endpoints", [])
+                 if e["id"] == ep_id), None
+            ) if ep_id else None
+            dlg = _OutletDetailDialog(
+                outlet=outlet, endpoint=endpoint, data=self._data, parent=self
+            )
+            dlg.exec()
+
     def _on_trace_clicked(self):
         if not self._selected_outlet_id:
             self._trace_info.setPlainText(t("trace_no_connection"))
@@ -719,8 +792,10 @@ class FloorplanView(QWidget):
 
         if self._selected_outlet_id:
             self._trace_info.setPlainText(f"{t('label_wall_outlet')}: {outlet_txt}")
+            self._btn_detail.setEnabled(True)
         else:
             self._trace_info.setPlainText(t("trace_no_connection"))
+            self._btn_detail.setEnabled(False)
 
         self._refresh_info()
 
@@ -792,6 +867,7 @@ class FloorplanView(QWidget):
         read_only = settings_storage.get_read_only_mode()
         self._btn_map.setEnabled(not read_only)
         self._btn_unmap.setEnabled(not read_only)
+        # Detail knop is altijd beschikbaar (ook read-only) als er een koppeling is
 
     # ------------------------------------------------------------------
     # Helpers
