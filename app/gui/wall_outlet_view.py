@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.9.0
+# Version: 1.10.0
 # Author:  Barremans
-# Changes: 1.8.1 — Visuele scheiding voor "Direct verbonden" sectie (HR lijn)
+# Changes: 1.10.0 — Direct modus: filter op rack_id als meegegeven
+#                   Constructor accepteert rack_id + rack_name parameters
+#                   Titelregel toont rack_name ipv site_name in direct modus
+#          1.8.1 — Visuele scheiding voor "Direct verbonden" sectie (HR lijn)
 #                  Rechtsklik op endpoint-kaartje: bewerken via outlet_endpoint_edit
 #          1.8.0 — Direct endpoint: nieuwe sectie "🖥 Direct verbonden" onderaan
 #                  _build_direct_endpoints_section() + _build_endpoint_card()
@@ -67,15 +70,20 @@ class WallOutletView(QWidget):
     # ------------------------------------------------------------------
 
     def __init__(self, room_or_site, context, data: dict,
-                 mode: str = "room", parent=None):
+                 mode: str = "room", parent=None,
+                 rack_id: str = "", rack_name: str = ""):
         """
         room_or_site : room dict (mode='room') of site dict (mode='site')
         context      : site dict (mode='room') of genegeerd (mode='site')
         data         : volledig network_data dict
-        mode         : 'room' | 'site'
+        mode         : 'room' | 'site' | 'direct'
+        rack_id      : filter direct-modus op één rack (optioneel)
+        rack_name    : weergavenaam van de rack voor de titelregel
         """
         super().__init__(parent)
-        self._mode = mode
+        self._mode      = mode
+        self._rack_id   = rack_id    # v1.10.0 — filter voor direct modus
+        self._rack_name = rack_name  # v1.10.0 — titelregel
         if mode == "site" or mode == "direct":
             self._site = room_or_site
             self._room = None
@@ -108,8 +116,9 @@ class WallOutletView(QWidget):
             )
             all_outlets = self._collect_site_outlets()
         elif self._mode == "direct":
+            context_name = self._rack_name if self._rack_name else self._site['name']
             title_text = (
-                f"🖥  {t('wall_outlet_group_direct')}  —  {self._site['name']}"
+                f"🖥  {t('wall_outlet_group_direct')}  —  {context_name}"
             )
             all_outlets = []
         else:
@@ -416,6 +425,16 @@ class WallOutletView(QWidget):
                 for slot in rack.get("slots", [])
                 if slot.get("device_id")
             }
+        elif self._mode == "direct" and self._rack_id:
+            # v1.10.0 — Filter op specifieke rack
+            allowed_device_ids = set()
+            for site in self._data.get("sites", []):
+                for room in site.get("rooms", []):
+                    for rack in room.get("racks", []):
+                        if rack["id"] == self._rack_id:
+                            for slot in rack.get("slots", []):
+                                if slot.get("device_id"):
+                                    allowed_device_ids.add(slot["device_id"])
         elif self._mode in ("site", "direct"):
             # Alle devices in alle ruimtes van deze site
             allowed_device_ids = {

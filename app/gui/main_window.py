@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.48.0
+# Version: 1.49.0
 # Author:  Barremans
-# Changes: 1.43.2 — Direct endpoints zichtbaar in boom per site
+# Changes: 1.49.0 — Direct endpoints view gefilterd op rack:
+#                   rack_id opgeslagen in boom UserRole data
+#                   rack_id doorgegeven aan _show_direct_endpoints_view()
+#                   WallOutletView ontvangt rack_id + rack_name voor filter + titel
+#          1.43.2 — Direct endpoints zichtbaar in boom per site
 #          1.44.0 — Verbinding verplaatsen: ctx_move_port_connection + handler
 #          1.45.0 — closeEvent: geen backup bij read-only of geen wijzigingen
 #                   startup sync: pull geblokkeerd als netwerkbestand leeg/ongeldig
@@ -645,6 +649,7 @@ class MainWindow(QMainWindow):
                         direct_item.setData(_COL, Qt.ItemDataRole.UserRole, {
                             "type":      _TYPE_DIRECT_EPS,
                             "site_id":   site["id"],
+                            "rack_id":   rack["id"],
                             "rack_name": rack["name"],
                         })
                         for ep, port, dev in rack_direct:
@@ -762,6 +767,7 @@ class MainWindow(QMainWindow):
         elif item_type == _TYPE_DIRECT_EPS:
             site = self._find_site(data["site_id"])
             rack_name = data.get("rack_name", "")
+            rack_id   = data.get("rack_id", "")
             if site:
                 ep_id = data.get("ep_id")
                 if ep_id:
@@ -771,7 +777,7 @@ class MainWindow(QMainWindow):
                         self.set_status(f"🖥  {ep.get('name', ep_id)}")
                 else:
                     self.set_status(f"🖥  {t('wall_outlet_group_direct')}  —  {rack_name}")
-                self._show_direct_endpoints_view(site, rack_name)
+                self._show_direct_endpoints_view(site, rack_name, rack_id)
 
         elif item_type == _TYPE_OUTLETS:
             room = self._find_room(data["room_id"])
@@ -875,6 +881,11 @@ class MainWindow(QMainWindow):
                 menu.addAction(t("ctx_delete"),
                                lambda: self._delete_rack_direct(data))
 
+        elif item_type == _TYPE_SITE_OUTLETS:
+            if not read_only:
+                menu.addAction(t("ctx_new_outlet"),
+                               lambda: self._new_wall_outlet(""))
+
         elif item_type == _TYPE_OUTLETS:
             if not read_only:                              # F5
                 menu.addAction(t("ctx_new_outlet"),
@@ -901,7 +912,7 @@ class MainWindow(QMainWindow):
             menu.exec(self._tree.viewport().mapToGlobal(pos))
 
     def _edit_wall_outlet(self, data: dict):
-        """Wandpunt bewerken via context menu."""
+        """Wandpunt bewerken via context menu. 1.49.0: ruimte DDL + verplaatsen."""
         room = self._find_room(data["room_id"])
         if not room:
             return
@@ -912,10 +923,21 @@ class MainWindow(QMainWindow):
         endpoints = self._data.get("endpoints", [])
         dlg = WallOutletDialog(parent=self, room_id=data["room_id"],
                                endpoints=endpoints, outlet=wo,
-                               existing_outlets=room.get("wall_outlets", []))
+                               existing_outlets=room.get("wall_outlets", []),
+                               data=self._data)
         if dlg.exec() and dlg.get_result():
             self._data["endpoints"] = dlg.get_endpoints_result()
-            wo.update(dlg.get_result())
+            result = dlg.get_result()
+            new_room_id = result.get("room_id", data["room_id"])
+            if new_room_id != data["room_id"]:
+                # Verplaatsen: verwijder uit oude ruimte, voeg toe aan nieuwe
+                room.get("wall_outlets", []).remove(wo)
+                new_room = self._find_room(new_room_id)
+                if new_room:
+                    wo.update(result)
+                    new_room.setdefault("wall_outlets", []).append(wo)
+            else:
+                wo.update(result)
             self._save_and_backup()
             self._populate_tree()
             # B1 — refresh de WallOutletView als die actief is na bewerken wandpunt
@@ -957,6 +979,7 @@ class MainWindow(QMainWindow):
                             endpoints=endpoints,
                             outlet=wo,
                             existing_outlets=room.get("wall_outlets", []),
+                            data=self._data,
                         )
                         if dlg.exec() and dlg.get_result():
                             self._data["endpoints"] = dlg.get_endpoints_result()
@@ -1183,15 +1206,17 @@ class MainWindow(QMainWindow):
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
-    def _show_direct_endpoints_view(self, site: dict, rack_name: str = ""):
-        """Toon alleen de direct verbonden endpoints — eigen view zonder wandpunten."""
+    def _show_direct_endpoints_view(self, site: dict, rack_name: str = "",
+                                     rack_id: str = ""):
+        """Toon alleen de direct verbonden endpoints — gefilterd op rack."""
         while self._mid_layout.count():
             item = self._mid_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         outlet_view = WallOutletView(site, None, self._data,
-                                     mode="direct", parent=self._mid_frame)
+                                     mode="direct", parent=self._mid_frame,
+                                     rack_id=rack_id, rack_name=rack_name)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
@@ -2204,19 +2229,21 @@ class MainWindow(QMainWindow):
                 self._populate_tree()
                 self.set_status(f"✓  {t('label_rack')} '{obj['name']}' aangemaakt.")
 
-    def _new_wall_outlet(self, room_id: str):
-        endpoints = self._data.get("endpoints", [])
-        room      = self._find_room(room_id)
-        existing  = room.get("wall_outlets", []) if room else []
+    def _new_wall_outlet(self, room_id: str = ""):
+        endpoints   = self._data.get("endpoints", [])
+        room        = self._find_room(room_id) if room_id else None
+        existing    = room.get("wall_outlets", []) if room else []
         dlg = WallOutletDialog(parent=self, room_id=room_id,
-                               endpoints=endpoints, existing_outlets=existing)
+                               endpoints=endpoints, existing_outlets=existing,
+                               data=self._data)
         if dlg.exec() and dlg.get_result():
             self._data["endpoints"] = dlg.get_endpoints_result()
             obj = dlg.get_result()
             obj["id"] = self._gen_id("wo")
-            room = self._find_room(room_id)
-            if room:
-                room.setdefault("wall_outlets", []).append(obj)
+            target_room_id = obj.get("room_id") or room_id
+            target_room    = self._find_room(target_room_id)
+            if target_room:
+                target_room.setdefault("wall_outlets", []).append(obj)
                 vlan_val = dlg.get_vlan()
                 if vlan_val and obj.get("id"):
                     self._propagate_vlan_after_save(obj["id"], "wall_outlet", vlan_val)

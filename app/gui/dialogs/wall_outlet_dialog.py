@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.7.0
+# Version: 1.9.0
 # Author:  Barremans
-# Changes: 1.7.0 — F6: sort_id veld toegevoegd — numerieke sorteervolgorde per locatiegroep
+# Changes: 1.8.0 — Bug fix: duplicate check naam + wandlocatie (location_description)
+#                  i.p.v. naam + ruimte. D20 in OB MIC != D20 in OB INKOMHAL.
+#          1.7.0 — F6: sort_id veld toegevoegd — numerieke sorteervolgorde per locatiegroep
 #                  Optioneel veld, niet ingevuld = 0 (achteraan bij sortering)
 #          1.6.0 — Locatie gewijzigd van vrij tekstveld naar configureerbare keuzelijst
 # =============================================================================
@@ -44,10 +46,11 @@ class WallOutletDialog(QDialog):
 
     def __init__(self, parent=None, outlet: dict = None,
                  room_id: str = "", endpoints: list = None,
-                 existing_outlets: list = None):
+                 existing_outlets: list = None, data: dict = None):
         super().__init__(parent)
         self._outlet           = outlet or {}
         self._room_id          = room_id
+        self._data             = data or {}
         self._endpoints_data   = [dict(ep) for ep in (endpoints or [])]
         self._existing_outlets = existing_outlets or []
         self._result           = None
@@ -73,6 +76,19 @@ class WallOutletDialog(QDialog):
         self._name     = QLineEdit()
         _bind_uppercase(self._name)
 
+        # Ruimte DDL (1.9.0)
+        # Zichtbaar bij bewerken (verplaatsen) + bij nieuw zonder room_id
+        self._ddl_room = QComboBox()
+        self._ddl_room.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self._ddl_room.setMinimumWidth(300)
+        self._show_room_ddl = bool(self._outlet) or not self._room_id
+        if self._show_room_ddl:
+            self._ddl_room.addItem("-- " + t("label_room") + " --", "")
+            for _site in self._data.get("sites", []):
+                for _room in _site.get("rooms", []):
+                    lbl = f"{_site['name']}  /  {_room['name']}"
+                    self._ddl_room.addItem(lbl, _room["id"])
+
         # Locatie — keuzelijst uit settings (configureerbaar)
         self._ddl_location = QComboBox()
         self._ddl_location.addItem("— " + t("label_location") + " —", "")
@@ -94,6 +110,8 @@ class WallOutletDialog(QDialog):
         # VLAN DDL
         self._ddl_vlan = _build_vlan_ddl()
 
+        if self._show_room_ddl:
+            form.addRow(t("label_room") + " *:", self._ddl_room)
         form.addRow(t("label_name")     + " *:", self._name)
         form.addRow(t("label_location") + ":",   self._ddl_location)
         form.addRow("VLAN:",                     self._ddl_vlan)
@@ -239,6 +257,12 @@ class WallOutletDialog(QDialog):
     def _populate(self):
         self._name.setText(self._outlet.get("name", ""))
 
+        # Ruimte DDL instellen (1.9.0)
+        if self._show_room_ddl and self._room_id:
+            idx = self._ddl_room.findData(self._room_id)
+            if idx >= 0:
+                self._ddl_room.setCurrentIndex(idx)
+
         # Locatie DDL instellen
         loc_key = self._outlet.get("location_description", "")
         idx = self._ddl_location.findData(loc_key)
@@ -272,10 +296,32 @@ class WallOutletDialog(QDialog):
             QMessageBox.warning(self, t("label_wall_outlet"), t("err_field_required"))
             return
 
-        current_id = self._outlet.get("id", "")
-        duplicate  = next(
-            (wo for wo in self._existing_outlets
+        # Ruimte bepalen (1.9.0): DDL of vaste room_id
+        if self._show_room_ddl:
+            effective_room_id = self._ddl_room.currentData() or ""
+            if not effective_room_id:
+                QMessageBox.warning(self, t("label_wall_outlet"), t("err_field_required"))
+                self._ddl_room.setFocus()
+                return
+        else:
+            effective_room_id = self._room_id
+
+        current_id  = self._outlet.get("id", "")
+        new_loc_key = self._ddl_location.currentData() or ""
+        # Duplicate check: gebruik data van de effectieve doelruimte (1.9.0)
+        if self._data and effective_room_id:
+            check_room = next(
+                (r for s in self._data.get("sites", [])
+                 for r in s.get("rooms", []) if r["id"] == effective_room_id),
+                None
+            )
+            check_outlets = check_room.get("wall_outlets", []) if check_room else []
+        else:
+            check_outlets = self._existing_outlets
+        duplicate   = next(
+            (wo for wo in check_outlets
              if wo.get("name", "").strip().lower() == name.lower()
+             and (wo.get("location_description", "") or "") == new_loc_key
              and wo.get("id", "") != current_id),
             None
         )
@@ -292,7 +338,7 @@ class WallOutletDialog(QDialog):
 
         self._result = {
             "id":                   self._outlet.get("id", ""),
-            "room_id":              self._room_id or self._outlet.get("room_id", ""),
+            "room_id":              effective_room_id,
             "name":                 name,
             "location_description": self._ddl_location.currentData() or "",
             "endpoint_id":          self._ddl_ep.currentData() or "",
