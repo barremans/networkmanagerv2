@@ -2,9 +2,21 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.49.0
+# Version: 1.53.0
 # Author:  Barremans
-# Changes: 1.49.0 — Direct endpoints view gefilterd op rack:
+# Changes: 1.53.0 — Trace gewist bij navigatie naar andere view
+#                   _wire_detail.clear() bij _show_rack_view, _show_wall_outlet_view,
+#                   _show_direct_endpoints_view, _show_site_outlets_view, _show_floorplan_view
+#          1.52.0 — outlet_duplicate_requested gekoppeld in room- en site-modus
+#                   _on_outlet_duplicate_requested: nieuw wandpunt met ruimte+locatie
+#                   vooringevuld vanuit bronwandpunt, naam leeg
+#          1.51.0 — endpoint_delete_requested gekoppeld in alle 3 WallOutletView modi
+#                   _on_endpoint_delete_requested handler: verwijdert endpoint +
+#                   referenties in wandpunten + verbindingen + refresh view
+#          1.50.0 — Rechtsklik wandpunt kaartje: verwijderen vanuit WallOutletView
+#                   outlet_delete_requested signaal gekoppeld in room- en site-modus
+#                   _on_outlet_delete_requested handler toegevoegd
+#          1.49.0 — Direct endpoints view gefilterd op rack:
 #                   rack_id opgeslagen in boom UserRole data
 #                   rack_id doorgegeven aan _show_direct_endpoints_view()
 #                   WallOutletView ontvangt rack_id + rack_name voor filter + titel
@@ -960,6 +972,90 @@ class MainWindow(QMainWindow):
                         })
                         return
 
+    def _on_outlet_delete_requested(self, outlet_id: str):
+        """1.50.0 — Rechtsklik 'Verwijderen' vanuit WallOutletView kaartje."""
+        if settings_storage.get_read_only_mode():          # F5
+            return
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo["id"] == outlet_id:
+                        self._delete_wall_outlet({
+                            "id":      outlet_id,
+                            "room_id": room["id"],
+                        })
+                        return
+
+    def _on_outlet_duplicate_requested(self, outlet_id: str):
+        """
+        1.51.0/1.17.0 — Rechtsklik 'Dupliceren' vanuit WallOutletView kaartje.
+        Opent nieuw wandpunt dialoog met ruimte + locatie vooringevuld, naam leeg.
+        """
+        if settings_storage.get_read_only_mode():
+            return
+        # Zoek bronwandpunt + ruimte op
+        src_outlet = None
+        src_room_id = ""
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo["id"] == outlet_id:
+                        src_outlet  = wo
+                        src_room_id = room["id"]
+                        break
+        if not src_outlet:
+            return
+
+        # Bouw een leeg wandpunt voor met ruimte + locatie gekopieerd
+        prefill = {
+            "location_description": src_outlet.get("location_description", ""),
+            "vlan":                 src_outlet.get("vlan"),
+            "sort_id":              src_outlet.get("sort_id", 0),
+            "notes":                "",
+            "name":                 "",
+            "endpoint_id":          "",
+        }
+        endpoints = self._data.get("endpoints", [])
+        room      = self._find_room(src_room_id)
+        dlg = WallOutletDialog(
+            parent=self,
+            outlet=None,         # nieuw wandpunt
+            room_id=src_room_id,
+            endpoints=endpoints,
+            existing_outlets=room.get("wall_outlets", []) if room else [],
+            data=self._data,
+        )
+        # Vul locatie + vlan + sort_id in na aanmaken dialoog
+        if dlg._ddl_location and prefill["location_description"]:
+            idx = dlg._ddl_location.findData(prefill["location_description"])
+            if idx >= 0:
+                dlg._ddl_location.setCurrentIndex(idx)
+        if prefill.get("vlan") is not None:
+            for i in range(dlg._ddl_vlan.count()):
+                if dlg._ddl_vlan.itemData(i) == int(prefill["vlan"]):
+                    dlg._ddl_vlan.setCurrentIndex(i)
+                    break
+        dlg._sort_id.setValue(int(prefill["sort_id"] or 0))
+
+        if dlg.exec() and dlg.get_result():
+            import time
+            result = dlg.get_result()
+            result["id"] = f"wo_{int(time.time() * 1000) % 1_000_000}"
+            target_room_id = result.get("room_id") or src_room_id
+            target_room    = self._find_room(target_room_id)
+            if target_room is None:
+                return
+            target_room.setdefault("wall_outlets", []).append(result)
+            # Eindapparaten uit dialoog synchroniseren
+            self._data["endpoints"] = dlg.get_endpoints_result()
+            self._save_and_backup()
+            self._populate_tree()
+            if isinstance(self._current_view, WallOutletView):
+                self._current_view.refresh(self._data)
+            self.set_status(
+                f"✓  {t('label_wall_outlet')} '{result['name']}' aangemaakt."
+            )
+
     def _on_outlet_endpoint_requested(self, outlet_id: str):
         """
         W1: Eindapparaat toevoegen/bewerken vanuit WallOutletView
@@ -1012,11 +1108,57 @@ class MainWindow(QMainWindow):
                 self._current_view.refresh(self._data)
             self.set_status(f"✓  🖥  '{ep.get('name', '')}' bijgewerkt.")
 
+    def _on_endpoint_delete_requested(self, ep_id: str):
+        """
+        1.50.0/1.15.0 — Eindapparaat verwijderen vanuit endpoint-kaartje (rechtsklik).
+        Verwijdert endpoint uit data + alle verbindingen die ernaar verwijzen.
+        """
+        if settings_storage.get_read_only_mode():
+            return
+        from PySide6.QtWidgets import QMessageBox
+        ep = next((e for e in self._data.get("endpoints", []) if e["id"] == ep_id), None)
+        if not ep:
+            return
+        reply = QMessageBox.question(
+            self, t("menu_delete"),
+            f"{t('msg_confirm_delete')}\n\n🖥  {ep.get('name', ep_id)}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        # Verwijder endpoint uit globale lijst
+        self._data["endpoints"] = [
+            e for e in self._data.get("endpoints", []) if e["id"] != ep_id
+        ]
+        # Verwijder endpoint_id referentie in wandpunten
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo.get("endpoint_id") == ep_id:
+                        wo["endpoint_id"] = ""
+        # Verwijder verbindingen die naar dit endpoint verwijzen
+        self._data["connections"] = [
+            c for c in self._data.get("connections", [])
+            if not (c.get("from_id") == ep_id or c.get("to_id") == ep_id)
+        ]
+        self._save_and_backup()
+        self._populate_tree()
+        if isinstance(self._current_view, WallOutletView):
+            self._current_view.refresh(self._data)
+        self.set_status(f"✓  🖥  '{ep.get('name', '')}' verwijderd.")
+
     def _delete_wall_outlet(self, data: dict):
-        """Wandpunt verwijderen via context menu."""
+        """Wandpunt verwijderen via context menu of kaartje rechtsklik."""
         if settings_storage.get_read_only_mode():          # F5
             return
         from PySide6.QtWidgets import QMessageBox
+        # Zoek naam op voor feedback melding
+        room = self._find_room(data["room_id"])
+        wo_name = ""
+        if room:
+            wo = next((w for w in room.get("wall_outlets", [])
+                       if w["id"] == data["id"]), None)
+            wo_name = wo.get("name", "") if wo else ""
         reply = QMessageBox.question(
             self, t("menu_delete"), t("msg_confirm_delete"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1034,7 +1176,10 @@ class MainWindow(QMainWindow):
             ]
             self._save_and_backup()
             self._populate_tree()
-            self.set_status(f"✓  {t('label_wall_outlet')} verwijderd.")
+            if isinstance(self._current_view, WallOutletView):
+                self._current_view.refresh(self._data)
+            lbl = f" '{wo_name}'" if wo_name else ""
+            self.set_status(f"✓  {t('label_wall_outlet')}{lbl} verwijderd.")
 
     def _on_device_context_menu(self, device_id: str, action: str):
         """Dispatcher voor device context menu acties vanuit rack_view."""
@@ -1192,6 +1337,7 @@ class MainWindow(QMainWindow):
 
     def _show_wall_outlet_view(self, room: dict, site: dict):
         """Verwijder huidige midden-inhoud en toon WallOutletView (ruimte-modus)."""
+        self._wire_detail.clear()   # 1.52.0 — wis trace bij navigatie
         while self._mid_layout.count():
             item = self._mid_layout.takeAt(0)
             if item.widget():
@@ -1201,14 +1347,18 @@ class MainWindow(QMainWindow):
                                      mode="room", parent=self._mid_frame)
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
         outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
+        outlet_view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
+        outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
+        outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
     def _show_direct_endpoints_view(self, site: dict, rack_name: str = "",
                                      rack_id: str = ""):
         """Toon alleen de direct verbonden endpoints — gefilterd op rack."""
+        self._wire_detail.clear()   # 1.52.0 — wis trace bij navigatie
         while self._mid_layout.count():
             item = self._mid_layout.takeAt(0)
             if item.widget():
@@ -1218,11 +1368,13 @@ class MainWindow(QMainWindow):
                                      mode="direct", parent=self._mid_frame,
                                      rack_id=rack_id, rack_name=rack_name)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
+        outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
     def _show_site_outlets_view(self, site: dict):
         """Toon WallOutletView in site-modus — alle wandpunten van de site."""
+        self._wire_detail.clear()   # 1.52.0 — wis trace bij navigatie
         while self._mid_layout.count():
             item = self._mid_layout.takeAt(0)
             if item.widget():
@@ -1232,8 +1384,11 @@ class MainWindow(QMainWindow):
                                      mode="site", parent=self._mid_frame)
         outlet_view.outlet_clicked.connect(self._on_outlet_clicked)
         outlet_view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
+        outlet_view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
+        outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
+        outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -1260,6 +1415,7 @@ class MainWindow(QMainWindow):
 
     def _show_rack_view(self, rack: dict, room: dict, site: dict):
         """Verwijder huidige midden-inhoud en toon RackView."""
+        self._wire_detail.clear()   # 1.52.0 — wis trace bij navigatie
         while self._mid_layout.count():
             item = self._mid_layout.takeAt(0)
             if item.widget():
@@ -2883,6 +3039,7 @@ class MainWindow(QMainWindow):
     def _show_floorplan_view(self, floorplan: dict):
         """Toon FloorplanView in het centrale paneel."""
         from app.gui.floorplan_view import FloorplanView
+        self._wire_detail.clear()   # 1.52.0 — wis trace bij navigatie
 
         # Verwijder huidige centrale view — setParent(None) voor onmiddellijke verwijdering
         while self._mid_layout.count():

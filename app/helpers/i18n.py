@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.23.0
+# Version: 1.24.0
 # Author:  Barremans
-# Changes: 1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
+# Changes: 1.24.0 — ctx_duplicate toegevoegd (NL + EN), ctx_edit/ctx_delete iconen verwijderd
+#          1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
 #          F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
 #          F3 — settings_group_language, settings_group_datasource,
@@ -473,8 +474,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_new_rack":             "🗄  Nieuw rack",
         "ctx_new_outlet":           "🌐  Nieuw wandpunt",
         "ctx_new_device":           "💻  Nieuw toestel",
-        "ctx_edit":                 "✏  Bewerken",
-        "ctx_delete":               "🗑  Verwijderen",
+        "ctx_edit":                 "Bewerken",
+        "ctx_delete":               "Verwijderen",
+        "ctx_duplicate":            "Dupliceren",
         "ctx_edit_device":          "✏  Toestel bewerken",
         "ctx_delete_device":        "🗑  Toestel verwijderen",
         "ctx_edit_outlet":          "✏  Wandpunt bewerken",
@@ -1065,8 +1067,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_new_rack":             "🗄  New Rack",
         "ctx_new_outlet":           "🌐  New Wall Outlet",
         "ctx_new_device":           "💻  New Device",
-        "ctx_edit":                 "✏  Edit",
-        "ctx_delete":               "🗑  Delete",
+        "ctx_edit":                 "Edit",
+        "ctx_delete":               "Delete",
+        "ctx_duplicate":            "Duplicate",
         "ctx_edit_device":          "✏  Edit Device",
         "ctx_delete_device":        "🗑  Delete Device",
         "ctx_edit_outlet":          "✏  Edit Wall Outlet",

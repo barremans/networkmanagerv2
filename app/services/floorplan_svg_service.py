@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/services/floorplan_svg_service.py
 # Role:    SVG analyse voor floorplans — detectie van puntlabels + posities
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
-# Changes: 1.6.0 — light-dark() CSS fix: Qt begrijpt deze CSS Level 5 functie niet
+# Changes: 1.7.0 — Bug fix: overlay label linksboven bij geneste g-structuur (draw.io)
+#                   _parse_drawio_svg_positions gebruikt nu _walk_drawio_g() die
+#                   cumulatieve parent-translate accumuleert per niveau.
+#                   Geneste labels (D20 in D20A) krijgen nu correcte absolute positie.
+#          1.6.0 — light-dark() CSS fix: Qt begrijpt deze CSS Level 5 functie niet
 #                   → vervangen door eerste waarde (lichte variant) voor witte achtergrond
 #                   SVG label prefixen dynamisch vanuit settings_storage
 #          1.5.2 — WAP prefix + recursieve bugfix
@@ -212,6 +216,7 @@ def detect_point_positions(svg_path: str | Path) -> dict[str, tuple[float, float
         root = tree.getroot()
 
         if root.get("content"):
+            # 1.7.0 — _parse_drawio_svg_positions accumuleert parent-offsets recursief
             return _parse_drawio_svg_positions(root)
         else:
             result: dict[str, tuple[float, float]] = {}
@@ -273,29 +278,51 @@ def _parse_drawio_svg_positions(root: ET.Element) -> dict[str, tuple[float, floa
     Draw.io exporteert elk wandpunt als <g id="M1">...</g> met daarin
     rect/image elementen op de echte SVG coördinaten. Geen conversie nodig.
 
-    Globale translate(0, offset) van de root g wordt meegenomen.
+    1.7.0 fix: parent-group offsets accumuleren zodat geneste g-elementen
+    (bv. D20 binnen D20A) de juiste absolute positie krijgen.
     """
     result: dict[str, tuple[float, float]] = {}
+    # Start de recursieve walk vanuit de directe kinderen van de SVG root
+    for child in root:
+        _walk_drawio_g(child, result, 0.0, 0.0)
+    return result
 
-    # Globale translate van de wrapper g
-    global_tx, global_ty = _get_global_translate(root)
 
-    for elem in root.iter():
-        tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-        if tag != "g":
-            continue
-        eid = elem.get("id", "")
-        norm = _normalize_point_label(eid)
-        if not _is_point_label(norm):
-            continue
-        if norm in result:
-            continue
+def _walk_drawio_g(
+    elem: ET.Element,
+    result: dict[str, tuple[float, float]],
+    parent_tx: float,
+    parent_ty: float,
+):
+    """
+    1.7.0 — Recursieve walk die cumulatieve translate bijhoudt.
+    Voor elk g-element: eigen translate optellen bij parent offset.
+    Als het g[id] een punt-label is: centrum bepalen relatief aan cumulatieve offset.
+    """
+    tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+    if tag != "g":
+        return
 
+    # Eigen translate van dit g-element optellen bij parent offset
+    own_tx, own_ty = _parse_transform_offset(elem.get("transform", ""))
+    cum_tx = parent_tx + own_tx
+    cum_ty = parent_ty + own_ty
+
+    eid = elem.get("id", "")
+    norm = _normalize_point_label(eid)
+    if _is_point_label(norm) and norm not in result:
+        # Zoek centrum in de subtree — coördinaten zijn relatief aan dit g-element
         cx, cy = _find_center_from_subtree(elem)
         if cx is not None:
-            result[norm] = (cx + global_tx, cy + global_ty)
+            result[norm] = (cx + cum_tx, cy + cum_ty)
+        else:
+            # Geen rect/image gevonden in subtree — gebruik eigen offset als fallback
+            # (dit is het geval voor puur label-g's zoals D20 in D20A)
+            result[norm] = (cum_tx, cum_ty)
 
-    return result
+    # Recurse in kinderen
+    for child in elem:
+        _walk_drawio_g(child, result, cum_tx, cum_ty)
 
 
 def _get_global_translate(root: ET.Element) -> tuple[float, float]:

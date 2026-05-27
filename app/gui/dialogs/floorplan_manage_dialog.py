@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_manage_dialog.py
 # Role:    Dialoog — grondplan beheren (naam, site, locatie, verwijderen)
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
-# Changes: 1.2.0 — G-OPEN-5/6: knop "SVG vervangen" naast SVG label
+# Changes: 1.3.0 — SVG vervangen: preview vóór bevestiging
+#                   Toont welke koppelingen verloren gaan met Ja/Nee dialoog
+#                   Geen koppelingen? → eenvoudige bevestiging
+#          1.2.0 — G-OPEN-5/6: knop "SVG vervangen" naast SVG label
 #                  roept floorplan_service.replace_svg() aan
 #                  toont melding met verwijderde verouderde koppelingen
 #                  floorplan_changed signaal wordt ook na SVG-wissel geëmit
@@ -283,20 +286,52 @@ class FloorplanManageDialog(QDialog):
         from pathlib import Path as _Path
         settings_storage.set_last_folder("floorplan_svg", str(_Path(path).parent))
 
+        # 1.3.0 — Preview: toon welke koppelingen verloren gaan vóór bevestiging
+        from app.services import floorplan_svg_service as _svg_svc
+        fp_id    = self._selected_fp.get("id", "")
+        mappings = self._selected_fp.get("mappings", {})
+
+        try:
+            new_labels = set(_svg_svc.detect_point_labels(path))
+            stale = [pt for pt in mappings if pt not in new_labels]
+        except Exception:
+            stale = []
+
+        if stale:
+            stale_lines = "\n".join(f"  • {pt}" for pt in sorted(stale))
+            reply = QMessageBox.question(
+                self,
+                "SVG vervangen — bevestig",
+                f"De volgende {len(stale)} koppeling(en) bestaan niet meer in de nieuwe SVG "
+                f"en zullen verwijderd worden:\n\n{stale_lines}\n\n"
+                f"Alle andere koppelingen blijven behouden.\n\nDoorgaan?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        else:
+            reply = QMessageBox.question(
+                self,
+                "SVG vervangen",
+                "Alle bestaande koppelingen blijven behouden.\n\nSVG vervangen?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         from app.services import floorplan_service
-        fp_id = self._selected_fp.get("id", "")
         ok, err, removed = floorplan_service.replace_svg(fp_id, path)
 
         if not ok:
             QMessageBox.warning(self, self.windowTitle(), f"SVG vervangen mislukt:\n{err}")
             return
 
-        # Toon resultaat
-        msg = t("msg_backup_ok") if hasattr(self, "_dummy") else "SVG vervangen."
         if removed:
             msg = f"SVG vervangen.\n\n⚠ {len(removed)} verouderde koppeling(en) verwijderd:\n{', '.join(removed)}"
         else:
-            msg = "SVG vervangen. Alle bestaande koppelingen zijn nog geldig."
+            msg = "SVG vervangen. Alle bestaande koppelingen zijn behouden."
 
         QMessageBox.information(self, self.windowTitle(), msg)
 

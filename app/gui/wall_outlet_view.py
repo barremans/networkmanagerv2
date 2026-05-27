@@ -2,9 +2,43 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.10.0
+# Version: 1.19.0
 # Author:  Barremans
-# Changes: 1.10.0 — Direct modus: filter op rack_id als meegegeven
+# Changes: 1.19.0 — _OutletDetailDialog: "Bewerken" knop toegevoegd
+#                   on_edit_clicked callback parameter
+#          1.18.1 — Prefix-rij-breuk binnen locatiegroep: A-reeks → rij, B-reeks → nieuwe rij
+#                   _name_prefix() helper: leading letters van naam (A21→A, CAM02→CAM)
+#                   Debounce timer (150ms) op resizeEvent
+#                   refresh() reset _last_col_count
+#          1.18.0 — Dynamische kolombreedte via resizeEvent + QGridLayout per groep
+#                   refresh() reset _last_col_count zodat col_count herberekend wordt
+#                   QTimer import toegevoegd
+#          1.18.0 — Dynamische kolombreedte via resizeEvent + QGridLayout per groep
+#                   col_count berekend op basis van beschikbare breedte (_CARD_MIN_W=200)
+#                   Bij vensterwijziging herlaadt de view automatisch met juist aantal kolommen
+#                   setMaximumWidth(280) verwijderd — QGridLayout verdeelt ruimte gelijkmatig
+#          1.17.0 — Rechtsklik wandpunt: "Dupliceren" optie
+#                   outlet_duplicate_requested signaal toegevoegd
+#          1.16.0 — Direct verbonden: groepering per aansluitapparaat
+#                   Sortering: device naam (natural sort) → poortnummer (natural sort)
+#                   Bv. PATCHPANEL A1 Port 6 → Port 7 → … / nieuwe groep SW10
+#          1.15.0 — Bug fix: refresh() lege view na delete
+#                   _build() hergebruikt bestaande layout bij refresh
+#                   Direct endpoint kaartje: "Verwijderen" in rechtsklik menu
+#                   endpoint_delete_requested signaal toegevoegd
+#          1.14.0 — setMaximumWidth(280) op kaartjes
+#                   addStretch() terug op rijen (vult lege ruimte rechts)
+#                   Correcte mix: min 160px, max 280px, stretch absorbeert rest
+#          1.13.0 — Responsieve kaartjes: setFixedSize → setMinimumWidth + Expanding policy
+#                   Kaartjes vullen nu de volledige beschikbare breedte
+#                   col_count verhoogd (max 6 room, max 5 site) voor brede schermen
+#                   AlignLeft + addStretch op rijen verwijderd zodat kaartjes uitrekken
+#          1.12.0 — Natural sort op wandpuntnaam binnen elke locatiegroep
+#                   A2 < A10 < B1 (correct), i.p.v. A10 < A2 (string sort)
+#                   sort_id=0 valt terug op natural sort ipv plain string sort
+#          1.11.0 — Rechtsklik wandpunt kaartje: "Verwijderen" optie toegevoegd
+#                   outlet_delete_requested signaal
+#          1.10.0 — Direct modus: filter op rack_id als meegegeven
 #                   Constructor accepteert rack_id + rack_name parameters
 #                   Titelregel toont rack_name ipv site_name in direct modus
 #          1.8.1 — Visuele scheiding voor "Direct verbonden" sectie (HR lijn)
@@ -29,16 +63,43 @@
 
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QScrollArea,
-    QVBoxLayout, QHBoxLayout, QSizePolicy,
+    QVBoxLayout, QHBoxLayout, QSizePolicy, QGridLayout,
     QDialog, QMenu, QFormLayout, QTextBrowser,
     QPushButton
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QCursor
+import re
 
 from app.helpers.i18n import t, get_language
 from app.helpers.settings_storage import get_outlet_location_label, load_outlet_locations
 from app.services import tracing
+
+# 1.18.0 — minimale kaartbreedte voor col_count berekening
+_CARD_MIN_W = 200
+_CARD_SPACING = 8
+
+
+def _natural_sort_key(name: str) -> list:
+    """
+    1.12.0 — Natural sort key: splitst een naam in tekst- en getalsdelen zodat
+    A2 < A10 < B1 correct gesorteerd wordt (i.p.v. A10 < A2 bij string sort).
+    """
+    return [
+        int(part) if part.isdigit() else part.lower()
+        for part in re.split(r"(\d+)", name or "")
+    ]
+
+
+def _name_prefix(name: str) -> str:
+    """
+    1.18.1 — Geeft het leading-letters deel van een naam terug.
+    Gebruikt voor rij-breuk bij prefix-wisseling in de grid.
+    Voorbeelden: "A21" → "A", "B1" → "B", "CAM02" → "CAM", "W7" → "W"
+    Nummers-only of leeg → "__num__" (apart blok onderaan)
+    """
+    m = re.match(r"^([A-Za-z]+)", name or "")
+    return m.group(1).upper() if m else "__num__"
 
 
 class WallOutletView(QWidget):
@@ -61,9 +122,12 @@ class WallOutletView(QWidget):
 
     outlet_clicked = Signal(str)
     outlet_edit_requested = Signal(str)       # rechtsklik → bewerken
+    outlet_delete_requested = Signal(str)     # 1.11.0: rechtsklik → verwijderen
+    outlet_duplicate_requested = Signal(str)  # 1.17.0: rechtsklik → dupliceren (ruimte+locatie)
     outlet_endpoint_requested = Signal(str)   # W1: eindapparaat toevoegen/bewerken
     endpoint_edit_requested = Signal(str)     # 1.8.1: rechtsklik endpoint-kaartje → bewerken
-    endpoint_double_clicked  = Signal(str)     # 1.9.0: dubbelklik endpoint-kaartje → detail popup
+    endpoint_delete_requested = Signal(str)   # 1.15.0: rechtsklik endpoint-kaartje → verwijderen
+    endpoint_double_clicked  = Signal(str)    # 1.9.0: dubbelklik endpoint-kaartje → detail popup
 
     # ------------------------------------------------------------------
     # Constructor — room- of site-modus
@@ -93,16 +157,54 @@ class WallOutletView(QWidget):
         self._data           = data
         self._outlet_widgets = {}
         self._selected_id    = None
+        self._last_col_count = 0   # 1.18.0 — voor resize rebuild detectie
+        # 1.18.0 — debounce timer: rebuild pas na 150ms stilstand resize
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._on_resize_settled)
         self._build()
+
+    # ------------------------------------------------------------------
+    # 1.18.0 — Dynamische kolombreedte op basis van beschikbare breedte
+    # ------------------------------------------------------------------
+
+    def _col_count(self) -> int:
+        """Berekent optimaal aantal kolommen op basis van huidige breedte."""
+        w = self.width() or 800
+        cols = max(1, (w + _CARD_SPACING) // (_CARD_MIN_W + _CARD_SPACING))
+        return cols
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._resize_timer.start(150)   # debounce 150ms
+
+    def _on_resize_settled(self):
+        """Wordt aangeroepen na 150ms stilstand — rebuild als col_count gewijzigd."""
+        new_cols = self._col_count()
+        if new_cols != self._last_col_count:
+            self._last_col_count = new_cols
+            layout = self.layout()
+            if layout:
+                while layout.count():
+                    item = layout.takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+            self._outlet_widgets.clear()
+            self._selected_id = None
+            self._build()
 
     # ------------------------------------------------------------------
     # Opbouw
     # ------------------------------------------------------------------
 
     def _build(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        # 1.15.0 — gebruik bestaande layout als die al bestaat (voor refresh)
+        if self.layout() is None:
+            outer = QVBoxLayout(self)
+            outer.setContentsMargins(0, 0, 0, 0)
+            outer.setSpacing(0)
+        else:
+            outer = self.layout()
 
         # Titelregel
         title_bar = QFrame()
@@ -170,26 +272,40 @@ class WallOutletView(QWidget):
             body_layout.addWidget(empty_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
         else:
             # V5 — groeperen per locatie (location_description)
-            col_count = 3 if self._mode == "site" else 4
+            # 1.18.0 — QGridLayout per groep: kolommen dynamisch op breedte
+            # 1.18.1 — Binnen elke locatiegroep: nieuwe grid-rij per naam-prefix (A, B, C…)
+            col_count = self._col_count()
             groups = self._group_by_location(all_outlets)
 
             for loc_key, loc_label, outlets_in_group in groups:
-                # Sectieheader
                 header = self._build_group_header(loc_label, len(outlets_in_group))
                 body_layout.addWidget(header)
 
-                # Kaartjes in vaste rijen van col_count — geen QGridLayout
-                # (QGridLayout geeft inconsistente kolombreedte bij herlaad)
-                row_widget = None
-                row_layout = None
-                for idx, (room, outlet) in enumerate(outlets_in_group):
-                    if idx % col_count == 0:
-                        row_widget = QWidget()
-                        row_layout = QHBoxLayout(row_widget)
-                        row_layout.setContentsMargins(0, 0, 0, 0)
-                        row_layout.setSpacing(8)
-                        row_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-                        body_layout.addWidget(row_widget)
+                grid_widget = QWidget()
+                grid = QGridLayout(grid_widget)
+                grid.setContentsMargins(0, 0, 0, 0)
+                grid.setSpacing(_CARD_SPACING)
+                for col in range(col_count):
+                    grid.setColumnStretch(col, 1)
+                body_layout.addWidget(grid_widget)
+
+                # Groepeer per prefix (leading letters) voor automatische rij-breuk
+                # A21,A22,A23 → prefix "A" → eigen blok rijen
+                # B1,B2 → prefix "B" → volgende blok rijen, enz.
+                grid_row   = 0
+                grid_col   = 0
+                cur_prefix = None
+
+                for room, outlet in outlets_in_group:
+                    name   = outlet.get("name", "")
+                    prefix = _name_prefix(name)
+
+                    # Prefix gewisseld → nieuwe rij starten
+                    if prefix != cur_prefix:
+                        if cur_prefix is not None and grid_col > 0:
+                            grid_row += 1   # sluit vorige prefix-rij af
+                        grid_col   = 0
+                        cur_prefix = prefix
 
                     endpoint = ep_map.get(outlet.get("endpoint_id", ""))
                     trace    = tracing.trace_from_wall_outlet(self._data, outlet["id"])
@@ -197,11 +313,11 @@ class WallOutletView(QWidget):
                         outlet, endpoint, trace,
                         room_name=room["name"] if self._mode == "site" else None
                     )
-                    row_layout.addWidget(card)
-
-                # Opvullen laatste rij met stretch zodat kaartjes links blijven
-                if row_layout is not None:
-                    row_layout.addStretch()
+                    grid.addWidget(card, grid_row, grid_col)
+                    grid_col += 1
+                    if grid_col >= col_count:
+                        grid_col = 0
+                        grid_row += 1
 
         # 1.8.0 — Direct verbonden endpoints sectie
         self._build_direct_endpoints_section(body_layout)
@@ -252,12 +368,13 @@ class WallOutletView(QWidget):
         if fallback_key in groups:
             order.append(fallback_key)
 
-        # F6 — sorteren binnen elke groep op sort_id ascending
-        # sort_id=0 (niet ingesteld) komt achteraan via (sort_id==0, sort_id, naam)
+        # F6/1.12.0 — sorteren binnen elke groep:
+        #   primair: sort_id (0 = niet ingesteld → achteraan)
+        #   secundair: natural sort op naam (A2 < A10 < B1)
         def _sort_key(item):
             _, outlet = item
             sid = int(outlet.get("sort_id", 0) or 0)
-            return (sid == 0, sid, outlet.get("name", "").lower())
+            return (sid == 0, sid, _natural_sort_key(outlet.get("name", "")))
 
         return [(k, labels[k], sorted(groups[k], key=_sort_key)) for k in order]
 
@@ -308,8 +425,14 @@ class WallOutletView(QWidget):
                             trace: list, room_name: str | None) -> QFrame:
         card = QFrame()
         card.setObjectName("wall-outlet")
-        # Site-modus: iets breder voor ruimtenaam + trace
-        card.setFixedSize(200 if room_name else 160, 120 if room_name else 90)
+        # 1.13.0 — Responsief: minimumbreedte i.p.v. vaste breedte
+        # Hoogte vast (inhoud past altijd), breedte rekt mee met beschikbare ruimte
+        card.setMinimumWidth(160)
+        card.setMinimumHeight(120 if room_name else 90)
+        card.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         card.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         card.setToolTip(get_outlet_location_label(
             outlet.get("location_description", ""), get_language()
@@ -502,22 +625,68 @@ class WallOutletView(QWidget):
             header_layout.addWidget(cnt_lbl)
             body_layout.addWidget(header)
 
-        # Kaartjes in rijen van 4
-        col_count = 3 if self._mode == "site" else 4
-        row_widget = None
-        row_layout = None
-        for idx, (ep, port, dev) in enumerate(items):
-            if idx % col_count == 0:
-                row_widget = QWidget()
-                row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(0, 0, 0, 0)
-                row_layout.setSpacing(8)
-                row_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-                body_layout.addWidget(row_widget)
-            card = self._build_endpoint_card(ep, port, dev)
-            row_layout.addWidget(card)
-        if row_layout is not None:
-            row_layout.addStretch()
+        # 1.16.0 — Groeperen per aansluitapparaat, gesorteerd op device naam + poortnummer
+        # Sortering: device naam (natural sort) → poortnummer (natural sort)
+        def _port_sort_key(item):
+            _, port, dev = item
+            dev_name  = dev.get("name", "") if dev else ""
+            port_name = port.get("name", "") if port else ""
+            return (_natural_sort_key(dev_name), _natural_sort_key(port_name))
+
+        items.sort(key=_port_sort_key)
+
+        # Groepeer per device_id
+        from collections import OrderedDict
+        groups: OrderedDict[str, list] = OrderedDict()
+        for item in items:
+            _, port, dev = item
+            dev_id = dev.get("id", "") if dev else "__no_device__"
+            if dev_id not in groups:
+                groups[dev_id] = []
+            groups[dev_id].append(item)
+
+        for dev_id, grp_items in groups.items():
+            # Subheader per device
+            _, _, dev = grp_items[0]
+            dev_name = dev.get("name", t("label_unknown")) if dev else t("label_unknown")
+            sub = QFrame()
+            sub.setObjectName("outlet_group_header")
+            sub.setStyleSheet(
+                "QFrame#outlet_group_header {"
+                "  background-color: rgba(255,255,255,0.05);"
+                "  border-left: 3px solid #2196f3;"
+                "  border-radius: 2px;"
+                "}"
+            )
+            sub_layout = QHBoxLayout(sub)
+            sub_layout.setContentsMargins(8, 4, 8, 4)
+            sub_layout.setSpacing(8)
+            sub_lbl = QLabel(f"⬡  {dev_name}")
+            sub_lbl.setObjectName("rack_title")
+            sub_lbl.setStyleSheet("font-size: 11px; font-weight: bold;")
+            cnt_lbl = QLabel(str(len(grp_items)))
+            cnt_lbl.setObjectName("secondary")
+            cnt_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            sub_layout.addWidget(sub_lbl)
+            sub_layout.addStretch()
+            sub_layout.addWidget(cnt_lbl)
+            body_layout.addWidget(sub)
+
+            # 1.18.0 — QGridLayout per device groep
+            col_count = self._col_count()
+
+            grid_widget = QWidget()
+            grid = QGridLayout(grid_widget)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setSpacing(_CARD_SPACING)
+            for col in range(col_count):
+                grid.setColumnStretch(col, 1)
+            body_layout.addWidget(grid_widget)
+
+            for idx, (ep, port, dev_item) in enumerate(grp_items):
+                row, col = divmod(idx, col_count)
+                card = self._build_endpoint_card(ep, port, dev_item)
+                grid.addWidget(card, row, col)
 
     def _build_endpoint_card(self, ep: dict, port: dict | None,
                               dev: dict | None) -> QFrame:
@@ -527,7 +696,13 @@ class WallOutletView(QWidget):
         """
         card = QFrame()
         card.setObjectName("wall-outlet")
-        card.setFixedSize(160, 90)
+        # 1.13.0 — Responsief: minimumbreedte i.p.v. vaste breedte
+        card.setMinimumWidth(160)
+        card.setMinimumHeight(90)
+        card.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         card.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
         layout = QVBoxLayout(card)
@@ -563,14 +738,18 @@ class WallOutletView(QWidget):
         port_lbl.setWordWrap(True)
         layout.addWidget(port_lbl)
 
-        # Rechtsklik — contextmenu Bewerken
+        # Rechtsklik — contextmenu Bewerken + Verwijderen (1.15.0)
         ep_id = ep["id"]
         def _on_context(event, eid=ep_id):
             menu = QMenu(self)
             act_edit = menu.addAction("✏  " + t("ctx_edit"))
+            menu.addSeparator()
+            act_del  = menu.addAction("🗑  " + t("ctx_delete"))
             action = menu.exec(QCursor.pos())
             if action == act_edit:
                 self.endpoint_edit_requested.emit(eid)
+            elif action == act_del:
+                self.endpoint_delete_requested.emit(eid)
         card.contextMenuEvent = _on_context
 
         # 1.9.0 — Dubbelklik opent detail popup + emit signal
@@ -607,15 +786,22 @@ class WallOutletView(QWidget):
         dlg.exec()
 
     def _on_outlet_context_menu(self, outlet_id: str, event):
-        """Rechtsklik — contextmenu met Bewerken en Eindapparaat opties."""
+        """Rechtsklik — contextmenu met Bewerken, Eindapparaat, Dupliceren en Verwijderen."""
         menu = QMenu(self)
         act_edit = menu.addAction("✏  " + t("ctx_edit"))
         act_ep   = menu.addAction("🖥  " + t("btn_new_endpoint"))
+        act_dup  = menu.addAction("⧉  " + t("ctx_duplicate"))
+        menu.addSeparator()
+        act_del  = menu.addAction("🗑  " + t("ctx_delete"))
         action   = menu.exec(QCursor.pos())
         if action == act_edit:
             self.outlet_edit_requested.emit(outlet_id)
         elif action == act_ep:
             self.outlet_endpoint_requested.emit(outlet_id)
+        elif action == act_dup:
+            self.outlet_duplicate_requested.emit(outlet_id)
+        elif action == act_del:
+            self.outlet_delete_requested.emit(outlet_id)
 
     # ------------------------------------------------------------------
     # Data verversen
@@ -623,6 +809,7 @@ class WallOutletView(QWidget):
 
     def refresh(self, data: dict):
         self._data = data
+        self._last_col_count = 0   # 1.18.0 — forceer col_count herberekening
         layout = self.layout()
         while layout.count():
             item = layout.takeAt(0)
@@ -643,12 +830,13 @@ class _OutletDetailDialog(QDialog):
     """
 
     def __init__(self, outlet: dict, endpoint, data: dict, parent=None,
-                 on_endpoint_clicked=None):
+                 on_endpoint_clicked=None, on_edit_clicked=None):
         super().__init__(parent)
         self._outlet              = outlet
         self._endpoint            = endpoint
         self._data                = data
         self._on_endpoint_clicked = on_endpoint_clicked
+        self._on_edit_clicked     = on_edit_clicked   # 1.19.0 — bewerken callback
         self.setWindowTitle(outlet.get('name', ''))
         self.setMinimumWidth(400)
         self.setModal(True)
@@ -737,6 +925,11 @@ class _OutletDetailDialog(QDialog):
 
         # ── Sluitknop ──────────────────────────────────────────────────
         btn_row = QHBoxLayout()
+        # 1.19.0 — Bewerken knop (wandpunt)
+        if self._on_edit_clicked:
+            btn_edit = QPushButton("✏  " + t("ctx_edit"))
+            btn_edit.clicked.connect(self._on_edit_btn_clicked)
+            btn_row.addWidget(btn_edit)
         # W1: knop eindapparaat toevoegen/bewerken
         if self._on_endpoint_clicked:
             ep_label = t("ctx_edit") if self._endpoint else t("btn_new_endpoint")
@@ -748,6 +941,12 @@ class _OutletDetailDialog(QDialog):
         btn_close.clicked.connect(self.accept)
         btn_row.addWidget(btn_close)
         layout.addLayout(btn_row)
+
+    def _on_edit_btn_clicked(self):
+        """1.19.0 — Sluit popup en open wandpunt bewerk-dialoog."""
+        self.accept()
+        if self._on_edit_clicked:
+            self._on_edit_clicked()
 
     def _on_ep_btn_clicked(self):
         """Sluit de popup en roep de endpoint callback aan."""

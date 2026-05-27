@@ -412,8 +412,10 @@ def get_mapped_outlet_id(floorplan: dict, svg_point: str) -> str | None:
 def get_mapped_object(floorplan: dict, svg_point: str) -> tuple[str, str] | None:
     """
     1.6.0 — Geeft (type, id) terug voor een SVG punt mapping.
+    1.3.0 (dialog) — port: prefix toegevoegd.
     - "outlet_123"   → ("wall_outlet", "outlet_123")
     - "ep:ep_xxx"    → ("endpoint",    "ep_xxx")
+    - "port:port_xx" → ("port",        "port_xx")
     - None of leeg   → None
     """
     if not floorplan:
@@ -423,6 +425,8 @@ def get_mapped_object(floorplan: dict, svg_point: str) -> tuple[str, str] | None
         return None
     if val.startswith("ep:"):
         return ("endpoint", val[3:])
+    if val.startswith("port:"):
+        return ("port", val[5:])
     return ("wall_outlet", val)
 
 

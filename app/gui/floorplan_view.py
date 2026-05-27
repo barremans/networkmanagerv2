@@ -2,9 +2,24 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.15.0
+# Version: 1.20.0
 # Author:  Barremans
-# Changes: 1.15.0 — Fix: endpoint lookup in _on_detail_clicked via outlet["endpoint_id"]
+# Changes: 1.20.0 — "+ SVG Prefix" knop in toolbar
+#                   Prefix toevoegen zonder naar Settings te gaan
+#                   Herlaadt overlays meteen na toevoegen
+#          1.19.0 — Poort-koppeling ondersteuning (port: prefix)
+#                   _COLOR_PORT (#ff7043) voor poort overlays
+#                   set_port_type() in _OverlayItem
+#                   _on_trace_clicked: trace via tracing.trace_from_port()
+#                   _resolve_outlet_name: poort-naam tonen
+#          1.18.0 — Info tab bewerkbaar
+#                   QLineEdit voor naam, QTextEdit voor notities, Opslaan knop
+#                   Read-only modus: velden + knop uitgeschakeld
+#          1.17.0 — Detail popup: "Bewerken" knop
+#          1.16.0 — Checkbox "Toon ongekoppelde punten"
+#                   Standaard UIT: ongekoppelde SVG-punten onzichtbaar
+#                   Aan: oranje overlays zichtbaar voor koppelen
+#          1.15.0 — Fix: endpoint lookup in _on_detail_clicked via outlet["endpoint_id"]
 #                   i.p.v. via connections (verkeerde aanpak).
 #          1.14.0 — Detail popup: "ℹ Detail tonen" knop in mapping tab
 #                   Wandpunt → _OutletDetailDialog uit wall_outlet_view
@@ -68,6 +83,7 @@ from PySide6.QtCore import Qt, Signal, QRectF
 from PySide6.QtGui import QAction, QPainter, QBrush, QColor, QPen, QFont
 from PySide6.QtSvgWidgets import QGraphicsSvgItem
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFormLayout,
     QFrame,
     QGraphicsEllipseItem,
@@ -101,6 +117,7 @@ _COLOR_MAPPED     = QColor("#4caf7d")   # groen — wandpunt
 _COLOR_UNMAPPED   = QColor("#f0a030")   # amber — ongekoppeld
 _COLOR_SELECTED   = QColor("#e040fb")   # paars — geselecteerd
 _COLOR_ENDPOINT   = QColor("#2196f3")   # blauw — direct endpoint
+_COLOR_PORT       = QColor("#ff7043")   # oranje-rood — poort koppeling
 _PEN_WIDTH        = 2.5
 
 
@@ -129,17 +146,14 @@ class _OverlayItem(QGraphicsEllipseItem):
         self.setZValue(10)
         self.setToolTip(label)
 
-        # Label ONDER de cirkel, donkere tekst op lichte achtergrond
+        # Label ONDER de cirkel — verborgen, tooltip volstaat
         self._txt = QGraphicsSimpleTextItem(label, self)
         font = QFont()
         font.setPointSize(6)
         font.setBold(True)
         self._txt.setFont(font)
         self._txt.setZValue(12)
-
-        # Positioneer label gecentreerd onder de cirkel
-        txt_w = self._txt.boundingRect().width()
-        self._txt.setPos(-txt_w / 2, r + 1)
+        self._txt.setVisible(False)   # 1.16.0 — label niet tonen, tooltip volstaat
 
         self._update_style()
 
@@ -152,16 +166,23 @@ class _OverlayItem(QGraphicsEllipseItem):
         self._is_endpoint = is_endpoint
         self._update_style()
 
+    def set_port_type(self, is_port: bool):
+        """1.19.0 — Markeer overlay als poort-koppeling (oranje-rood)."""
+        self._is_port = is_port
+        self._update_style()
+
     def set_selected(self, selected: bool):
         self._selected = selected
         self._update_style()
 
     def _update_style(self):
-        is_ep = getattr(self, "_is_endpoint", False)
+        is_ep   = getattr(self, "_is_endpoint", False)
+        is_port = getattr(self, "_is_port", False)
         color = _COLOR_SELECTED if self._selected else (
+            _COLOR_PORT     if (self._mapped and is_port) else (
             _COLOR_ENDPOINT if (self._mapped and is_ep) else (
                 _COLOR_MAPPED if self._mapped else _COLOR_UNMAPPED
-            )
+            ))
         )
         fill = QColor(color)
         fill.setAlpha(160)
@@ -309,8 +330,29 @@ class FloorplanView(QWidget):
         self._btn_fit = QPushButton(t("floorplan_action_fit"))
         self._btn_fit.clicked.connect(self._on_fit)
 
+        # 1.16.0 — Toggle ongekoppelde SVG-punten (standaard verborgen)
+        self._chk_show_unmapped = QCheckBox("Toon ongekoppelde punten")
+        self._chk_show_unmapped.setChecked(False)
+        self._chk_show_unmapped.setToolTip(
+            "Oranje punten tonen voor SVG-locaties die nog niet aan een wandpunt gekoppeld zijn"
+        )
+        self._chk_show_unmapped.toggled.connect(self._on_toggle_unmapped)
+
         viewer_btn_row.addWidget(self._btn_reset_zoom)
         viewer_btn_row.addWidget(self._btn_fit)
+        viewer_btn_row.addSpacing(12)
+        viewer_btn_row.addWidget(self._chk_show_unmapped)
+        viewer_btn_row.addSpacing(12)
+
+        # 1.20.0 — Snel prefix toevoegen zonder naar Settings te gaan
+        self._btn_add_prefix = QPushButton("+ SVG Prefix")
+        self._btn_add_prefix.setToolTip(
+            "Voeg een nieuw SVG-label prefix toe (bv. SW, CAM) zodat die punten "
+            "herkend worden op het grondplan"
+        )
+        self._btn_add_prefix.clicked.connect(self._on_add_prefix)
+        viewer_btn_row.addWidget(self._btn_add_prefix)
+
         viewer_btn_row.addStretch(1)
 
         viewer_layout.addLayout(viewer_btn_row)
@@ -394,20 +436,34 @@ class FloorplanView(QWidget):
 
         # Tab 5: info (G-OPEN-2)
         self._tab_info = QWidget()
-        info_layout = QFormLayout(self._tab_info)
+        info_layout = QVBoxLayout(self._tab_info)
         info_layout.setContentsMargins(8, 8, 8, 8)
         info_layout.setSpacing(8)
 
-        self._lbl_info_name = QLabel("-")
-        self._lbl_info_name.setWordWrap(True)
+        form_info = QFormLayout()
+        form_info.setSpacing(6)
+
+        # 1.18.0 — Naam bewerkbaar
+        from PySide6.QtWidgets import QLineEdit
+        self._edit_info_name = QLineEdit()
+        self._edit_info_name.setPlaceholderText("(optioneel)")
 
         self._txt_info_notes = QTextEdit()
-        self._txt_info_notes.setReadOnly(True)
         self._txt_info_notes.setMinimumHeight(80)
-        self._txt_info_notes.setPlaceholderText("-")
+        self._txt_info_notes.setPlaceholderText("(optioneel)")
 
-        info_layout.addRow(f"{t('label_name')}:", self._lbl_info_name)
-        info_layout.addRow(f"{t('label_notes')}:", self._txt_info_notes)
+        form_info.addRow(f"{t('label_name')}:", self._edit_info_name)
+        form_info.addRow(f"{t('label_notes')}:", self._txt_info_notes)
+        info_layout.addLayout(form_info)
+
+        # Opslaan knop
+        info_btn_row = QHBoxLayout()
+        info_btn_row.addStretch()
+        self._btn_info_save = QPushButton(t("btn_save"))
+        self._btn_info_save.clicked.connect(self._on_info_save)
+        info_btn_row.addWidget(self._btn_info_save)
+        info_layout.addLayout(info_btn_row)
+        info_layout.addStretch()
 
         self._tabs.addTab(self._tab_selection,  t("floorplan_tab_selection"))
         self._tabs.addTab(self._tab_mapping,    t("floorplan_tab_mapping"))
@@ -473,6 +529,7 @@ class FloorplanView(QWidget):
         # Overlays plaatsen op gedetecteerde posities
         positions = floorplan_svg_service.detect_point_positions(svg_path)
         mappings  = self._floorplan.get("mappings", {})
+        show_unmapped = self._chk_show_unmapped.isChecked()
         for label, (x, y) in positions.items():
             overlay = _OverlayItem(
                 label=label, x=x, y=y,
@@ -482,6 +539,10 @@ class FloorplanView(QWidget):
             mapped_val = mappings.get(label, "")
             overlay.set_mapped(bool(mapped_val))
             overlay.set_endpoint_type(mapped_val.startswith("ep:"))
+            overlay.set_port_type(mapped_val.startswith("port:"))
+            # 1.16.0 — ongekoppelde punten standaard verborgen
+            if not mapped_val:
+                overlay.setVisible(show_unmapped)
             self._scene.addItem(overlay)
             self._overlay_items[label] = overlay
 
@@ -544,11 +605,8 @@ class FloorplanView(QWidget):
             mapped_val = floorplan_service.get_mapping(
                 self._floorplan["id"], svg_point,
             )
-            # ep: prefix = direct endpoint, anders wandpunt
-            if mapped_val and mapped_val.startswith("ep:"):
-                self._selected_outlet_id = mapped_val  # bewaar als "ep:ep_xxx"
-            else:
-                self._selected_outlet_id = mapped_val  # wandpunt ID of None
+            # Bewaar de volledige mapping waarde — ep:, port: of wandpunt ID
+            self._selected_outlet_id = mapped_val or None
             if svg_point in self._overlay_items:
                 self._overlay_items[svg_point].set_selected(True)
 
@@ -557,6 +615,47 @@ class FloorplanView(QWidget):
     # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
+
+    def _on_toggle_unmapped(self, checked: bool):
+        """1.16.0 — Toon/verberg ongekoppelde SVG-punten (oranje overlays)."""
+        for overlay in self._overlay_items.values():
+            if not overlay._mapped:
+                overlay.setVisible(checked)
+
+    def _on_add_prefix(self):
+        """
+        1.20.0 — Voeg snel een nieuw SVG-label prefix toe vanuit de grondplan view.
+        Toont een invoerdialoog, slaat op via settings_storage en herlaadt de overlays.
+        """
+        from PySide6.QtWidgets import QInputDialog
+        from app.helpers.settings_storage import (
+            load_outlet_label_prefixes,
+            save_outlet_label_prefixes,
+        )
+
+        prefix, ok = QInputDialog.getText(
+            self,
+            "SVG Prefix toevoegen",
+            "Prefix (bv. M, WAP, D, SW, CAM):",
+        )
+        if not ok or not prefix.strip():
+            return
+
+        prefix = prefix.strip().upper()
+        prefixes = load_outlet_label_prefixes()
+        if prefix in prefixes:
+            QMessageBox.information(
+                self,
+                "SVG Prefix",
+                f'Prefix "{prefix}" bestaat al.'
+            )
+            return
+
+        prefixes.append(prefix)
+        save_outlet_label_prefixes(prefixes)
+
+        # Herlaad overlays zodat nieuw prefix meteen herkend wordt
+        self._load_svg()
 
     def _on_reset_zoom(self):
         self._graphics_view.resetTransform()
@@ -669,8 +768,23 @@ class FloorplanView(QWidget):
                 (e for e in self._data.get("endpoints", [])
                  if e["id"] == ep_id), None
             ) if ep_id else None
+
+            # 1.16.0 — edit callback: zoek room_id en delegeer naar main_window
+            def _do_edit():
+                room_id = next(
+                    (r["id"] for s in self._data.get("sites", [])
+                     for r in s.get("rooms", [])
+                     if any(wo["id"] == outlet_id
+                            for wo in r.get("wall_outlets", []))),
+                    ""
+                )
+                mw = self.window()
+                if hasattr(mw, "_edit_wall_outlet"):
+                    mw._edit_wall_outlet({"id": outlet_id, "room_id": room_id})
+
             dlg = _OutletDetailDialog(
-                outlet=outlet, endpoint=endpoint, data=self._data, parent=self
+                outlet=outlet, endpoint=endpoint, data=self._data,
+                parent=self, on_edit_clicked=_do_edit,
             )
             dlg.exec()
 
@@ -679,10 +793,15 @@ class FloorplanView(QWidget):
             self._trace_info.setPlainText(t("trace_no_connection"))
             return
 
-        # Direct endpoint: trace via de verbonden poort
-        if self._selected_outlet_id.startswith("ep:"):
-            ep_id = self._selected_outlet_id[3:]
-            # Zoek de poort die verbonden is met dit endpoint
+        sel = self._selected_outlet_id
+
+        if sel.startswith("port:"):
+            # 1.19.0 — Poort-koppeling: trace direct via poort ID
+            port_id = sel[5:]
+            steps = tracing.trace_from_port(self._data, port_id)
+        elif sel.startswith("ep:"):
+            # Direct endpoint: trace via de verbonden poort
+            ep_id = sel[3:]
             conn = next(
                 (c for c in self._data.get("connections", [])
                  if (c.get("to_type") == "endpoint" and c["to_id"] == ep_id) or
@@ -695,7 +814,7 @@ class FloorplanView(QWidget):
             else:
                 steps = []
         else:
-            steps = tracing.trace_from_wall_outlet(self._data, self._selected_outlet_id)
+            steps = tracing.trace_from_wall_outlet(self._data, sel)
 
         if not steps:
             self._trace_info.setPlainText(t("trace_no_connection"))
@@ -712,8 +831,9 @@ class FloorplanView(QWidget):
                 lines.append(f"[{obj_type}] {label}")
 
         self._trace_info.setPlainText("\n".join(lines))
-        if not self._selected_outlet_id.startswith("ep:"):
-            self.trace_requested.emit(self._selected_outlet_id)
+        # trace_requested enkel voor wandpunten (niet ep: of port:)
+        if not sel.startswith("ep:") and not sel.startswith("port:"):
+            self.trace_requested.emit(sel)
 
     def _on_view_context_menu(self, pos):
         menu = QMenu(self)
@@ -756,11 +876,18 @@ class FloorplanView(QWidget):
 
         # Overlay kleuren bijwerken — ALLEEN voor bekende posities
         mappings = self._floorplan.get("mappings", {})
+        show_unmapped = self._chk_show_unmapped.isChecked()
         for label, overlay in self._overlay_items.items():
             mapped_val = mappings.get(label, "")
             overlay.set_mapped(bool(mapped_val))
             overlay.set_endpoint_type(mapped_val.startswith("ep:"))
+            overlay.set_port_type(mapped_val.startswith("port:"))
             overlay.set_selected(label == self._selected_svg_point)
+            # 1.16.0 — zichtbaarheid bijhouden na koppelen/ontkoppelen
+            if not mapped_val:
+                overlay.setVisible(show_unmapped)
+            else:
+                overlay.setVisible(True)
 
         # Naam bijwerken indien aanwezig
         name = self._floorplan.get("name", "") or ""
@@ -802,15 +929,36 @@ class FloorplanView(QWidget):
     def _refresh_info(self):
         """G-OPEN-2 — Naam en notities van het huidige grondplan tonen in de Info tab."""
         if not self._floorplan:
-            self._lbl_info_name.setText("-")
+            self._edit_info_name.setText("")
             self._txt_info_notes.setPlainText("")
             return
 
         name  = self._floorplan.get("name", "") or ""
         notes = self._floorplan.get("description", "") or ""
 
-        self._lbl_info_name.setText(name if name else "-")
+        self._edit_info_name.setText(name)
         self._txt_info_notes.setPlainText(notes)
+
+    def _on_info_save(self):
+        """1.18.0 — Naam en notities van het grondplan opslaan."""
+        if not self._floorplan:
+            return
+        if settings_storage.get_read_only_mode():
+            return
+        fp_id = self._floorplan.get("id", "")
+        name  = self._edit_info_name.text().strip()
+        notes = self._txt_info_notes.toPlainText().strip()
+        # update_floorplan_meta slaat naam alleen op als niet leeg
+        # description altijd opslaan (ook leeg = wissen)
+        from app.services import floorplan_service as _fps
+        data = _fps.load_floorplans()
+        for fp in data.get("floorplans", []):
+            if fp.get("id") == fp_id:
+                fp["name"] = name
+                fp["description"] = notes
+                break
+        _fps.save_floorplans(data)
+        self._refresh_from_storage()
 
     def _refresh_validation(self):
         self._validation_list.clear()
@@ -868,6 +1016,10 @@ class FloorplanView(QWidget):
         self._btn_map.setEnabled(not read_only)
         self._btn_unmap.setEnabled(not read_only)
         # Detail knop is altijd beschikbaar (ook read-only) als er een koppeling is
+        # 1.18.0 — Info tab: velden en opslaan knop in read-only uitschakelen
+        self._edit_info_name.setReadOnly(read_only)
+        self._txt_info_notes.setReadOnly(read_only)
+        self._btn_info_save.setEnabled(not read_only)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -876,6 +1028,21 @@ class FloorplanView(QWidget):
     def _resolve_outlet_name(self, outlet_id: str | None) -> str | None:
         if not outlet_id:
             return None
+
+        # Poort-koppeling (1.19.0)
+        if outlet_id.startswith("port:"):
+            port_id = outlet_id[5:]
+            port = next((p for p in self._data.get("ports", [])
+                         if p.get("id") == port_id), None)
+            if port:
+                dev = next((d for d in self._data.get("devices", [])
+                            if d["id"] == port.get("device_id", "")), None)
+                dev_name = dev.get("name", "") if dev else ""
+                port_name = port.get("name", port_id)
+                side = port.get("side", "")
+                side_lbl = f" ({side.upper()})" if side else ""
+                return f"🔌  {dev_name} — {port_name}{side_lbl}" if dev_name else f"🔌  {port_name}{side_lbl}"
+            return port_id
 
         # Direct endpoint
         if outlet_id.startswith("ep:"):
