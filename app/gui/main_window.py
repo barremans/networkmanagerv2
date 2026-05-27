@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.53.0
+# Version: 1.54.0
 # Author:  Barremans
-# Changes: 1.53.0 — Trace gewist bij navigatie naar andere view
+# Changes: 1.54.0 — ConnectSmartDialog: universele koppeldialoog met 3 tabs + zoekfunctie
+#                   Vervangt ConnectToOutletDialog + ConnectPortToPortDialog als
+#                   primaire actie. ctx_connect_to_outlet opent nu SmartDialog.
+#                   _on_connect_smart handler toegevoegd.
+#          1.53.0 — Trace gewist bij navigatie naar andere view
 #                   _wire_detail.clear() bij _show_rack_view, _show_wall_outlet_view,
 #                   _show_direct_endpoints_view, _show_site_outlets_view, _show_floorplan_view
 #          1.52.0 — outlet_duplicate_requested gekoppeld in room- en site-modus
@@ -142,6 +146,7 @@ from app.gui.dialogs.connection_dialog import ConnectionDialog
 from app.gui.dialogs.connection_edit_dialog import ConnectionEditDialog
 from app.gui.dialogs.connect_to_outlet_dialog import ConnectToOutletDialog
 from app.gui.dialogs.connect_port_to_port_dialog import ConnectPortToPortDialog
+from app.gui.dialogs.connect_smart_dialog import ConnectSmartDialog, _TAB_OUTLET, _TAB_PORT
 from app.gui.dialogs.site_dialog import SiteDialog
 from app.gui.dialogs.room_dialog import RoomDialog
 from app.gui.dialogs.rack_dialog import RackDialog
@@ -1755,12 +1760,11 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
 
-        # Wandpunt koppelen alleen tonen als poort vrij is
-        act_outlet = None
-        act_port_to_port = None
+        # Koppelen — één actie, opent SmartDialog met tabs
+        act_connect_smart = None
+        act_port_to_port  = None   # behouden voor backwards compat
         if not is_connected:
-            act_outlet = menu.addAction(t("ctx_connect_to_outlet"))
-            act_port_to_port = menu.addAction(t("ctx_connect_port_to_port"))
+            act_connect_smart = menu.addAction(t("ctx_connect_to_outlet"))
 
         # Direct endpoint: koppelen (vrij) of loskoppelen + bewerken + detail (al direct endpoint)
         act_endpoint_direct = None
@@ -1784,34 +1788,8 @@ class MainWindow(QMainWindow):
         if chosen is None:
             return
 
-        if act_outlet and chosen == act_outlet:
-            dlg = ConnectToOutletDialog(
-                self._data, port_id, port_label, parent=self
-            )
-            if dlg.exec() and dlg.get_result():
-                conn = dlg.get_result()
-                self._data.setdefault("connections", []).append(conn)
-                self._save_and_backup()
-                outlet = next(
-                    (wo for s in self._data.get("sites", [])
-                     for r in s.get("rooms", [])
-                     for wo in r.get("wall_outlets", [])
-                     if wo["id"] == conn["to_id"]),
-                    None
-                )
-                outlet_name = outlet["name"] if outlet else conn["to_id"]
-                log_change(
-                    action=ACTION_ADD,
-                    entity=ENTITY_CONNECTION,
-                    entity_id=conn["id"],
-                    label=f"{port_label} → 🌐 {outlet_name}",
-                    details={"cable_type": conn["cable_type"]}
-                )
-                if isinstance(self._current_view, RackView):
-                    self._current_view.refresh(self._data)
-                steps = tracing.trace_from_port(self._data, port_id)
-                self._wire_detail.set_trace(steps, port_label, data=self._data)
-                self.set_status(f"✓  {port_label}  ►  🌐  {outlet_name}")
+        if act_connect_smart and chosen == act_connect_smart:
+            self._on_connect_smart(port_id, port_label)
 
         elif act_port_to_port and chosen == act_port_to_port:
             self._on_connect_port_to_port(port_id, port_label)
@@ -1846,6 +1824,80 @@ class MainWindow(QMainWindow):
         elif act_disconnect and chosen == act_disconnect:
             if existing_conn:
                 self._on_delete_connection(existing_conn["id"])
+
+    # ------------------------------------------------------------------
+    # Smart koppeldialoog (wandpunt / eindapparaat / poort)
+    # ------------------------------------------------------------------
+
+    def _on_connect_smart(self, port_id: str, port_label: str):
+        """
+        1.54.0 — Universele koppeldialoog met 3 tabs en zoekfunctie.
+        Vervangt ConnectToOutletDialog + ConnectPortToPortDialog als
+        primaire koppelactie vanuit het poort-contextmenu.
+        """
+        dlg = ConnectSmartDialog(
+            data=self._data,
+            port_id=port_id,
+            port_label=port_label,
+            initial_tab=_TAB_OUTLET,
+            parent=self,
+        )
+        if not dlg.exec() or not dlg.get_result():
+            return
+
+        conn    = dlg.get_result()
+        to_type = conn["to_type"]
+        to_id   = conn["to_id"]
+
+        self._data.setdefault("connections", []).append(conn)
+        self._save_and_backup()
+
+        # Status + logging per type
+        if to_type == "wall_outlet":
+            target = next(
+                (wo for s in self._data.get("sites", [])
+                 for r in s.get("rooms", [])
+                 for wo in r.get("wall_outlets", [])
+                 if wo["id"] == to_id),
+                None,
+            )
+            target_label = target["name"] if target else to_id
+            icon = "🌐"
+        elif to_type == "endpoint":
+            target = next(
+                (ep for ep in self._data.get("endpoints", []) if ep["id"] == to_id),
+                None,
+            )
+            target_label = target.get("name", to_id) if target else to_id
+            icon = "🖥"
+        else:  # port
+            target_port = next(
+                (p for p in self._data.get("ports", []) if p["id"] == to_id), None
+            )
+            target_dev = next(
+                (d for d in self._data.get("devices", [])
+                 if d["id"] == target_port.get("device_id", "")), None
+            ) if target_port else None
+            target_label = (
+                f"{target_dev.get('name','?')} — "
+                f"{target_port.get('name','?')} "
+                f"({target_port.get('side','').upper()})"
+                if target_port and target_dev else to_id
+            )
+            icon = "🔌"
+
+        log_change(
+            action=ACTION_ADD,
+            entity=ENTITY_CONNECTION,
+            entity_id=conn["id"],
+            label=f"{port_label} → {icon} {target_label}",
+            details={"cable_type": conn["cable_type"]},
+        )
+        if isinstance(self._current_view, RackView):
+            self._current_view.refresh(self._data)
+        steps = tracing.trace_from_port(self._data, port_id)
+        self._wire_detail.set_trace(steps, port_label, data=self._data)
+        self.set_status(f"✓  {port_label}  ►  {icon}  {target_label}")
 
     # ------------------------------------------------------------------
     # Direct endpoint koppelen aan poort

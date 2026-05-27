@@ -2,10 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.9.0
+# Version: 1.10.0
 # Author:  Barremans
-# Changes: 1.8.0 — Bug fix: duplicate check naam + wandlocatie (location_description)
-#                  i.p.v. naam + ruimte. D20 in OB MIC != D20 in OB INKOMHAL.
+# Changes: 1.10.0 — Eindapparaat DDL vervangen door zoekbalk + QListWidget
+#                   Zoeken op naam en type, directe selectie via klik
+#                   ＋/✏/🗑 knoppen blijven behouden naast zoekbalk
+#          1.9.0  — Ruimte DDL: wandpunt verplaatsen naar andere ruimte
+#          1.8.0  — Bug fix: duplicate check naam + wandlocatie
 #          1.7.0 — F6: sort_id veld toegevoegd — numerieke sorteervolgorde per locatiegroep
 #                  Optioneel veld, niet ingevuld = 0 (achteraan bij sortering)
 #          1.6.0 — Locatie gewijzigd van vrij tekstveld naar configureerbare keuzelijst
@@ -14,7 +17,8 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QTextEdit, QPushButton,
-    QMessageBox, QFrame, QLabel, QSpinBox
+    QMessageBox, QFrame, QLabel, QSpinBox,
+    QListWidget, QListWidgetItem
 )
 from app.helpers.i18n import t
 from app.services.vlan_service import load_vlans
@@ -126,12 +130,12 @@ class WallOutletDialog(QDialog):
         ep_header = QLabel(t("label_endpoint") + ":")
         layout.addWidget(ep_header)
 
-        ep_row = QHBoxLayout()
-        self._ddl_ep = QComboBox()
-        self._ddl_ep.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self._ddl_ep.setMinimumWidth(180)
-        self._ddl_ep.currentIndexChanged.connect(self._on_ep_selection_changed)
-        ep_row.addWidget(self._ddl_ep, stretch=1)
+        # 1.10.0 — Zoekbalk + knoppen op één rij
+        ep_search_row = QHBoxLayout()
+        self._ep_search = QLineEdit()
+        self._ep_search.setPlaceholderText(f"🔍  {t('search_placeholder_endpoint')}")
+        self._ep_search.textChanged.connect(self._filter_ep_list)
+        ep_search_row.addWidget(self._ep_search, 1)
 
         self._btn_ep_new  = QPushButton("＋")
         self._btn_ep_new.setFixedWidth(34)
@@ -148,10 +152,16 @@ class WallOutletDialog(QDialog):
         self._btn_ep_del.setToolTip(t("ctx_delete"))
         self._btn_ep_del.clicked.connect(self._on_delete_endpoint)
 
-        ep_row.addWidget(self._btn_ep_new)
-        ep_row.addWidget(self._btn_ep_edit)
-        ep_row.addWidget(self._btn_ep_del)
-        layout.addLayout(ep_row)
+        ep_search_row.addWidget(self._btn_ep_new)
+        ep_search_row.addWidget(self._btn_ep_edit)
+        ep_search_row.addWidget(self._btn_ep_del)
+        layout.addLayout(ep_search_row)
+
+        # 1.10.0 — Lijst (vervangt DDL)
+        self._list_ep = QListWidget()
+        self._list_ep.setFixedHeight(130)
+        self._list_ep.currentItemChanged.connect(self._on_ep_selection_changed)
+        layout.addWidget(self._list_ep)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
@@ -175,7 +185,14 @@ class WallOutletDialog(QDialog):
     # DDL eindapparaten
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Eindapparaat lijst beheer (1.10.0)
+    # ------------------------------------------------------------------
+
+    _EP_ID_ROLE = 256  # Qt.UserRole
+
     def _refresh_ddl(self, select_id: str = None):
+        """1.10.0 — Herbouw de eindapparaat-lijst en selecteer select_id indien opgegeven."""
         from app.helpers import settings_storage
         from app.helpers.i18n import get_language
         lang        = get_language()
@@ -183,26 +200,76 @@ class WallOutletDialog(QDialog):
             et.get("key", ""): et.get(f"label_{lang}", et.get("label_nl", ""))
             for et in settings_storage.load_endpoint_types()
         }
-        current_id = select_id if select_id is not None else (self._ddl_ep.currentData() or "")
-        self._ddl_ep.blockSignals(True)
-        self._ddl_ep.clear()
-        self._ddl_ep.addItem(f"— {t('label_endpoint')} —", "")
-        for ep in self._endpoints_data:
+        # Bewaar huidige selectie als select_id niet opgegeven
+        current_id = select_id if select_id is not None else self._get_selected_ep_id()
+
+        # Herstel zoekterm leeg zodat alle items zichtbaar zijn na CRUD
+        self._ep_search.blockSignals(True)
+        self._ep_search.clear()
+        self._ep_search.blockSignals(False)
+
+        self._ep_type_map = ep_type_map
+        self._filter_ep_list("", select_id=current_id)
+
+    def _filter_ep_list(self, text: str = "", select_id: str = None):
+        """Filter de eindapparaat-lijst op zoekterm."""
+        from app.helpers import settings_storage
+        from app.helpers.i18n import get_language
+        if not hasattr(self, "_ep_type_map"):
+            lang = get_language()
+            self._ep_type_map = {
+                et.get("key", ""): et.get(f"label_{lang}", et.get("label_nl", ""))
+                for et in settings_storage.load_endpoint_types()
+            }
+
+        q          = text.strip().lower()
+        current_id = select_id if select_id is not None else self._get_selected_ep_id()
+
+        self._list_ep.blockSignals(True)
+        self._list_ep.clear()
+
+        # Lege keuze — bovenaan
+        none_item = QListWidgetItem(f"— {t('label_endpoint')} —")
+        none_item.setData(self._EP_ID_ROLE, "")
+        self._list_ep.addItem(none_item)
+
+        for ep in sorted(self._endpoints_data, key=lambda e: e.get("name", "").lower()):
             name    = ep.get("name", ep.get("id", "?"))
             ep_type = ep.get("type", "")
-            label   = f"{name}  ({ep_type_map[ep_type]})" if ep_type in ep_type_map else name
-            self._ddl_ep.addItem(label, ep.get("id", ""))
-        self._ddl_ep.blockSignals(False)
-        idx = self._ddl_ep.findData(current_id) if current_id else 0
-        self._ddl_ep.setCurrentIndex(max(0, idx))
+            label   = f"{name}  ({self._ep_type_map[ep_type]})" if ep_type in self._ep_type_map else name
+            if q and q not in label.lower():
+                continue
+            item = QListWidgetItem(label)
+            item.setData(self._EP_ID_ROLE, ep.get("id", ""))
+            self._list_ep.addItem(item)
+
+        self._list_ep.blockSignals(False)
+
+        # Herstel selectie
+        self._select_ep_by_id(current_id or "")
         self._update_ep_buttons()
 
+    def _get_selected_ep_id(self) -> str:
+        item = self._list_ep.currentItem()
+        if item:
+            return item.data(self._EP_ID_ROLE) or ""
+        return ""
+
+    def _select_ep_by_id(self, ep_id: str):
+        for i in range(self._list_ep.count()):
+            if self._list_ep.item(i).data(self._EP_ID_ROLE) == ep_id:
+                self._list_ep.setCurrentRow(i)
+                return
+        # Fallback: selecteer lege keuze
+        if self._list_ep.count() > 0:
+            self._list_ep.setCurrentRow(0)
+
     def _update_ep_buttons(self):
-        has = bool(self._ddl_ep.currentData())
+        has = bool(self._get_selected_ep_id())
         self._btn_ep_edit.setEnabled(has)
         self._btn_ep_del.setEnabled(has)
 
-    def _on_ep_selection_changed(self, _):
+    def _on_ep_selection_changed(self, current, previous):
         self._update_ep_buttons()
 
     # ------------------------------------------------------------------
@@ -222,7 +289,7 @@ class WallOutletDialog(QDialog):
 
     def _on_edit_endpoint(self):
         from app.gui.dialogs.endpoint_dialog import EndpointDialog
-        ep_id = self._ddl_ep.currentData()
+        ep_id = self._get_selected_ep_id()
         if not ep_id:
             return
         ep = next((e for e in self._endpoints_data if e.get("id") == ep_id), None)
@@ -234,7 +301,7 @@ class WallOutletDialog(QDialog):
             self._refresh_ddl(select_id=ep_id)
 
     def _on_delete_endpoint(self):
-        ep_id = self._ddl_ep.currentData()
+        ep_id = self._get_selected_ep_id()
         if not ep_id:
             return
         ep = next((e for e in self._endpoints_data if e.get("id") == ep_id), None)
@@ -280,10 +347,7 @@ class WallOutletDialog(QDialog):
                     break
 
         ep_id = self._outlet.get("endpoint_id", "")
-        if ep_id:
-            idx = self._ddl_ep.findData(ep_id)
-            if idx >= 0:
-                self._ddl_ep.setCurrentIndex(idx)
+        self._refresh_ddl(select_id=ep_id if ep_id else "")
         self._update_ep_buttons()
 
     # ------------------------------------------------------------------
@@ -341,7 +405,7 @@ class WallOutletDialog(QDialog):
             "room_id":              effective_room_id,
             "name":                 name,
             "location_description": self._ddl_location.currentData() or "",
-            "endpoint_id":          self._ddl_ep.currentData() or "",
+            "endpoint_id":          self._get_selected_ep_id() or "",
             "notes":                self._notes.toPlainText().strip(),
             "sort_id":              self._sort_id.value(),
         }

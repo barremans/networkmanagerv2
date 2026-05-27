@@ -40,6 +40,10 @@
 #                   dlg_connect_port_title, err_no_port_selected,
 #                   warn_port_already_connected, label_target_device,
 #                   label_target_port, msg_port_to_port_connected (NL + EN)
+#          1.25.0 — ConnectSmartDialog + WallOutletView zoek: dlg_connect_smart_title,
+#                   search_placeholder_outlet/endpoint/port/outlets,
+#                   err_no_endpoint_selected, warn_endpoint_already_connected,
+#                   lbl_already_connected, search_results, search_no_results (NL + EN)
 # =============================================================================
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
@@ -498,7 +502,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "outlet_locator_no_outlets":    "Geen wandpunten gevonden in deze ruimte",
 
         # Poort context menu + verbinding met wandpunt
-        "ctx_connect_to_outlet":        "🌐  Verbinden met wandpunt...",
+        "ctx_connect_to_outlet":        "🌐  Koppelen...",
         "ctx_disconnect_port":          "✂  Verbinding verwijderen",
         "ctx_move_port_connection":     "⇆  Verbinding verplaatsen",
         "move_conn_new_port":           "Nieuwe poort",
@@ -529,6 +533,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_target_device":          "Doeltoestel",
         "label_target_port":            "Doelpoort",
         "msg_port_to_port_connected":   "Poort-naar-poort verbinding aangemaakt.",
+
+        "dlg_connect_smart_title":          "Poort koppelen",
+        "search_placeholder_outlet":        "Zoek site, ruimte of wandpunt...",
+        "search_placeholder_endpoint":      "Zoek naam, type, locatie of IP...",
+        "search_placeholder_port":          "Zoek site, rack, device of poort...",
+        "err_no_endpoint_selected":         "Selecteer eerst een eindapparaat.",
+        "warn_endpoint_already_connected":  "Dit eindapparaat is al verbonden. Toch doorgaan?",
+        "lbl_already_connected":            "al verbonden",
+        "search_placeholder_outlets":       "Zoek wandpunt of eindapparaat...",
+        "search_results":                   "Zoekresultaten",
         "label_detail":                 "Detail tonen",
 
         # Cross-rack trace
@@ -1091,7 +1105,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "outlet_locator_no_outlets":    "No wall outlets found in this room",
 
         # Port context menu + connect to outlet
-        "ctx_connect_to_outlet":        "🌐  Connect to wall outlet...",
+        "ctx_connect_to_outlet":        "🌐  Connect...",
         "ctx_disconnect_port":          "✂  Remove connection",
         "ctx_move_port_connection":     "⇆  Move connection",
         "move_conn_new_port":           "New port",
@@ -1122,6 +1136,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_target_device":          "Target device",
         "label_target_port":            "Target port",
         "msg_port_to_port_connected":   "Port-to-port connection created.",
+
+        "dlg_connect_smart_title":          "Connect port",
+        "search_placeholder_outlet":        "Search site, room or outlet...",
+        "search_placeholder_endpoint":      "Search name, type, location or IP...",
+        "search_placeholder_port":          "Search site, rack, device or port...",
+        "err_no_endpoint_selected":         "Please select an endpoint first.",
+        "warn_endpoint_already_connected":  "This endpoint is already connected. Continue anyway?",
+        "lbl_already_connected":            "already connected",
+        "search_placeholder_outlets":       "Search outlet or endpoint...",
+        "search_results":                   "Search results",
         "label_detail":                 "Show detail",
 
         # Cross-rack trace

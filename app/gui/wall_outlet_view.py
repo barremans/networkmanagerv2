@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.19.0
+# Version: 1.20.0
 # Author:  Barremans
-# Changes: 1.19.0 — _OutletDetailDialog: "Bewerken" knop toegevoegd
+# Changes: 1.20.0 — Zoekbalk in titelregel: doorzoekt wandpunten én eindapparaten
+#                   Zoekt op naam, ruimte, locatie, eindapparaatnaam, IP, serienummer
+#                   Lege zoekterm → normale groepsweergave hersteld
+#                   _apply_filter() + _build_search_results() methodes toegevoegd
+#          1.19.0 — _OutletDetailDialog: "Bewerken" knop toegevoegd
 #                   on_edit_clicked callback parameter
 #          1.18.1 — Prefix-rij-breuk binnen locatiegroep: A-reeks → rij, B-reeks → nieuwe rij
 #                   _name_prefix() helper: leading letters van naam (A21→A, CAM02→CAM)
@@ -65,7 +69,7 @@ from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QScrollArea,
     QVBoxLayout, QHBoxLayout, QSizePolicy, QGridLayout,
     QDialog, QMenu, QFormLayout, QTextBrowser,
-    QPushButton
+    QPushButton, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QCursor
@@ -158,6 +162,7 @@ class WallOutletView(QWidget):
         self._outlet_widgets = {}
         self._selected_id    = None
         self._last_col_count = 0   # 1.18.0 — voor resize rebuild detectie
+        self._search_text    = ""  # 1.20.0 — actieve zoekterm
         # 1.18.0 — debounce timer: rebuild pas na 150ms stilstand resize
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
@@ -245,6 +250,20 @@ class WallOutletView(QWidget):
         count_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         title_layout.addWidget(title_lbl)
         title_layout.addStretch()
+
+        # 1.20.0 — Zoekbalk (alleen in site- en room-modus, niet in direct-modus)
+        if self._mode in ("site", "room"):
+            self._search_bar = QLineEdit()
+            self._search_bar.setPlaceholderText(f"🔍  {t('search_placeholder_outlets')}")
+            self._search_bar.setMaximumWidth(280)
+            self._search_bar.setFixedHeight(26)
+            self._search_bar.setText(self._search_text)
+            self._search_bar.textChanged.connect(self._on_search_changed)
+            title_layout.addWidget(self._search_bar)
+            title_layout.addSpacing(8)
+        else:
+            self._search_bar = None
+
         title_layout.addWidget(count_lbl)
         outer.addWidget(title_bar)
 
@@ -262,6 +281,9 @@ class WallOutletView(QWidget):
         if self._mode == "direct":
             # Geen wandpunten tonen — alleen direct verbonden sectie
             pass
+        elif self._search_text.strip():
+            # 1.20.0 — Zoekresultaten: platte lijst zonder groepsheaders
+            self._build_search_results(body_layout, all_outlets, ep_map)
         elif not all_outlets:
             empty_lbl = QLabel(
                 t("site_outlets_empty") if self._mode == "site"
@@ -325,6 +347,231 @@ class WallOutletView(QWidget):
         body_layout.addStretch()
         scroll.setWidget(body)
         outer.addWidget(scroll)
+
+    # ------------------------------------------------------------------
+    # 1.20.0 — Zoeken over wandpunten en eindapparaten
+    # ------------------------------------------------------------------
+
+    def _on_search_changed(self, text: str):
+        """Zoekterm gewijzigd — bewaar en rebuild scroll-inhoud."""
+        self._search_text = text
+        # Rebuild enkel de scroll-inhoud, niet de hele view
+        layout = self.layout()
+        if not layout:
+            return
+        # Verwijder alles behalve de titelregel (index 0)
+        while layout.count() > 1:
+            item = layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+        self._outlet_widgets.clear()
+
+        # Rebuild scroll + body
+        ep_map      = {e["id"]: e for e in self._data.get("endpoints", [])}
+        all_outlets = self._collect_site_outlets() if self._mode == "site" \
+                      else [(self._room, wo) for wo in self._room.get("wall_outlets", [])]
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body        = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(12, 12, 12, 12)
+        body_layout.setSpacing(16)
+        body_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        if text.strip():
+            self._build_search_results(body_layout, all_outlets, ep_map)
+        elif not all_outlets:
+            empty_lbl = QLabel(
+                t("site_outlets_empty") if self._mode == "site"
+                else t("tree_no_endpoint")
+            )
+            empty_lbl.setObjectName("secondary")
+            empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            body_layout.addWidget(empty_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+        else:
+            col_count = self._col_count()
+            groups    = self._group_by_location(all_outlets)
+            for loc_key, loc_label, outlets_in_group in groups:
+                header = self._build_group_header(loc_label, len(outlets_in_group))
+                body_layout.addWidget(header)
+                grid_widget = QWidget()
+                grid = QGridLayout(grid_widget)
+                grid.setContentsMargins(0, 0, 0, 0)
+                grid.setSpacing(_CARD_SPACING)
+                for col in range(col_count):
+                    grid.setColumnStretch(col, 1)
+                body_layout.addWidget(grid_widget)
+                grid_row, grid_col, cur_prefix = 0, 0, None
+                for room, outlet in outlets_in_group:
+                    prefix = _name_prefix(outlet.get("name", ""))
+                    if prefix != cur_prefix:
+                        if cur_prefix is not None and grid_col > 0:
+                            grid_row += 1
+                        grid_col, cur_prefix = 0, prefix
+                    endpoint = ep_map.get(outlet.get("endpoint_id", ""))
+                    trace    = tracing.trace_from_wall_outlet(self._data, outlet["id"])
+                    card     = self._build_outlet_card(
+                        outlet, endpoint, trace,
+                        room_name=room["name"] if self._mode == "site" else None
+                    )
+                    grid.addWidget(card, grid_row, grid_col)
+                    grid_col += 1
+                    if grid_col >= col_count:
+                        grid_col, grid_row = 0, grid_row + 1
+
+        self._build_direct_endpoints_section(body_layout)
+        body_layout.addStretch()
+        scroll.setWidget(body)
+        layout.addWidget(scroll)
+
+    def _build_search_results(
+        self,
+        body_layout: QVBoxLayout,
+        all_outlets: list[tuple[dict, dict]],
+        ep_map: dict,
+    ):
+        """
+        1.20.0 — Bouw gefilterde resultatenweergave.
+        Zoekt in: wandpuntnaam, ruimtenaam, locatielabel, eindapparaatnaam,
+                  eindapparaat IP, eindapparaat serienummer, eindapparaat model.
+        Wandpunten en eindapparaten worden samen getoond, gesorteerd op naam.
+        """
+        q    = self._search_text.strip().lower()
+        lang = get_language()
+
+        # ── Wandpunten zoeken ────────────────────────────────────────
+        matched_outlets: list[tuple[dict, dict]] = []
+        for room, outlet in all_outlets:
+            ep      = ep_map.get(outlet.get("endpoint_id", ""))
+            loc_key = outlet.get("location_description", "")
+            loc_lbl = get_outlet_location_label(loc_key, lang) if loc_key else ""
+            haystack = " ".join(filter(None, [
+                outlet.get("name", ""),
+                room.get("name", ""),
+                loc_lbl,
+                ep.get("name", "")    if ep else "",
+                ep.get("ip", "")      if ep else "",
+                ep.get("serial", "")  if ep else "",
+                ep.get("model", "")   if ep else "",
+                ep.get("brand", "")   if ep else "",
+            ])).lower()
+            if q in haystack:
+                matched_outlets.append((room, outlet))
+
+        # ── Direct verbonden eindapparaten zoeken ────────────────────
+        direct_conns = [
+            c for c in self._data.get("connections", [])
+            if c.get("to_type") == "endpoint" or c.get("from_type") == "endpoint"
+        ]
+        port_map = {p["id"]: p for p in self._data.get("ports", [])}
+        dev_map  = {d["id"]: d for d in self._data.get("devices", [])}
+
+        # Scope: alleen devices van de huidige site/ruimte
+        if self._mode == "room":
+            allowed_device_ids = {
+                slot.get("device_id")
+                for rack in self._room.get("racks", [])
+                for slot in rack.get("slots", [])
+                if slot.get("device_id")
+            }
+        else:
+            allowed_device_ids = {
+                slot.get("device_id")
+                for room in self._site.get("rooms", [])
+                for rack in room.get("racks", [])
+                for slot in rack.get("slots", [])
+                if slot.get("device_id")
+            }
+
+        matched_direct: list[tuple] = []
+        seen_ep_ids = set()
+        for conn in direct_conns:
+            ep_id   = conn["to_id"]   if conn.get("to_type")   == "endpoint" else conn["from_id"]
+            port_id = conn["from_id"] if conn.get("to_type")   == "endpoint" else conn["to_id"]
+            if ep_id in seen_ep_ids:
+                continue
+            ep   = ep_map.get(ep_id)
+            port = port_map.get(port_id)
+            dev  = dev_map.get(port["device_id"]) if port else None
+            if allowed_device_ids and (not port or port.get("device_id") not in allowed_device_ids):
+                continue
+            if not ep:
+                continue
+            haystack = " ".join(filter(None, [
+                ep.get("name", ""),
+                ep.get("ip", ""),
+                ep.get("serial", ""),
+                ep.get("model", ""),
+                ep.get("brand", ""),
+                ep.get("location", ""),
+                dev.get("name", "") if dev else "",
+            ])).lower()
+            if q in haystack:
+                matched_direct.append((ep, port, dev))
+                seen_ep_ids.add(ep_id)
+
+        total = len(matched_outlets) + len(matched_direct)
+
+        # ── Resultaten header ────────────────────────────────────────
+        hdr = self._build_group_header(
+            f"🔍  {t('search_results')}  \"{self._search_text}\"", total
+        )
+        body_layout.addWidget(hdr)
+
+        if total == 0:
+            empty_lbl = QLabel(t("search_no_results"))
+            empty_lbl.setObjectName("secondary")
+            empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            body_layout.addWidget(empty_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+            return
+
+        col_count = self._col_count()
+
+        # ── Wandpunten resultaten ────────────────────────────────────
+        if matched_outlets:
+            matched_outlets.sort(key=lambda x: _natural_sort_key(x[1].get("name", "")))
+            grid_widget = QWidget()
+            grid = QGridLayout(grid_widget)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setSpacing(_CARD_SPACING)
+            for col in range(col_count):
+                grid.setColumnStretch(col, 1)
+            body_layout.addWidget(grid_widget)
+            for idx, (room, outlet) in enumerate(matched_outlets):
+                row, col = divmod(idx, col_count)
+                endpoint = ep_map.get(outlet.get("endpoint_id", ""))
+                trace    = tracing.trace_from_wall_outlet(self._data, outlet["id"])
+                card     = self._build_outlet_card(
+                    outlet, endpoint, trace,
+                    room_name=room["name"]   # altijd ruimtenaam tonen in zoekresultaten
+                )
+                grid.addWidget(card, row, col)
+
+        # ── Direct verbonden eindapparaten resultaten ────────────────
+        if matched_direct:
+            if matched_outlets:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.Shape.HLine)
+                sep.setStyleSheet("color: rgba(255,255,255,0.10); margin: 4px 0;")
+                body_layout.addWidget(sep)
+
+            ep_hdr = self._build_group_header(
+                f"🖥  {t('wall_outlet_group_direct')}", len(matched_direct)
+            )
+            body_layout.addWidget(ep_hdr)
+
+            grid_widget = QWidget()
+            grid = QGridLayout(grid_widget)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setSpacing(_CARD_SPACING)
+            for col in range(col_count):
+                grid.setColumnStretch(col, 1)
+            body_layout.addWidget(grid_widget)
+            for idx, (ep, port, dev) in enumerate(matched_direct):
+                row, col = divmod(idx, col_count)
+                card = self._build_endpoint_card(ep, port, dev)
+                grid.addWidget(card, row, col)
 
     def _group_by_location(
         self, outlets: list[tuple[dict, dict]]
@@ -818,6 +1065,9 @@ class WallOutletView(QWidget):
         self._outlet_widgets.clear()
         self._selected_id = None
         self._build()
+        # 1.20.0 — herstel zoekterm na refresh
+        if self._search_text and self._search_bar:
+            self._search_bar.setText(self._search_text)
 
 # ---------------------------------------------------------------------------
 # Detail popup — dubbelklik op wandpunt kaartje
