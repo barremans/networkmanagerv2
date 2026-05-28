@@ -2,9 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.54.0
+# Version: 1.56.0
 # Author:  Barremans
-# Changes: 1.54.0 — ConnectSmartDialog: universele koppeldialoog met 3 tabs + zoekfunctie
+# Changes: 1.56.0 — outlet_disconnect_requested: verbinding verwijderen vanuit
+#                   WallOutletView rechtsklik menu + handler _on_outlet_disconnect_requested
+#          1.55.0 — ConnectOutletToPortDialog: wandpunt koppelen aan poort
+#                   outlet_connect_port_requested signaal gekoppeld (room + site modus)
+#                   _on_outlet_connect_port_requested handler toegevoegd
+#                   Opent ConnectOutletToPortDialog met poort-zoeklijst
+#          1.54.0 — ConnectSmartDialog: universele koppeldialoog met 3 tabs + zoekfunctie
 #                   Vervangt ConnectToOutletDialog + ConnectPortToPortDialog als
 #                   primaire actie. ctx_connect_to_outlet opent nu SmartDialog.
 #                   _on_connect_smart handler toegevoegd.
@@ -147,6 +153,7 @@ from app.gui.dialogs.connection_edit_dialog import ConnectionEditDialog
 from app.gui.dialogs.connect_to_outlet_dialog import ConnectToOutletDialog
 from app.gui.dialogs.connect_port_to_port_dialog import ConnectPortToPortDialog
 from app.gui.dialogs.connect_smart_dialog import ConnectSmartDialog, _TAB_OUTLET, _TAB_PORT
+from app.gui.dialogs.connect_outlet_to_port_dialog import ConnectOutletToPortDialog
 from app.gui.dialogs.site_dialog import SiteDialog
 from app.gui.dialogs.room_dialog import RoomDialog
 from app.gui.dialogs.rack_dialog import RackDialog
@@ -1094,6 +1101,125 @@ class MainWindow(QMainWindow):
                             )
                         return
 
+    def _on_outlet_connect_port_requested(self, outlet_id: str):
+        """
+        1.55.0 — Wandpunt koppelen aan een poort vanuit WallOutletView.
+        Opent een dialoog met zoeklijst van alle beschikbare poorten.
+        Het wandpunt is de bronkant, de gebruiker kiest een vrije poort.
+        """
+        if settings_storage.get_read_only_mode():
+            return
+
+        # Zoek wandpunt op
+        outlet = None
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo["id"] == outlet_id:
+                        outlet = wo
+                        break
+
+        if not outlet:
+            return
+
+        outlet_label = outlet.get("name", outlet_id)
+
+        dlg = ConnectOutletToPortDialog(
+            data=self._data,
+            outlet_id=outlet_id,
+            outlet_label=outlet_label,
+            parent=self,
+        )
+        if not dlg.exec() or not dlg.get_result():
+            return
+
+        conn = dlg.get_result()
+        self._data.setdefault("connections", []).append(conn)
+        self._save_and_backup()
+
+        # Doelpoort label voor logging
+        target_port = next(
+            (p for p in self._data.get("ports", []) if p["id"] == conn["to_id"]), None
+        )
+        target_dev = next(
+            (d for d in self._data.get("devices", [])
+             if d["id"] == target_port.get("device_id", "")), None
+        ) if target_port else None
+        target_label = (
+            f"{target_dev.get('name','?')} — "
+            f"{target_port.get('name','?')} "
+            f"({target_port.get('side','').upper()})"
+            if target_port and target_dev else conn["to_id"]
+        )
+
+        log_change(
+            action=ACTION_ADD,
+            entity=ENTITY_CONNECTION,
+            entity_id=conn["id"],
+            label=f"🌐 {outlet_label} → 🔌 {target_label}",
+            details={"cable_type": conn["cable_type"]},
+        )
+        if isinstance(self._current_view, WallOutletView):
+            self._current_view.refresh(self._data)
+        steps = tracing.trace_from_wall_outlet(self._data, outlet_id)
+        self._wire_detail.set_trace(steps, outlet_label, data=self._data)
+        self.set_status(f"✓  🌐 {outlet_label}  ►  🔌  {target_label}")
+
+    def _on_outlet_disconnect_requested(self, outlet_id: str):
+        """
+        1.22.0 — Verbinding verwijderen vanuit WallOutletView (rechtsklik op kaartje).
+        Verwijdert alle verbindingen waarbij dit wandpunt betrokken is.
+        """
+        if settings_storage.get_read_only_mode():
+            return
+
+        conns = [
+            c for c in self._data.get("connections", [])
+            if c.get("from_id") == outlet_id or c.get("to_id") == outlet_id
+        ]
+        if not conns:
+            return
+
+        # Bevestiging
+        outlet = next(
+            (wo for s in self._data.get("sites", [])
+             for r in s.get("rooms", [])
+             for wo in r.get("wall_outlets", [])
+             if wo["id"] == outlet_id),
+            None,
+        )
+        outlet_name = outlet.get("name", outlet_id) if outlet else outlet_id
+
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            t("ctx_disconnect_port"),
+            f"{t('msg_confirm_delete')}\n\n{outlet_name}  →  verbinding",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        conn_ids = {c["id"] for c in conns}
+        self._data["connections"] = [
+            c for c in self._data.get("connections", [])
+            if c["id"] not in conn_ids
+        ]
+        self._save_and_backup()
+
+        for conn in conns:
+            log_change(
+                action=ACTION_DELETE,
+                entity=ENTITY_CONNECTION,
+                entity_id=conn["id"],
+                label=f"✂  {outlet_name}",
+            )
+
+        if isinstance(self._current_view, WallOutletView):
+            self._current_view.refresh(self._data)
+        self._wire_detail.clear()
+        self.set_status(f"✂  {outlet_name}  verbinding verwijderd")
+
     def _on_endpoint_edit_requested(self, ep_id: str):
         """
         1.8.1 — Eindapparaat bewerken vanuit endpoint-kaartje in WallOutletView
@@ -1355,6 +1481,8 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
+        outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         self._mid_layout.addWidget(outlet_view)
@@ -1392,6 +1520,8 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
+        outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         self._mid_layout.addWidget(outlet_view)

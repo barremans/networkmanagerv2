@@ -2,9 +2,16 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.20.0
+# Version: 1.22.0
 # Author:  Barremans
-# Changes: 1.20.0 — Zoekbalk in titelregel: doorzoekt wandpunten én eindapparaten
+# Changes: 1.22.0 — Rechtsklik verbonden wandpunt: "✂ Verbinding verwijderen"
+#                   outlet_disconnect_requested signaal + handler in main_window
+#          1.21.2 — Fix: QTimer.singleShot(0) voor detail-dialoog callbacks
+#                   zodat tweede dialoog pas opent nadat eerste volledig gesloten is
+#          1.21.1 — Fix: callback vóór accept() aanroepen
+#                   outlet_connect_port_requested signaal
+#                   _OutletDetailDialog: "🔌 Koppelen" knop als geen verbinding
+#          1.20.0 — Zoekbalk in titelregel: doorzoekt wandpunten én eindapparaten
 #                   Zoekt op naam, ruimte, locatie, eindapparaatnaam, IP, serienummer
 #                   Lege zoekterm → normale groepsweergave hersteld
 #                   _apply_filter() + _build_search_results() methodes toegevoegd
@@ -129,6 +136,8 @@ class WallOutletView(QWidget):
     outlet_delete_requested = Signal(str)     # 1.11.0: rechtsklik → verwijderen
     outlet_duplicate_requested = Signal(str)  # 1.17.0: rechtsklik → dupliceren (ruimte+locatie)
     outlet_endpoint_requested = Signal(str)   # W1: eindapparaat toevoegen/bewerken
+    outlet_connect_port_requested = Signal(str)  # 1.21.0: koppelen aan poort
+    outlet_disconnect_requested = Signal(str)    # 1.22.0: verbinding verwijderen
     endpoint_edit_requested = Signal(str)     # 1.8.1: rechtsklik endpoint-kaartje → bewerken
     endpoint_delete_requested = Signal(str)   # 1.15.0: rechtsklik endpoint-kaartje → verwijderen
     endpoint_double_clicked  = Signal(str)    # 1.9.0: dubbelklik endpoint-kaartje → detail popup
@@ -1024,19 +1033,45 @@ class WallOutletView(QWidget):
 
     def _on_outlet_double_clicked(self, outlet_id: str, outlet: dict):
         """Dubbelklik — toon detail popup met alle wandpunt + eindapparaat info."""
+        from PySide6.QtCore import QTimer
         ep_map  = {e["id"]: e for e in self._data.get("endpoints", [])}
         ep      = ep_map.get(outlet.get("endpoint_id", ""))
-        dlg     = _OutletDetailDialog(
+
+        # 1.21.1 — callbacks via QTimer.singleShot zodat detail-dialoog
+        # volledig gesloten is vóór de volgende dialoog opent
+        def _emit_edit():
+            QTimer.singleShot(0, lambda: self.outlet_edit_requested.emit(outlet_id))
+
+        def _emit_connect():
+            QTimer.singleShot(0, lambda: self.outlet_connect_port_requested.emit(outlet_id))
+
+        def _emit_ep():
+            QTimer.singleShot(0, lambda: self.outlet_endpoint_requested.emit(outlet_id))
+
+        dlg = _OutletDetailDialog(
             outlet, ep, self._data, parent=self,
-            on_endpoint_clicked=lambda: self.outlet_endpoint_requested.emit(outlet_id),
+            on_endpoint_clicked=_emit_ep,
+            on_edit_clicked=_emit_edit,
+            on_connect_clicked=_emit_connect,
         )
         dlg.exec()
 
     def _on_outlet_context_menu(self, outlet_id: str, event):
         """Rechtsklik — contextmenu met Bewerken, Eindapparaat, Dupliceren en Verwijderen."""
+        is_connected = any(
+            c for c in self._data.get("connections", [])
+            if c.get("from_id") == outlet_id or c.get("to_id") == outlet_id
+        )
         menu = QMenu(self)
-        act_edit = menu.addAction("✏  " + t("ctx_edit"))
-        act_ep   = menu.addAction("🖥  " + t("btn_new_endpoint"))
+        act_edit    = menu.addAction("✏  " + t("ctx_edit"))
+        act_ep      = menu.addAction("🖥  " + t("btn_new_endpoint"))
+        # Koppelen (vrij) of loskoppelen (verbonden)
+        act_connect    = None
+        act_disconnect = None
+        if not is_connected:
+            act_connect = menu.addAction("🔌  " + t("ctx_connect_outlet_to_port"))
+        else:
+            act_disconnect = menu.addAction("✂  " + t("ctx_disconnect_port"))
         act_dup  = menu.addAction("⧉  " + t("ctx_duplicate"))
         menu.addSeparator()
         act_del  = menu.addAction("🗑  " + t("ctx_delete"))
@@ -1045,6 +1080,10 @@ class WallOutletView(QWidget):
             self.outlet_edit_requested.emit(outlet_id)
         elif action == act_ep:
             self.outlet_endpoint_requested.emit(outlet_id)
+        elif act_connect and action == act_connect:
+            self.outlet_connect_port_requested.emit(outlet_id)
+        elif act_disconnect and action == act_disconnect:
+            self.outlet_disconnect_requested.emit(outlet_id)
         elif action == act_dup:
             self.outlet_duplicate_requested.emit(outlet_id)
         elif action == act_del:
@@ -1080,13 +1119,15 @@ class _OutletDetailDialog(QDialog):
     """
 
     def __init__(self, outlet: dict, endpoint, data: dict, parent=None,
-                 on_endpoint_clicked=None, on_edit_clicked=None):
+                 on_endpoint_clicked=None, on_edit_clicked=None,
+                 on_connect_clicked=None):
         super().__init__(parent)
         self._outlet              = outlet
         self._endpoint            = endpoint
         self._data                = data
         self._on_endpoint_clicked = on_endpoint_clicked
         self._on_edit_clicked     = on_edit_clicked   # 1.19.0 — bewerken callback
+        self._on_connect_clicked  = on_connect_clicked  # 1.21.0 — koppelen aan poort
         self.setWindowTitle(outlet.get('name', ''))
         self.setMinimumWidth(400)
         self.setModal(True)
@@ -1180,6 +1221,17 @@ class _OutletDetailDialog(QDialog):
             btn_edit = QPushButton("✏  " + t("ctx_edit"))
             btn_edit.clicked.connect(self._on_edit_btn_clicked)
             btn_row.addWidget(btn_edit)
+        # 1.21.0 — Koppelen aan poort (alleen als nog geen verbinding)
+        if self._on_connect_clicked:
+            is_connected = any(
+                c for c in self._data.get("connections", [])
+                if c.get("from_id") == self._outlet["id"]
+                or c.get("to_id")   == self._outlet["id"]
+            )
+            if not is_connected:
+                btn_connect = QPushButton("🔌  " + t("ctx_connect_outlet_to_port"))
+                btn_connect.clicked.connect(self._on_connect_btn_clicked)
+                btn_row.addWidget(btn_connect)
         # W1: knop eindapparaat toevoegen/bewerken
         if self._on_endpoint_clicked:
             ep_label = t("ctx_edit") if self._endpoint else t("btn_new_endpoint")
@@ -1194,15 +1246,21 @@ class _OutletDetailDialog(QDialog):
 
     def _on_edit_btn_clicked(self):
         """1.19.0 — Sluit popup en open wandpunt bewerk-dialoog."""
-        self.accept()
         if self._on_edit_clicked:
             self._on_edit_clicked()
+        self.accept()
+
+    def _on_connect_btn_clicked(self):
+        """1.21.0 — Sluit popup en open poort-koppel dialoog."""
+        if self._on_connect_clicked:
+            self._on_connect_clicked()
+        self.accept()
 
     def _on_ep_btn_clicked(self):
         """Sluit de popup en roep de endpoint callback aan."""
-        self.accept()
         if self._on_endpoint_clicked:
             self._on_endpoint_clicked()
+        self.accept()
 
 # ---------------------------------------------------------------------------
 # Detail popup — dubbelklik op direct endpoint kaartje (1.9.0)

@@ -543,6 +543,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "lbl_already_connected":            "al verbonden",
         "search_placeholder_outlets":       "Zoek wandpunt of eindapparaat...",
         "search_results":                   "Zoekresultaten",
+        "dlg_connect_outlet_to_port_title": "Wandpunt koppelen aan poort",
+        "ctx_connect_outlet_to_port":       "🔌  Koppelen aan poort...",
         "label_detail":                 "Detail tonen",
 
         # Cross-rack trace
@@ -1146,6 +1148,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "lbl_already_connected":            "already connected",
         "search_placeholder_outlets":       "Search outlet or endpoint...",
         "search_results":                   "Search results",
+        "dlg_connect_outlet_to_port_title": "Connect wall outlet to port",
+        "ctx_connect_outlet_to_port":       "🔌  Connect to port...",
         "label_detail":                 "Show detail",
 
         # Cross-rack trace

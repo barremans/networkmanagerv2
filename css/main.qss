@@ -2,21 +2,20 @@
    Networkmap_Creator
    File:    css/main.qss
    Role:    Volledige QSS styling — alle kleuren, device types, kabelkleuren
-   Version: 1.5.0
+   Version: 1.6.0
    Author:  Barremans
-   Changes: 1.1.0 — poort kleuren vervangen door Wong 2011 kleurenblind-vriendelijk palette
-            1.3.0 — Hover effect device rij + ontbrekende device types
-            1.4.0 — Hover device rij: witte outline, port-back rond, port-connected-back
+   Changes: 1.6.0 — port-trace kleur gewijzigd van roze/lila (#CC79A7) naar
+                    knalrood (#E8001C) — maximaal contrast t.o.v. blauw en geel
+                    (deuteranopie / protanopie). Oranje staat maximaal contrast
+                    t.o.v. blauw (vrij) en geel (verbonden).
             1.5.0 — Nieuw poort kleurenschema: blauw vs geel (geen oranje meer)
                     port-front        #0072B2  donkerblauw  vrije VOOR poort  (vierkant)
                     port-back         #56B4E9  lichtblauw   vrije ACHTER poort (rond)
                     port-connected    #F0E442  geel         verbonden VOOR poort (vierkant)
                     port-connected-back #F0E442 geel        verbonden ACHTER poort (rond)
                     port-connect-mode #56B4E9  lichtblauw   klikbaar in verbindingsmodus
-                    port-selected     #FFFFFF  wit          geselecteerd als poort A
-                    port-trace        #CC79A7  roze/lila    actieve trace
-                    Oranje (#E69F00) volledig verwijderd — niet onderscheidbaar van geel
-                    voor tritanopie / blauw-geel kleurblindheid
+                    port-selected     #E8001C  wit          geselecteerd als poort A
+                    port-trace        #FFFFFF  knalrood     actieve trace
    ============================================================================= */
 
 
@@ -569,7 +568,7 @@ QLabel[objectName="device-sublabel"] {
      port-connected-back  geel         #F0E442  verbonden + achter (rond)
      port-connect-mode    lichtblauw   #56B4E9  klikbaar in verbindingsmodus
      port-selected        wit          #FFFFFF  geselecteerd als poort A
-     port-trace           roze/lila    #CC79A7  actieve trace
+     port-trace           knalrood     #E8001C  actieve trace
    ============================================================ */
 
 /* Vrije voorpoort — donkerblauw, VIERKANT */
@@ -658,10 +657,10 @@ QFrame[objectName="port-selected"] {
     max-height: 14px;
 }
 
-/* Trace poort — roze/lila */
+/* Trace poort — knalrood (maximaal contrast t.o.v. blauw en geel) */
 QFrame[objectName="port-trace"] {
-    background-color: #CC79A7;
-    border: 1px solid #AA5585;
+    background-color: #E8001C;
+    border: 1px solid #B00015;
     border-radius: 2px;
     min-width: 14px;
     max-width: 14px;
@@ -669,7 +668,7 @@ QFrame[objectName="port-trace"] {
     max-height: 14px;
 }
 QFrame[objectName="port-trace"]:hover {
-    background-color: #DD99BB;
+    background-color: #FF2030;
     border: 2px solid #FFFFFF;
 }
 

@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/tracing.py
 # Role:    Trace berekening — pure logica, GEEN Qt imports
-# Version: 1.7.0
+# Version: 1.8.0
 # Author:  Barremans
 # Changes: 1.1.0 — B8: _is_patchpanel() helper — type check accepteert
 #                       zowel "patch_panel" als "patchpanel" (beide komen
@@ -29,6 +29,10 @@
 #                       gaat naar steps (achteraan), niet naar prepend_steps.
 #                       Prepend is exclusief voor de directe externe verbinding van de
 #                       startpoort zelf (SW10 via PP BACK conn).
+#          1.8.0 — Fix: trace wall_outlet → PP_back volgde PP_front verbinding niet.
+#                       B8-blok zette internal te vroeg in visited. Nieuwe helper
+#                       _follow_internal_external() volgt externe verbinding van
+#                       reeds-bezochte interne partner alsnog.
 # =============================================================================
 #
 # BELANGRIJK: Dit bestand bevat GEEN Qt imports.
@@ -364,19 +368,21 @@ def _trace_from_port_internal(data: dict, port_id: str,
             if conn["to_id"] != skip_outlet_id:
                 _follow_wall_outlet(conn["to_id"], cable)
             elif _is_patchpanel(device):
-                # We komen van wall_outlet kant — volg intern door naar front
+                # We komen van wall_outlet kant (skip) — volg intern door naar front
+                # 1.8.0: gebruik _follow_internal_ext zodat de externe verbinding
+                # van internal gevolgd wordt ook als internal al in visited zit
                 internal = _get_patchpanel_partner(data, port)
-                if internal and internal["id"] not in visited:
-                    _follow(internal["id"])
+                if internal:
+                    _follow_internal_ext(internal)
             return
         if conn["to_id"] == current_port_id and conn["from_type"] == "wall_outlet":
             if conn["from_id"] != skip_outlet_id:
                 _follow_wall_outlet(conn["from_id"], cable)
             elif _is_patchpanel(device):
-                # We komen van wall_outlet kant — volg intern door naar front
+                # We komen van wall_outlet kant (skip) — volg intern door naar front
                 internal = _get_patchpanel_partner(data, port)
-                if internal and internal["id"] not in visited:
-                    _follow(internal["id"])
+                if internal:
+                    _follow_internal_ext(internal)
             return
 
         # Verbinding naar direct endpoint (port → endpoint)?
@@ -431,6 +437,66 @@ def _trace_from_port_internal(data: dict, port_id: str,
                     ))
                 else:
                     _follow(partner_port["id"])
+
+    def _follow_internal_ext(internal_port: dict):
+        """
+        1.8.0 — Volg de externe verbinding van een interne patchpanel partner
+        die al in visited/steps zit. Voegt alleen de externe bestemming toe
+        (wall_outlet, endpoint of switch-poort), niet de internal poort zelf opnieuw.
+        """
+        int_conn = _get_connection_for_port(data, internal_port["id"])
+        if not int_conn:
+            return
+        int_cable = int_conn["cable_type"]
+
+        # → wall_outlet
+        if int_conn["from_id"] == internal_port["id"] and int_conn["to_type"] == "wall_outlet":
+            if int_conn["to_id"] != skip_outlet_id:
+                _follow_wall_outlet(int_conn["to_id"], int_cable)
+        elif int_conn["to_id"] == internal_port["id"] and int_conn["from_type"] == "wall_outlet":
+            if int_conn["from_id"] != skip_outlet_id:
+                _follow_wall_outlet(int_conn["from_id"], int_cable)
+
+        # → poort (switch)
+        elif int_conn["from_id"] == internal_port["id"] and int_conn["to_type"] == "port":
+            pid = int_conn["to_id"]
+            if pid not in visited:
+                visited.add(pid)
+                p   = _get_port(data, pid)
+                dev = _get_device(data, p["device_id"]) if p else None
+                if p and dev:
+                    steps.append(_make_step(
+                        obj_type   = "port",
+                        obj_id     = pid,
+                        label      = _port_label_with_context(data, p, dev),
+                        side       = p["side"],
+                        cable_type = int_cable,
+                        port_name  = p.get("name", ""),
+                    ))
+        elif int_conn["to_id"] == internal_port["id"] and int_conn["from_type"] == "port":
+            pid = int_conn["from_id"]
+            if pid not in visited:
+                visited.add(pid)
+                p   = _get_port(data, pid)
+                dev = _get_device(data, p["device_id"]) if p else None
+                if p and dev:
+                    steps.append(_make_step(
+                        obj_type   = "port",
+                        obj_id     = pid,
+                        label      = _port_label_with_context(data, p, dev),
+                        side       = p["side"],
+                        cable_type = int_cable,
+                        port_name  = p.get("name", ""),
+                    ))
+
+        # → direct endpoint
+        elif int_conn["from_id"] == internal_port["id"] and int_conn["to_type"] == "endpoint":
+            ep = _get_endpoint(data, int_conn["to_id"])
+            if ep:
+                steps.append(_make_step(
+                    obj_type="endpoint", obj_id=int_conn["to_id"],
+                    label=ep.get("name", "?"),
+                ))
 
     def _follow_wall_outlet(outlet_id: str, cable: str):
         outlet = _get_wall_outlet(data, outlet_id)
