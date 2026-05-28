@@ -2,9 +2,12 @@
    Networkmap_Creator
    File:    css/main.qss
    Role:    Volledige QSS styling — alle kleuren, device types, kabelkleuren
-   Version: 1.6.0
+   Version: 1.7.0
    Author:  Barremans
-   Changes: 1.6.0 — port-trace kleur gewijzigd van roze/lila (#CC79A7) naar
+   Changes: 1.7.0 — Zoekvenster filterknop stijlen toegevoegd:
+                    QPushButton#filter-active   — blauw, bold, duidelijk actief
+                    QPushButton#filter-inactive — grijs, subtiel inactief
+            1.6.0 — port-trace kleur gewijzigd van roze/lila (#CC79A7) naar
                     knalrood (#E8001C) — maximaal contrast t.o.v. blauw en geel
                     (deuteranopie / protanopie). Oranje staat maximaal contrast
                     t.o.v. blauw (vrij) en geel (verbonden).
@@ -206,6 +209,48 @@ QPushButton#btn_connect_active {
 
 QPushButton#btn_connect_active:hover {
     background-color: #A03030;
+}
+
+
+/* ============================================================
+   ZOEKVENSTER FILTERKNOPPEN
+   Actieve tab: blauw + bold — duidelijk onderscheidend
+   Inactieve tab: grijs/donker — subtiel op de achtergrond
+   ============================================================ */
+
+QPushButton#filter-inactive {
+    background-color: #1e2535;
+    color: #7080A0;
+    border: 1px solid #2e3a4a;
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-size: 9pt;
+    font-weight: normal;
+}
+
+QPushButton#filter-inactive:hover {
+    background-color: #263040;
+    color: #A0B4CC;
+    border: 1px solid #3a4a5a;
+}
+
+QPushButton#filter-active {
+    background-color: #0072B2;
+    color: #FFFFFF;
+    border: 1px solid #005a8e;
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-size: 9pt;
+    font-weight: bold;
+}
+
+QPushButton#filter-active:hover {
+    background-color: #0086CC;
+    border: 1px solid #006aaa;
+}
+
+QPushButton#filter-active:pressed {
+    background-color: #005A8E;
 }
 
 
@@ -672,7 +717,7 @@ QFrame[objectName="port-trace"]:hover {
     border: 2px solid #FFFFFF;
 }
 
-/* SFP uplink poort — cyaan/groen, 18px */
+/* SFP uplink poort — cyaan/groen, 18px, VIERKANT met afgeronde hoeken */
 QFrame[objectName="port-sfp"] {
     background-color: #009E73;
     border: 1px solid #007A58;
@@ -794,19 +839,4 @@ QPushButton[objectName="btn_rack_nav"]:hover {
 
 QPushButton[objectName="btn_rack_nav"]:pressed {
     background-color: #1A2A4A;
-}
-
-/* SFP uplink poort — cyaan/groen, 18px, VIERKANT met afgeronde hoeken */
-QFrame[objectName="port-sfp"] {
-    background-color: #009E73;
-    border: 1px solid #007A58;
-    border-radius: 3px;
-    min-width: 18px;
-    max-width: 18px;
-    min-height: 18px;
-    max-height: 18px;
-}
-QFrame[objectName="port-sfp"]:hover {
-    background-color: #00C48A;
-    border: 2px solid #FFFFFF;
 }

@@ -495,7 +495,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "site_outlets_empty":           "Geen wandpunten gevonden in deze site.",
 
         # Outlet locator
-        "menu_outlet_locator":          "🌐  Wandpunten zoeken",
+        "menu_outlet_locator":          "Wandpunten overzicht",
         "outlet_filter_placeholder":    "Filter op naam of locatie...",
         "outlet_no_trace":              "Geen verbinding",
         "outlet_locator_choose_room":   "← Kies een ruimte om wandpunten te tonen",
@@ -1100,7 +1100,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "site_outlets_empty":           "No wall outlets found in this site.",
 
         # Outlet locator
-        "menu_outlet_locator":          "🌐  Find Wall Outlets",
+        "menu_outlet_locator":          "Wall Outlet Overview",
         "outlet_filter_placeholder":    "Filter by name or location...",
         "outlet_no_trace":              "No connection",
         "outlet_locator_choose_room":   "← Choose a room to show wall outlets",

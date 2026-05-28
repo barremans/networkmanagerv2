@@ -2,11 +2,24 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.56.0
+# Version: 1.59.1
 # Author:  Barremans
-# Changes: 1.56.0 — outlet_disconnect_requested: verbinding verwijderen vanuit
-#                   WallOutletView rechtsklik menu + handler _on_outlet_disconnect_requested
-#          1.55.0 — ConnectOutletToPortDialog: wandpunt koppelen aan poort
+# Changes: 1.59.1 — DeviceInfoDialog: slot parameter fix (TypeError opgelost)
+#          1.59.0 — Zoekvenster fixes fase 2:
+#                   Endpoint detail tonen: endpoint_double_clicked gekoppeld in alle WallOutletView modi
+#                   Poort navigatie: duidelijk statusbericht als device niet in rack-slot
+#          1.58.1 — Zoekvenster fixes:
+#                   _show_rack_view: device_double_clicked niet meer gekoppeld
+#                   Dubbelklik op device = alleen focus/navigatie, geen popup
+#                   Detail popup uitsluitend via zoekvenster rechtsklik 'Detail tonen'
+#                   _on_device_double_clicked: slot doorgegeven aan DeviceInfoDialog (U-positie)
+#          1.58.0 — Zoekvenster v2.1.0 integratie:
+#                   _on_search(): altijd update_data() aanroepen (ook bij nieuw venster)
+#                   detail_requested signaal gekoppeld (rechtsklik "Detail tonen")
+#                   _on_search_detail_requested(): nieuw — opent DeviceInfoDialog
+#                   _on_search_result(): fallback voor device niet in rack (statusbericht)
+#                   _on_search_result(): fallback voor endpoint zonder wandpunt (statusbericht)
+#          1.55.0 — Wandpunt koppelen aan poort vanuit WallOutletView:
 #                   outlet_connect_port_requested signaal gekoppeld (room + site modus)
 #                   _on_outlet_connect_port_requested handler toegevoegd
 #                   Opent ConnectOutletToPortDialog met poort-zoeklijst
@@ -378,6 +391,8 @@ class MainWindow(QMainWindow):
         self._act_search.triggered.connect(self._on_search)
         tb.addAction(self._act_search)
 
+        # 2.0.0 — "Wandpunten zoeken" hernoemd naar "Wandpuntenkaart"
+        # Zoekfunctionaliteit zit nu in het unified zoekvenster (Ctrl+F)
         self._act_outlet_locator = QAction(t("menu_outlet_locator"), self)
         self._act_outlet_locator.setShortcut("Ctrl+W")
         self._act_outlet_locator.setEnabled(True)
@@ -1165,61 +1180,6 @@ class MainWindow(QMainWindow):
         self._wire_detail.set_trace(steps, outlet_label, data=self._data)
         self.set_status(f"✓  🌐 {outlet_label}  ►  🔌  {target_label}")
 
-    def _on_outlet_disconnect_requested(self, outlet_id: str):
-        """
-        1.22.0 — Verbinding verwijderen vanuit WallOutletView (rechtsklik op kaartje).
-        Verwijdert alle verbindingen waarbij dit wandpunt betrokken is.
-        """
-        if settings_storage.get_read_only_mode():
-            return
-
-        conns = [
-            c for c in self._data.get("connections", [])
-            if c.get("from_id") == outlet_id or c.get("to_id") == outlet_id
-        ]
-        if not conns:
-            return
-
-        # Bevestiging
-        outlet = next(
-            (wo for s in self._data.get("sites", [])
-             for r in s.get("rooms", [])
-             for wo in r.get("wall_outlets", [])
-             if wo["id"] == outlet_id),
-            None,
-        )
-        outlet_name = outlet.get("name", outlet_id) if outlet else outlet_id
-
-        from PySide6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self,
-            t("ctx_disconnect_port"),
-            f"{t('msg_confirm_delete')}\n\n{outlet_name}  →  verbinding",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        conn_ids = {c["id"] for c in conns}
-        self._data["connections"] = [
-            c for c in self._data.get("connections", [])
-            if c["id"] not in conn_ids
-        ]
-        self._save_and_backup()
-
-        for conn in conns:
-            log_change(
-                action=ACTION_DELETE,
-                entity=ENTITY_CONNECTION,
-                entity_id=conn["id"],
-                label=f"✂  {outlet_name}",
-            )
-
-        if isinstance(self._current_view, WallOutletView):
-            self._current_view.refresh(self._data)
-        self._wire_detail.clear()
-        self.set_status(f"✂  {outlet_name}  verbinding verwijderd")
-
     def _on_endpoint_edit_requested(self, ep_id: str):
         """
         1.8.1 — Eindapparaat bewerken vanuit endpoint-kaartje in WallOutletView
@@ -1482,9 +1442,9 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
-        outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
+        outlet_view.endpoint_double_clicked.connect(self._on_endpoint_detail)  # 1.59.0
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -1502,6 +1462,7 @@ class MainWindow(QMainWindow):
                                      rack_id=rack_id, rack_name=rack_name)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
+        outlet_view.endpoint_double_clicked.connect(self._on_endpoint_detail)  # 1.59.0
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -1521,9 +1482,9 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
-        outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
+        outlet_view.endpoint_double_clicked.connect(self._on_endpoint_detail)  # 1.59.0
         self._mid_layout.addWidget(outlet_view)
         self._current_view = outlet_view
 
@@ -1564,7 +1525,6 @@ class MainWindow(QMainWindow):
         rack_view.port_selected_for_connect.connect(self._on_port_selected_for_connect)
         rack_view.device_context_menu.connect(self._on_device_context_menu)
         rack_view.port_context_menu.connect(self._on_port_context_menu)
-        rack_view.device_double_clicked.connect(self._on_device_double_clicked)
         self._mid_layout.addWidget(rack_view)
         self._current_view = rack_view
 
@@ -2179,6 +2139,48 @@ class MainWindow(QMainWindow):
                      if p["id"] == port_id), None)
         dev = next((d for d in self._data.get("devices", [])
                     if d["id"] == port.get("device_id", "")), None) if port else None
+
+        dlg = _EndpointDetailDialog(
+            ep=ep,
+            port=port,
+            dev=dev,
+            data=self._data,
+            parent=self,
+        )
+        dlg.exec()
+
+    # ------------------------------------------------------------------
+    # Endpoint detail popup vanuit WallOutletView dubbelklik (1.59.0)
+    # ------------------------------------------------------------------
+
+    def _on_endpoint_detail(self, ep_id: str):
+        """
+        1.59.0 — Toont _EndpointDetailDialog bij dubbelklik op endpoint-kaartje
+        in WallOutletView (room/site/direct modus).
+        Zoekt bijhorende poort op via verbindingen.
+        """
+        from app.gui.wall_outlet_view import _EndpointDetailDialog
+
+        ep = next((e for e in self._data.get("endpoints", [])
+                   if e["id"] == ep_id), None)
+        if not ep:
+            return
+
+        # Zoek gekoppelde poort via verbindingen
+        port = None
+        dev  = None
+        for conn in self._data.get("connections", []):
+            pid = None
+            if conn.get("to_type") == "endpoint" and conn.get("to_id") == ep_id:
+                pid = conn.get("from_id")
+            elif conn.get("from_type") == "endpoint" and conn.get("from_id") == ep_id:
+                pid = conn.get("to_id")
+            if pid:
+                port = next((p for p in self._data.get("ports", []) if p["id"] == pid), None)
+                if port:
+                    dev = next((d for d in self._data.get("devices", [])
+                                if d["id"] == port.get("device_id", "")), None)
+                break
 
         dlg = _EndpointDetailDialog(
             ep=ep,
@@ -3057,21 +3059,26 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_device_double_clicked(self, device_id: str):
-        """Dubbelklik op device — toon readonly info popup."""
+        """
+        1.58.1 — Detail popup via zoekvenster rechtsklik "Detail tonen".
+        Niet meer gekoppeld aan RackView dubbelklik (dat navigeert alleen).
+        slot doorgegeven zodat DeviceInfoDialog de U-positie kan tonen.
+        """
         device = next((d for d in self._data.get("devices", [])
                        if d["id"] == device_id), None)
         if not device:
             return
-        rack = room = site = None
+        rack = room = site = slot_found = None
         for s in self._data.get("sites", []):
             for r in s.get("rooms", []):
                 for ra in r.get("racks", []):
-                    for slot in ra.get("slots", []):
-                        if slot.get("device_id") == device_id:
-                            rack, room, site = ra, r, s
+                    for sl in ra.get("slots", []):
+                        if sl.get("device_id") == device_id:
+                            rack, room, site, slot_found = ra, r, s, sl
         dlg = DeviceInfoDialog(
             parent=self, device=device, data=self._data,
-            rack=rack or {}, room=room or {}, site=site or {}
+            rack=rack or {}, room=room or {}, site=site or {},
+            slot=slot_found or {}
         )
         dlg.exec()
 
@@ -3614,11 +3621,23 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_search_win") or not self._search_win:
             self._search_win = SearchWindow(self._data, parent=self)
             self._search_win.result_selected.connect(self._on_search_result)
-        else:
-            self._search_win.update_data(self._data)
+            self._search_win.detail_requested.connect(self._on_search_detail_requested)
+        # Altijd data bijwerken — ook bij eerste aanmaak en na data-wijzigingen
+        self._search_win.update_data(self._data)
         self._search_win.show()
         self._search_win.raise_()
         self._search_win.activateWindow()
+
+    def _on_search_detail_requested(self, result_type: str, result_id: str):
+        """
+        1.59.0 — Rechtsklik "Detail tonen" in zoekvenster.
+        device  → DeviceInfoDialog
+        endpoint → _EndpointDetailDialog (via _on_endpoint_detail)
+        """
+        if result_type == "device":
+            self._on_device_double_clicked(result_id)
+        elif result_type == "endpoint":
+            self._on_endpoint_detail(result_id)
 
     def _on_outlet_locator(self):
         self._show_outlet_locator(room_id=None)
@@ -3639,6 +3658,12 @@ class MainWindow(QMainWindow):
         view = OutletLocatorView(self._data, parent=self._mid_frame)
         view.outlet_selected.connect(self._on_locator_outlet_selected)
         view.room_navigate_requested.connect(self._on_locator_room_navigate)
+        # 1.59.0 — nieuwe signals gekoppeld (zelfde handlers als WallOutletView)
+        view.outlet_edit_requested.connect(self._on_outlet_edit_requested)
+        view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
+        view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
+        view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
         self._mid_layout.addWidget(view)
         self._current_view = view
 
@@ -3671,6 +3696,11 @@ class MainWindow(QMainWindow):
         self._select_tree_item_by_id(room_id, "room")
 
     def _on_search_result(self, result_type: str, result_id: str):
+        """
+        1.58.0 — Navigatie vanuit zoekvenster (Enter / dubbelklik / rechtsklik Navigeer).
+        Fallback statusberichten voor device niet in rack en endpoint zonder wandpunt.
+        """
+
         if result_type == "rack":
             for site in self._data.get("sites", []):
                 for room in site.get("rooms", []):
@@ -3678,8 +3708,8 @@ class MainWindow(QMainWindow):
                         if rack["id"] == result_id:
                             self._navigate_to_rack(rack, room, site)
                             self.set_status(
-                                f"🔍  {t('label_rack')}: {rack['name']} — "
-                                f"{room['name']} — {site['name']}"
+                                f"\U0001f50d  {t('label_rack')}: {rack['name']} \u2014 "
+                                f"{room['name']} \u2014 {site['name']}"
                             )
                             return
 
@@ -3691,7 +3721,7 @@ class MainWindow(QMainWindow):
                     self._tree.setCurrentItem(item)
                     item.setExpanded(True)
                     site = self._find_site(result_id)
-                    self.set_status(f"🔍  {t('label_site')}: {site['name']}")
+                    self.set_status(f"\U0001f50d  {t('label_site')}: {site['name']}")
                     return
 
         elif result_type == "room":
@@ -3700,32 +3730,68 @@ class MainWindow(QMainWindow):
                     if room["id"] == result_id:
                         self._select_tree_item_by_id(result_id)
                         self.set_status(
-                            f"🔍  {t('label_room')}: {room['name']} — {site['name']}"
+                            f"\U0001f50d  {t('label_room')}: {room['name']} \u2014 {site['name']}"
                         )
                         return
 
         elif result_type in ("device", "port"):
             dev_id = result_id
+            highlight_port_id = None
             if result_type == "port":
                 port = next((p for p in self._data.get("ports", [])
                              if p["id"] == result_id), None)
                 dev_id = port["device_id"] if port else None
+                highlight_port_id = result_id
             if not dev_id:
                 return
+
+            # Zoek rack-locatie
+            found_in_rack = False
             for site in self._data.get("sites", []):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         for slot in rack.get("slots", []):
                             if slot.get("device_id") == dev_id:
+                                found_in_rack = True
                                 self._navigate_to_rack(rack, room, site)
                                 dev = next((d for d in self._data.get("devices", [])
                                             if d["id"] == dev_id), None)
+                                if highlight_port_id:
+                                    port_steps = tracing.trace_from_port(
+                                        self._data, highlight_port_id
+                                    )
+                                    pids = [s["obj_id"] for s in port_steps
+                                            if s["obj_type"] == "port"]
+                                    port_obj = next((p for p in self._data.get("ports", [])
+                                                     if p["id"] == highlight_port_id), None)
+                                    port_lbl = (
+                                        f"{dev['name']} \u2014 "
+                                        f"{port_obj.get('name','?')} "
+                                        f"({port_obj.get('side','').upper()})"
+                                    ) if port_obj and dev else result_id
+                                    from PySide6.QtCore import QTimer as _QT2
+                                    def _do_hl(pids=pids, port_steps=port_steps, port_lbl=port_lbl):
+                                        if isinstance(self._current_view, RackView):
+                                            self._current_view.highlight_trace(pids)
+                                        self._wire_detail.set_trace(port_steps, port_lbl, data=self._data)
+                                    _QT2.singleShot(150, _do_hl)
                                 self.set_status(
-                                    f"🔍  {t('label_device')}: "
-                                    f"{dev['name'] if dev else dev_id} — "
-                                    f"{rack['name']} — {site['name']}"
+                                    f"\U0001f50d  {t('label_device')}: "
+                                    f"{dev['name'] if dev else dev_id} \u2014 "
+                                    f"{rack['name']} \u2014 {site['name']}"
                                 )
                                 return
+
+            # 1.58.0/1.59.0 — Fallback: device niet in een rack-slot
+            if not found_in_rack:
+                dev = next((d for d in self._data.get("devices", [])
+                            if d["id"] == dev_id), None)
+                dev_name = dev["name"] if dev else dev_id
+                lbl = t("label_port") if result_type == "port" else t("label_device")
+                self.set_status(
+                    f"\U0001f50d  {lbl}: {dev_name}  \u2014  "
+                    f"\u26a0  device niet in een rack geplaatst"
+                )
 
         elif result_type == "wall_outlet":
             for site in self._data.get("sites", []):
@@ -3733,26 +3799,48 @@ class MainWindow(QMainWindow):
                     for wo in room.get("wall_outlets", []):
                         if wo["id"] == result_id:
                             self._show_wall_outlet_view(room, site)
+                            wo_name = wo.get("name", "")
+                            from PySide6.QtCore import QTimer as _QT3
+                            def _focus_wo(wo_name=wo_name):
+                                if isinstance(self._current_view, WallOutletView):
+                                    if hasattr(self._current_view, "_search_bar") and self._current_view._search_bar:
+                                        self._current_view._search_bar.setText(wo_name)
+                            _QT3.singleShot(100, _focus_wo)
+                            steps = tracing.trace_from_wall_outlet(self._data, result_id)
+                            self._wire_detail.set_trace(steps, wo_name, data=self._data)
                             self.set_status(
-                                f"🔍  {t('label_wall_outlet')}: "
-                                f"{wo.get('name', '')} — {room['name']} — {site['name']}"
+                                f"\U0001f50d  {t('label_wall_outlet')}: "
+                                f"{wo_name} \u2014 {room['name']} \u2014 {site['name']}"
                             )
                             return
 
         elif result_type == "endpoint":
+            ep = next((e for e in self._data.get("endpoints", []) if e["id"] == result_id), None)
+            ep_name = ep.get("name", result_id) if ep else result_id
+
+            # Zoek via wandpunt
             for site in self._data.get("sites", []):
                 for room in site.get("rooms", []):
                     for wo in room.get("wall_outlets", []):
                         if wo.get("endpoint_id") == result_id:
                             self._show_wall_outlet_view(room, site)
-                            ep = next((e for e in self._data.get("endpoints", [])
-                                       if e["id"] == result_id), None)
+                            from PySide6.QtCore import QTimer as _QT4
+                            def _focus_ep(ep_name=ep_name):
+                                if isinstance(self._current_view, WallOutletView):
+                                    if hasattr(self._current_view, "_search_bar") and self._current_view._search_bar:
+                                        self._current_view._search_bar.setText(ep_name)
+                            _QT4.singleShot(100, _focus_ep)
                             self.set_status(
-                                f"🔍  {t('label_endpoint')}: "
-                                f"{ep['name'] if ep else result_id} — "
-                                f"{wo.get('name', '')} — {room['name']}"
+                                f"\U0001f50d  {t('label_endpoint')}: "
+                                f"{ep_name} \u2014 {wo.get('name', '')} \u2014 {room['name']}"
                             )
                             return
+
+            # 1.58.0 — Fallback: endpoint niet gekoppeld aan een wandpunt
+            self.set_status(
+                f"\U0001f50d  {t('label_endpoint')}: {ep_name}  \u2014  "
+                f"\u26a0  niet gekoppeld aan een wandpunt"
+            )
 
     def _select_tree_item_by_id(self, obj_id: str, obj_type: str = None):
         def _search(item: QTreeWidgetItem) -> bool:

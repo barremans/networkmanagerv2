@@ -1,24 +1,32 @@
 # =============================================================================
 # Networkmap_Creator
 # File:    app/gui/outlet_locator_view.py
-# Role:    Wandpunten zoek- en trace view — omgekeerde trace UX
-# Version: 1.0.1
+# Role:    Wandpunten overzicht — omgekeerde trace UX
+# Version: 1.1.0
 # Author:  Barremans
+# Changes: 1.1.0 — Titel toont site naam ipv generieke label
+#                   Dubbelklik op kaartje → _OutletDetailDialog (zelfde als WallOutletView)
+#                   Rechtsklik op kaartje → contextmenu (Bewerken, Eindapparaat,
+#                   Koppelen/Loskoppelen, Dupliceren, Verwijderen)
+#                   Signals toegevoegd: outlet_edit_requested, outlet_delete_requested,
+#                   outlet_duplicate_requested, outlet_endpoint_requested,
+#                   outlet_connect_port_requested, outlet_disconnect_requested
+#          1.0.1 — Initiële versie
 # =============================================================================
 #
 # Use case: technicus staat in een ruimte, kiest ruimte → ziet wandpunten →
 # klikt op wandpunt → ziet trace naar patchpanel/switch in één compacte regel.
 #
-# Bereikbaar via: Hulpmiddelen → Wandpunten zoeken (Ctrl+W)
+# Bereikbaar via: Toolbar → Wandpunten overzicht (Ctrl+W)
 # Ruimte kiezen: dropdown of klik op ruimte in de linkerboom (via set_room())
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QComboBox, QLineEdit,
     QScrollArea, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QSizePolicy, QToolButton
+    QSizePolicy, QMenu
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QCursor
 
 from app.helpers.i18n import t
@@ -37,7 +45,6 @@ def _compact_trace(steps: list[dict]) -> str:
     if not steps:
         return t("outlet_no_trace")
 
-    # Alle port-stappen
     port_steps = [s for s in steps if s["obj_type"] == "port"]
     ep_steps   = [s for s in steps if s["obj_type"] == "endpoint"]
 
@@ -46,11 +53,9 @@ def _compact_trace(steps: list[dict]) -> str:
             return f"💻  {ep_steps[0]['label']}"
         return t("outlet_no_trace")
 
-    # Eerste poort (patchpanel back) en laatste poort (switch)
     first = port_steps[0]
     last  = port_steps[-1]
 
-    # Kabeltype uit eerste verbinding
     cable = next((s.get("cable_type", "") for s in steps if s.get("cable_type")), "")
     cable_icon = {
         "utp_cat5e": "🔵", "utp_cat6": "🟢", "utp_cat6a": "🔷",
@@ -73,7 +78,10 @@ def _compact_trace(steps: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 class _OutletCard(QFrame):
-    """Klikbaar kaartje voor één wandpunt met naam, locatie en compacte trace."""
+    """
+    Klikbaar kaartje voor één wandpunt met naam, locatie en compacte trace.
+    1.1.0 — dubbelklik en rechtsklik worden afgehandeld door OutletLocatorView.
+    """
 
     clicked = Signal(str)   # outlet_id
 
@@ -88,12 +96,10 @@ class _OutletCard(QFrame):
         layout.setContentsMargins(8, 6, 8, 4)
         layout.setSpacing(2)
 
-        # Naam
         name_lbl = QLabel(f"🌐  {outlet.get('name', '')}")
         name_lbl.setObjectName("outlet-label")
         layout.addWidget(name_lbl)
 
-        # Locatie
         loc = outlet.get("location_description", "")
         if loc:
             loc_lbl = QLabel(loc)
@@ -103,7 +109,6 @@ class _OutletCard(QFrame):
 
         layout.addStretch()
 
-        # Compacte trace
         trace_lbl = QLabel(_compact_trace(trace))
         trace_lbl.setObjectName("secondary")
         trace_lbl.setWordWrap(False)
@@ -121,22 +126,35 @@ class _OutletCard(QFrame):
 
 class OutletLocatorView(QWidget):
     """
-    Wandpunten zoek- en trace view.
+    Wandpunten overzicht en trace view.
 
     Signalen:
-      outlet_selected(outlet_id, steps)  — trace beschikbaar voor wire_detail
-      room_navigate_requested(room_id)   — vraag boom om ruimte te selecteren
+      outlet_selected(outlet_id, steps)       — trace beschikbaar voor wire_detail
+      room_navigate_requested(room_id)         — vraag boom om ruimte te selecteren
+      outlet_edit_requested(outlet_id)         — 1.1.0: bewerken
+      outlet_delete_requested(outlet_id)       — 1.1.0: verwijderen
+      outlet_duplicate_requested(outlet_id)    — 1.1.0: dupliceren
+      outlet_endpoint_requested(outlet_id)     — 1.1.0: eindapparaat toevoegen/bewerken
+      outlet_connect_port_requested(outlet_id) — 1.1.0: koppelen aan poort
+      outlet_disconnect_requested(outlet_id)   — 1.1.0: verbinding verwijderen
     """
 
-    outlet_selected          = Signal(str, list)   # outlet_id, trace steps
-    room_navigate_requested  = Signal(str)          # room_id
+    outlet_selected              = Signal(str, list)
+    room_navigate_requested      = Signal(str)
+    outlet_edit_requested        = Signal(str)
+    outlet_delete_requested      = Signal(str)
+    outlet_duplicate_requested   = Signal(str)
+    outlet_endpoint_requested    = Signal(str)
+    outlet_connect_port_requested = Signal(str)
+    outlet_disconnect_requested  = Signal(str)
 
     def __init__(self, data: dict, parent=None):
         super().__init__(parent)
-        self._data        = data
+        self._data            = data
         self._current_room_id = None
-        self._cards       = {}   # outlet_id → _OutletCard
-        self._selected_id = None
+        self._cards           = {}   # outlet_id → _OutletCard
+        self._outlets_map     = {}   # outlet_id → outlet dict
+        self._selected_id     = None
         self._build()
 
     # ------------------------------------------------------------------
@@ -155,9 +173,9 @@ class OutletLocatorView(QWidget):
         tl.setContentsMargins(8, 4, 8, 4)
         tl.setSpacing(8)
 
-        title_lbl = QLabel(f"🌐  {t('menu_outlet_locator')}")
-        title_lbl.setObjectName("rack_title")
-        tl.addWidget(title_lbl)
+        self._title_lbl = QLabel(f"🌐  {t('menu_outlet_locator')}")
+        self._title_lbl.setObjectName("rack_title")
+        tl.addWidget(self._title_lbl)
         tl.addStretch()
         outer.addWidget(title_bar)
 
@@ -168,7 +186,6 @@ class OutletLocatorView(QWidget):
         fl.setContentsMargins(8, 6, 8, 6)
         fl.setSpacing(8)
 
-        # Ruimte dropdown
         room_lbl = QLabel(t("label_room") + ":")
         room_lbl.setFixedWidth(60)
         fl.addWidget(room_lbl)
@@ -180,7 +197,6 @@ class OutletLocatorView(QWidget):
         self._ddl_room.currentIndexChanged.connect(self._on_room_changed)
         fl.addWidget(self._ddl_room)
 
-        # Zoekfilter
         self._search = QLineEdit()
         self._search.setPlaceholderText(f"🔍  {t('outlet_filter_placeholder')}")
         self._search.setClearButtonEnabled(True)
@@ -210,7 +226,6 @@ class OutletLocatorView(QWidget):
         self._scroll.setWidget(self._body)
         outer.addWidget(self._scroll, stretch=1)
 
-        # Eerste populatie
         self._populate_room_ddl()
         self._refresh_cards()
 
@@ -219,7 +234,6 @@ class OutletLocatorView(QWidget):
     # ------------------------------------------------------------------
 
     def _populate_room_ddl(self, select_room_id: str = None):
-        """Vul de ruimte-dropdown met alle ruimtes van alle sites."""
         self._ddl_room.blockSignals(True)
         self._ddl_room.clear()
         self._ddl_room.addItem(f"— {t('label_room')} —", "")
@@ -245,8 +259,6 @@ class OutletLocatorView(QWidget):
     # ------------------------------------------------------------------
 
     def _refresh_cards(self):
-        """Herbouw kaartjes voor de geselecteerde ruimte."""
-        # Verwijder oude kaartjes
         while self._body_layout.count():
             item = self._body_layout.takeAt(0)
             if item.widget():
@@ -254,9 +266,13 @@ class OutletLocatorView(QWidget):
             elif item.layout():
                 self._clear_layout(item.layout())
         self._cards.clear()
+        self._outlets_map.clear()
         self._selected_id = None
 
-        room = self._find_room(self._current_room_id)
+        # 1.1.0 — Titel bijwerken met site naam
+        self._update_title()
+
+        room    = self._find_room(self._current_room_id)
         outlets = room.get("wall_outlets", []) if room else []
         filter_text = self._search.text().strip().lower()
 
@@ -281,7 +297,6 @@ class OutletLocatorView(QWidget):
             self._info_lbl.setText("")
             return
 
-        # Info
         site_name = ""
         for site in self._data.get("sites", []):
             for r in site.get("rooms", []):
@@ -292,19 +307,25 @@ class OutletLocatorView(QWidget):
             f"  —  {len(outlets)} {t('tree_wall_outlets').lower()}"
         )
 
-        # Kaartjes in grid (3 per rij)
         col_count = 3
         grid = QGridLayout()
         grid.setSpacing(8)
 
         for idx, outlet in enumerate(outlets):
+            self._outlets_map[outlet["id"]] = outlet
             trace = tracing.trace_from_wall_outlet(self._data, outlet["id"])
             card  = _OutletCard(outlet, trace, parent=self._body)
             card.clicked.connect(self._on_card_clicked)
+
+            # 1.1.0 — dubbelklik en rechtsklik
+            card.mouseDoubleClickEvent = lambda e, oid=outlet["id"], o=outlet: \
+                self._on_card_double_clicked(oid, o)
+            card.contextMenuEvent = lambda e, oid=outlet["id"]: \
+                self._on_card_context_menu(oid, e)
+
             self._cards[outlet["id"]] = card
             grid.addWidget(card, idx // col_count, idx % col_count)
 
-        # Opvullen
         remainder = len(outlets) % col_count
         if remainder:
             for i in range(col_count - remainder):
@@ -320,6 +341,18 @@ class OutletLocatorView(QWidget):
         self._body_layout.addLayout(grid)
         self._body_layout.addStretch()
 
+    def _update_title(self):
+        """1.1.0 — Titelregel bijwerken met site naam als ruimte geselecteerd is."""
+        if self._current_room_id:
+            for site in self._data.get("sites", []):
+                for room in site.get("rooms", []):
+                    if room["id"] == self._current_room_id:
+                        self._title_lbl.setText(
+                            f"🌐  {t('menu_outlet_locator')}  —  {site['name']}"
+                        )
+                        return
+        self._title_lbl.setText(f"🌐  {t('menu_outlet_locator')}")
+
     def _clear_layout(self, layout):
         while layout.count():
             item = layout.takeAt(0)
@@ -327,22 +360,11 @@ class OutletLocatorView(QWidget):
                 item.widget().deleteLater()
 
     # ------------------------------------------------------------------
-    # Handlers
+    # Handlers — klik, dubbelklik, rechtsklik
     # ------------------------------------------------------------------
 
-    def _on_room_changed(self, _index: int):
-        self._current_room_id = self._ddl_room.currentData() or None
-        self._search.clear()
-        self._refresh_cards()
-        if self._current_room_id:
-            self.room_navigate_requested.emit(self._current_room_id)
-
-    def _on_filter_changed(self, _text: str):
-        self._refresh_cards()
-
     def _on_card_clicked(self, outlet_id: str):
-        """Wandpunt geselecteerd — highlight kaartje, emit trace."""
-        # Deselecteer vorige
+        """Enkele klik — highlight kaartje + emit trace."""
         if self._selected_id and self._selected_id in self._cards:
             prev = self._cards[self._selected_id]
             prev.setObjectName("wall-outlet")
@@ -357,15 +379,88 @@ class OutletLocatorView(QWidget):
         steps = tracing.trace_from_wall_outlet(self._data, outlet_id)
         self.outlet_selected.emit(outlet_id, steps)
 
+    def _on_card_double_clicked(self, outlet_id: str, outlet: dict):
+        """
+        1.1.0 — Dubbelklik → detail popup (zelfde als WallOutletView).
+        Gebruikt _OutletDetailDialog uit wall_outlet_view.
+        """
+        from app.gui.wall_outlet_view import _OutletDetailDialog
+        from PySide6.QtCore import QTimer
+
+        ep_map = {e["id"]: e for e in self._data.get("endpoints", [])}
+        ep     = ep_map.get(outlet.get("endpoint_id", ""))
+
+        def _emit_edit():
+            QTimer.singleShot(0, lambda: self.outlet_edit_requested.emit(outlet_id))
+
+        def _emit_connect():
+            QTimer.singleShot(0, lambda: self.outlet_connect_port_requested.emit(outlet_id))
+
+        def _emit_ep():
+            QTimer.singleShot(0, lambda: self.outlet_endpoint_requested.emit(outlet_id))
+
+        dlg = _OutletDetailDialog(
+            outlet, ep, self._data, parent=self,
+            on_endpoint_clicked=_emit_ep,
+            on_edit_clicked=_emit_edit,
+            on_connect_clicked=_emit_connect,
+        )
+        dlg.exec()
+
+    def _on_card_context_menu(self, outlet_id: str, event):
+        """
+        1.1.0 — Rechtsklik → contextmenu (zelfde opties als WallOutletView).
+        """
+        is_connected = any(
+            c for c in self._data.get("connections", [])
+            if c.get("from_id") == outlet_id or c.get("to_id") == outlet_id
+        )
+        menu = QMenu(self)
+        act_edit    = menu.addAction("✏  " + t("ctx_edit"))
+        act_ep      = menu.addAction("🖥  " + t("btn_new_endpoint"))
+        act_connect    = None
+        act_disconnect = None
+        if not is_connected:
+            act_connect = menu.addAction("🔌  " + t("ctx_connect_outlet_to_port"))
+        else:
+            act_disconnect = menu.addAction("✂  " + t("ctx_disconnect_port"))
+        act_dup = menu.addAction("⧉  " + t("ctx_duplicate"))
+        menu.addSeparator()
+        act_del = menu.addAction("🗑  " + t("ctx_delete"))
+
+        action = menu.exec(QCursor.pos())
+        if action == act_edit:
+            self.outlet_edit_requested.emit(outlet_id)
+        elif action == act_ep:
+            self.outlet_endpoint_requested.emit(outlet_id)
+        elif act_connect and action == act_connect:
+            self.outlet_connect_port_requested.emit(outlet_id)
+        elif act_disconnect and action == act_disconnect:
+            self.outlet_disconnect_requested.emit(outlet_id)
+        elif action == act_dup:
+            self.outlet_duplicate_requested.emit(outlet_id)
+        elif action == act_del:
+            self.outlet_delete_requested.emit(outlet_id)
+
+    # ------------------------------------------------------------------
+    # Handlers — dropdown en filter
+    # ------------------------------------------------------------------
+
+    def _on_room_changed(self, _index: int):
+        self._current_room_id = self._ddl_room.currentData() or None
+        self._search.clear()
+        self._refresh_cards()
+        if self._current_room_id:
+            self.room_navigate_requested.emit(self._current_room_id)
+
+    def _on_filter_changed(self, _text: str):
+        self._refresh_cards()
+
     # ------------------------------------------------------------------
     # Publieke API
     # ------------------------------------------------------------------
 
     def set_room(self, room_id: str):
-        """
-        Gestuurd door main_window wanneer gebruiker op ruimte klikt in boom.
-        Selecteert de ruimte in de dropdown en herlaadt de kaartjes.
-        """
         if room_id == self._current_room_id:
             return
         idx = self._ddl_room.findData(room_id)
@@ -378,7 +473,6 @@ class OutletLocatorView(QWidget):
             self._refresh_cards()
 
     def refresh(self, data: dict):
-        """Data verversen na wijzigingen."""
         self._data = data
         cur = self._current_room_id
         self._populate_room_ddl(select_room_id=cur)

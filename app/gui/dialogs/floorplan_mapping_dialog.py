@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_mapping_dialog.py
 # Role:    Dialoog — SVG punt koppelen aan wandpunt, eindapparaat of poort
-# Version: 1.4.0
+# Version: 1.5.0
 # Author:  Barremans
-# Changes: 1.4.0 — Zoekbalk per tab: QLineEdit + QListWidget ipv QComboBox
+# Changes: 1.5.0 — Wandpunt label toont nu ook locatie:
+#                   "SERVERRUIMTE — D23 — OB REFTER (G)"
+#                   zodat gelijknamige wandpunten onderscheidbaar zijn
+#          1.4.0 — Zoekbalk per tab: QLineEdit + QListWidget ipv QComboBox
 #                   Filter bij typen, selectie via klik in lijst
 #                   Poort tab: device + poort in één regel, direct doorzoekbaar
 #          1.3.0 — Poort koppeling: Tab 3 "Poort"
@@ -28,7 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.helpers import settings_storage
-from app.helpers.i18n import t
+from app.helpers.i18n import t, get_language
+from app.helpers.settings_storage import get_outlet_location_label
 from app.services import floorplan_service
 
 _USER_ROLE = 256   # Qt.UserRole
@@ -163,6 +167,7 @@ class FloorplanMappingDialog(QDialog):
     def _populate_outlets(self):
         self._all_outlets = []
         site_id = self._floorplan.get("site_id")
+        lang = get_language()
         if site_id:
             for site in self._data.get("sites", []):
                 if site.get("id") != site_id:
@@ -170,7 +175,17 @@ class FloorplanMappingDialog(QDialog):
                 for room in site.get("rooms", []):
                     room_name = room.get("name", "?")
                     for outlet in room.get("wall_outlets", []):
-                        label = f"{room_name} — {outlet.get('name', outlet.get('id','?'))}"
+                        loc_key   = outlet.get("location_description", "")
+                        loc_label = (
+                            get_outlet_location_label(loc_key, lang)
+                            if loc_key else ""
+                        )
+                        # 1.5.0 — locatie toevoegen zodat gelijknamige wandpunten
+                        # onderscheidbaar zijn: "SERVERRUIMTE — D23 — OB REFTER (G)"
+                        parts = [room_name, outlet.get("name", outlet.get("id", "?"))]
+                        if loc_label:
+                            parts.append(loc_label)
+                        label = "  —  ".join(parts)
                         self._all_outlets.append((label, outlet.get("id", "")))
                 break
         self._all_outlets.sort(key=lambda x: x[0].lower())

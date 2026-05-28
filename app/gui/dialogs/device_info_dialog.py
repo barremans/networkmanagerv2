@@ -2,10 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/device_info_dialog.py
 # Role:    Readonly device info popup — dubbelklik op device in rack_view
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
+# Changes: 1.2.0 — slot parameter toegevoegd: toont U-positie in locatie banner
+#                   "🗄 Rack 01  ·  U35  ·  🚪 SERVERRUIMTE  ·  📍 CGK Gullegem"
 #          1.1.0 — Subnetmasker toegevoegd aan info popup (na IP adres)
+#          1.0.0 — Initiële versie
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -27,17 +29,19 @@ def _val(v) -> str:
 class DeviceInfoDialog(QDialog):
     """
     Readonly popup met alle velden van een device.
-    Geopend via dubbelklik op een device in de RackView.
+    Geopend via rechtsklik "Detail tonen" in het zoekvenster.
     """
 
     def __init__(self, parent=None, device: dict = None, data: dict = None,
-                 rack: dict = None, room: dict = None, site: dict = None):
+                 rack: dict = None, room: dict = None, site: dict = None,
+                 slot: dict = None):
         super().__init__(parent)
         self._device = device or {}
         self._data   = data   or {}
         self._rack   = rack   or {}
         self._room   = room   or {}
         self._site   = site   or {}
+        self._slot   = slot   or {}
 
         self.setWindowTitle(f"ℹ  {self._device.get('name', t('label_device'))}")
         self.setMinimumWidth(460)
@@ -59,8 +63,25 @@ class DeviceInfoDialog(QDialog):
         loc_l = QHBoxLayout(loc_frame)
         loc_l.setContentsMargins(10, 6, 10, 6)
 
+        # U-positie uit slot
+        u_start = self._slot.get("u_start", "")
+        height  = self._slot.get("height", 1)
+        if u_start != "":
+            try:
+                u_start = int(u_start)
+                height  = int(height) if height else 1
+                if height > 1:
+                    u_str = f"U{u_start}–U{u_start + height - 1}  ({height}U)"
+                else:
+                    u_str = f"U{u_start}"
+            except (ValueError, TypeError):
+                u_str = f"U{u_start}"
+            u_part = f"  ·  {u_str}"
+        else:
+            u_part = ""
+
         rack_lbl = QLabel(
-            f"🗄  {self._rack.get('name', '—')}  ·  "
+            f"🗄  {self._rack.get('name', '—')}{u_part}  ·  "
             f"🚪  {self._room.get('name', '—')}  ·  "
             f"📍  {self._site.get('name', '—')}"
         )
@@ -74,7 +95,7 @@ class DeviceInfoDialog(QDialog):
         form.setSpacing(8)
         form.setContentsMargins(12, 12, 12, 12)
 
-        dev_type = self._device.get("type", "")
+        dev_type   = self._device.get("type", "")
         type_label = t(f"device_{dev_type}") if dev_type else "—"
 
         rows = [
@@ -100,7 +121,7 @@ class DeviceInfoDialog(QDialog):
 
         for label, value, always_show in rows:
             if not always_show and value == "—":
-                continue   # verberg lege optionele velden
+                continue
             lbl = QLabel(label + ":")
             lbl.setObjectName("secondary")
             val_lbl = QLabel(value)
@@ -138,8 +159,7 @@ class DeviceInfoDialog(QDialog):
         # ── Sluiten knop ───────────────────────────────────────────────
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        btn_close = QPushButton(t("btn_cancel") if t("btn_cancel") else "Sluiten")
-        btn_close.setText("Sluiten")
+        btn_close = QPushButton("Sluiten")
         btn_close.clicked.connect(self.accept)
         btn_layout.addWidget(btn_close)
         outer.addLayout(btn_layout)
