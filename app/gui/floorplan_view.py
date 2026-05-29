@@ -715,22 +715,52 @@ class FloorplanView(QWidget):
     def _on_detail_clicked(self):
         """
         1.14.0 — Toon detail popup voor het gekoppelde object:
-        - Wandpunt → _OutletDetailDialog
+        - Wandpunt    → _OutletDetailDialog
         - Eindapparaat → _EndpointDetailDialog
+        - Poort (port:) → DeviceInfoDialog voor het device van de poort
         """
         if not self._selected_outlet_id:
             return
 
         from app.gui.wall_outlet_view import _OutletDetailDialog, _EndpointDetailDialog
 
-        if self._selected_outlet_id.startswith("ep:"):
-            # Eindapparaat
-            ep_id = self._selected_outlet_id[3:]
+        sel = self._selected_outlet_id
+
+        # ── Poort-koppeling (port: prefix) ────────────────────────────
+        if sel.startswith("port:"):
+            port_id = sel[5:]
+            port = next((p for p in self._data.get("ports", [])
+                         if p["id"] == port_id), None)
+            if not port:
+                return
+            dev = next((d for d in self._data.get("devices", [])
+                        if d["id"] == port.get("device_id", "")), None)
+            if not dev:
+                return
+            # Zoek rack/room/site/slot voor dit device
+            rack = room = site = slot_found = None
+            for s in self._data.get("sites", []):
+                for r in s.get("rooms", []):
+                    for ra in r.get("racks", []):
+                        for sl in ra.get("slots", []):
+                            if sl.get("device_id") == dev["id"]:
+                                rack, room, site, slot_found = ra, r, s, sl
+            from app.gui.dialogs.device_info_dialog import DeviceInfoDialog
+            dlg = DeviceInfoDialog(
+                parent=self, device=dev, data=self._data,
+                rack=rack or {}, room=room or {}, site=site or {},
+                slot=slot_found or {}
+            )
+            dlg.exec()
+            return
+
+        # ── Eindapparaat (ep: prefix) ──────────────────────────────────
+        if sel.startswith("ep:"):
+            ep_id = sel[3:]
             ep = next((e for e in self._data.get("endpoints", [])
                        if e["id"] == ep_id), None)
             if not ep:
                 return
-            # Zoek verbonden poort
             conn = next(
                 (c for c in self._data.get("connections", [])
                  if (c.get("to_type") == "endpoint" and c["to_id"] == ep_id) or
@@ -751,42 +781,42 @@ class FloorplanView(QWidget):
                 ep=ep, port=port, dev=dev, data=self._data, parent=self
             )
             dlg.exec()
-        else:
-            # Wandpunt — endpoint via outlet["endpoint_id"]
-            outlet_id = self._selected_outlet_id
-            outlet = next(
-                (wo for s in self._data.get("sites", [])
+            return
+
+        # ── Wandpunt ──────────────────────────────────────────────────
+        outlet_id = sel
+        outlet = next(
+            (wo for s in self._data.get("sites", [])
+             for r in s.get("rooms", [])
+             for wo in r.get("wall_outlets", [])
+             if wo["id"] == outlet_id),
+            None
+        )
+        if not outlet:
+            return
+        ep_id    = outlet.get("endpoint_id", "")
+        endpoint = next(
+            (e for e in self._data.get("endpoints", [])
+             if e["id"] == ep_id), None
+        ) if ep_id else None
+
+        def _do_edit():
+            room_id = next(
+                (r["id"] for s in self._data.get("sites", [])
                  for r in s.get("rooms", [])
-                 for wo in r.get("wall_outlets", [])
-                 if wo["id"] == outlet_id),
-                None
+                 if any(wo["id"] == outlet_id
+                        for wo in r.get("wall_outlets", []))),
+                ""
             )
-            if not outlet:
-                return
-            ep_id    = outlet.get("endpoint_id", "")
-            endpoint = next(
-                (e for e in self._data.get("endpoints", [])
-                 if e["id"] == ep_id), None
-            ) if ep_id else None
+            mw = self.window()
+            if hasattr(mw, "_edit_wall_outlet"):
+                mw._edit_wall_outlet({"id": outlet_id, "room_id": room_id})
 
-            # 1.16.0 — edit callback: zoek room_id en delegeer naar main_window
-            def _do_edit():
-                room_id = next(
-                    (r["id"] for s in self._data.get("sites", [])
-                     for r in s.get("rooms", [])
-                     if any(wo["id"] == outlet_id
-                            for wo in r.get("wall_outlets", []))),
-                    ""
-                )
-                mw = self.window()
-                if hasattr(mw, "_edit_wall_outlet"):
-                    mw._edit_wall_outlet({"id": outlet_id, "room_id": room_id})
-
-            dlg = _OutletDetailDialog(
-                outlet=outlet, endpoint=endpoint, data=self._data,
-                parent=self, on_edit_clicked=_do_edit,
-            )
-            dlg.exec()
+        dlg = _OutletDetailDialog(
+            outlet=outlet, endpoint=endpoint, data=self._data,
+            parent=self, on_edit_clicked=_do_edit,
+        )
+        dlg.exec()
 
     def _on_trace_clicked(self):
         if not self._selected_outlet_id:

@@ -2,9 +2,14 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_mapping_dialog.py
 # Role:    Dialoog — SVG punt koppelen aan wandpunt, eindapparaat of poort
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.5.0 — Wandpunt label toont nu ook locatie:
+# Changes: 1.6.0 — _populate_port_devices: filter op device-definitie
+#                   _port_sort_key: front poorten eerst (was back eerst)
+#                   back_ports=0 → back poorten niet tonen
+#                   front+sfp max → overbodige front poorten niet tonen
+#                   Voorkomt orphan-poorten in koppellijst bij switch zonder back
+#          1.5.0 — Wandpunt label toont nu ook locatie:
 #                   "SERVERRUIMTE — D23 — OB REFTER (G)"
 #                   zodat gelijknamige wandpunten onderscheidbaar zijn
 #          1.4.0 — Zoekbalk per tab: QLineEdit + QListWidget ipv QComboBox
@@ -262,8 +267,8 @@ class FloorplanMappingDialog(QDialog):
         name  = p.get("name", "")
         parts = [int(c) if c.isdigit() else c.lower()
                  for c in re.split(r'(\d+)', name)]
-        side_order = 0 if p.get("side", "") == "back" else (
-                     1 if p.get("side", "") == "front" else 2)
+        side_order = 0 if p.get("side", "") == "front" else (
+                     1 if p.get("side", "") == "back" else 2)
         return (parts, side_order)
 
     # ------------------------------------------------------------------
