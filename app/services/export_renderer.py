@@ -4,8 +4,30 @@
 # Role:    G1/G2 — QPainter renderer voor rack + wandpunten export
 #          Genereert QImage (PNG/JPG) en PDF volledig vanuit data,
 #          onafhankelijk van de UI / schermweergave.
-# Version: 1.0.0
+# Version: 1.5.0
 # Author:  Barremans
+# Changes: 1.5.0 — Kaartjes gebruiken setPointSize() ipv setPixelSize()
+#                   _fp_font_pt() + _fp_draw_pt() toegevoegd voor geschaald canvas
+#                   Fontgroottes: labels 9pt, data 10pt, badge 13pt, secties 9pt
+#          1.4.0 — Kaartjes volledige A4-breedte, 1 per rij
+#                   Fontgrootte 15px data, 13px labels
+#                   Eindapparaat: merk, model, notities toegevoegd
+#                   Eindapparaat 2-koloms layout in ep-kaartje
+#                   Constanten voor alle font- en kaartje-afmetingen
+#          1.3.0 — Pagina's 2/3/5 verwijderd — PDF heeft nu 2 pagina's
+#                   Pagina 1: grondplan, Pagina 2: gekoppelde kaartjes
+#                   Badge header toont svg_pt + type + objectnaam
+#                   Locatie wandpunt via get_outlet_location_label()
+#          1.2.0 — G-OPEN-8: FloorplanRenderer volledig herschreven
+#                   PDF heeft vaste 5-paginastructuur per grondplan:
+#                     Pagina 1: SVG grondplan + overlays + legenda
+#                     Pagina 2: Alle wandpunten van de site
+#                     Pagina 3: Alle devices van de site
+#                     Pagina 4: Gekoppelde wandpunten / devices
+#                     Pagina 5: Niet-gekoppelde wandpunten / devices
+#                   PNG: enkel pagina 1
+#                   render_pdf_pages() via QPrinter
+#          1.1.0 — G-OPEN-8: FloorplanRenderer initieel toegevoegd
 # =============================================================================
 
 import datetime
@@ -60,6 +82,49 @@ def _font(size: int, bold: bool = False) -> QFont:
     f = QFont("Consolas", size * _SCALE // 2)
     f.setBold(bold)
     return f
+
+
+def _fp_font(size_px: int, bold: bool = False) -> QFont:
+    """
+    Font voor FloorplanRenderer header — setPixelSize() zodat QPainter.scale()
+    het font NIET vergroot. Alleen gebruiken voor tekst buiten de printer-schaling.
+    """
+    f = QFont("Arial")
+    f.setPixelSize(size_px)
+    f.setBold(bold)
+    return f
+
+
+def _fp_font_pt(size_pt: int, bold: bool = False) -> QFont:
+    """
+    Font voor kaartjes op het geschaalde printer-canvas.
+    setPointSize() schaalt mee met QPainter.scale() → correcte grootte op papier.
+    Verhouding: 1pt ≈ 1/72 inch; A4 landscape = 297mm breed ≈ 842pt.
+    Canvas _IMG_W = 4960px → schaal ≈ 842/4960 ≈ 0.17 pt/px.
+    size_pt waarden: 8=klein, 10=normaal, 12=groot, 14=titel
+    """
+    f = QFont("Arial")
+    f.setPointSize(size_pt)
+    f.setBold(bold)
+    return f
+
+
+def _fp_draw_text(p: "QPainter", rect: "QRect", text: str, color: "QColor",
+                  size_px: int = 18, bold: bool = False,
+                  align=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft):
+    """_draw_text voor header (buiten printer-schaling) — pixel-font."""
+    p.setFont(_fp_font(size_px, bold))
+    p.setPen(color)
+    p.drawText(rect, align, text)
+
+
+def _fp_draw_pt(p: "QPainter", rect: "QRect", text: str, color: "QColor",
+                size_pt: int = 10, bold: bool = False,
+                align=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft):
+    """_draw_text voor kaartjes op geschaald printer-canvas — point-font."""
+    p.setFont(_fp_font_pt(size_pt, bold))
+    p.setPen(color)
+    p.drawText(rect, align, text)
 
 
 def _draw_text(p: QPainter, rect: QRect, text: str, color: QColor,
@@ -688,6 +753,1028 @@ def render_outlets_pdf(room_or_site: dict, data: dict, mode: str,
         p.fillRect(0, 0, _PAGE_W * 4, renderer._calc_total_height() * 4, _C_BG)
         renderer.render_to_painter(p, 0)
         p.end()
+        return (True, "")
+    except Exception as e:
+        return (False, str(e))
+
+# ===========================================================================
+# FLOORPLAN RENDERER  (G-OPEN-8)
+# ===========================================================================
+
+# Overlay kleuren — zelfde palet als floorplan_view.py
+_C_OL_MAPPED    = QColor("#4caf7d")   # groen  — wandpunt
+_C_OL_ENDPOINT  = QColor("#2196f3")   # blauw  — direct endpoint
+_C_OL_PORT      = QColor("#ff7043")   # oranje — poort-koppeling
+_C_OL_UNMAPPED  = QColor("#f0a030")   # amber  — ongekoppeld
+_OVERLAY_R_EXP  = 8 * _SCALE          # overlay straal in export-pixels
+
+# Paginastructuur PDF
+# Pagina 1 : SVG grondplan + overlay-cirkels + legenda
+# Pagina 2 : Alle wandpunten van de site
+# Pagina 3 : Alle devices van de site (in rack-slots)
+# Pagina 4 : Gekoppelde wandpunten & devices (via SVG-mapping)
+# Pagina 5 : Niet-gekoppelde wandpunten & devices
+
+
+class FloorplanRenderer:
+    """
+    G-OPEN-8 — Exporteer grondplan als PDF of PNG.
+
+    PDF-structuur (vaste pagina-indeling):
+      Pagina 1 : SVG grondplan met overlay-cirkels + legenda
+      Pagina 2 : Alle wandpunten van de site
+      Pagina 3 : Alle devices van de site
+      Pagina 4 : Gekoppelde wandpunten / devices (aanwezig in SVG-mappings)
+      Pagina 5 : Niet-gekoppelde wandpunten / devices
+
+    PNG : enkel pagina 1 (grondplan + legenda).
+
+    Werkt headless — geen Qt-venster nodig.
+    SVG gerenderd via QSvgRenderer naar tussentijds QImage.
+    """
+
+    # Kleuren voor witte PDF-achtergrond (afwijkend van donker UI-thema)
+    _C_TITLE     = QColor("#111111")   # bijna zwart
+    _C_DATE      = QColor("#444444")   # donkergrijs
+    _C_TBL_MAIN  = QColor("#111111")   # tabelkoptekst
+    _C_TBL_SUB   = QColor("#333333")   # tabeldata
+    _C_GRP_TXT   = QColor("#111111")   # groep-scheidingsbalk tekst
+    _C_BORDER_FP = QColor("#aaaaaa")   # scheidingslijn
+
+    _IMG_W       = 2480 * _SCALE   # A4 landscape @150dpi equivalent
+    _IMG_H       = 1754 * _SCALE   # A4 landscape hoogte
+    _SVG_MAX_H   = 1400 * _SCALE   # maximale SVG-hoogte op pagina 1
+    _LEGEND_H    = 64  * _SCALE    # legenda-balk hoogte
+    _SEC_HDR_H   = 32  * _SCALE    # sectiekoptekst hoogte
+    _COL_HDR_H   = 24  * _SCALE    # kolomkoptekst hoogte
+    _ROW_H       = 20  * _SCALE    # tabelrij hoogte
+
+    def __init__(
+        self,
+        floorplan: dict,
+        site: dict,
+        data: dict,
+    ):
+        self._floorplan = floorplan
+        self._site      = site
+        self._data      = data
+
+        # Gemapte SVG punten: {svg_point: mapped_val}
+        self._mappings: dict[str, str] = floorplan.get("mappings", {})
+
+        # Gecachede lookups
+        self._outlet_map: dict[str, dict] = {}   # outlet_id → outlet
+        self._device_map: dict[str, dict] = {}   # device_id → device
+        self._port_map:   dict[str, dict] = {}   # port_id   → port
+        self._ep_map:     dict[str, dict] = {}   # ep_id     → endpoint
+        self._build_maps()
+
+    # ------------------------------------------------------------------
+    # Cache opbouwen
+    # ------------------------------------------------------------------
+
+    def _build_maps(self):
+        data = self._data
+        for s in data.get("sites", []):
+            for r in s.get("rooms", []):
+                for wo in r.get("wall_outlets", []):
+                    self._outlet_map[wo["id"]] = wo
+        for d in data.get("devices", []):
+            self._device_map[d["id"]] = d
+        for p in data.get("ports", []):
+            self._port_map[p["id"]] = p
+        for e in data.get("endpoints", []):
+            self._ep_map[e["id"]] = e
+
+    # ------------------------------------------------------------------
+    # PNG entry point — enkel grondplan-pagina
+    # ------------------------------------------------------------------
+
+    def render_image(self) -> "QImage":
+        img = QImage(QSize(self._IMG_W, self._IMG_H), QImage.Format.Format_ARGB32)
+        img.fill(QColor("#ffffff"))
+        p = QPainter(img)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self._draw_page1(p)
+        p.end()
+        return img
+
+    # ------------------------------------------------------------------
+    # PDF entry point — alle pagina's via printer
+    # ------------------------------------------------------------------
+
+    def render_pdf_pages(self, printer: "QPrinter"):
+        """
+        Tekent alle PDF-pagina's op de gegeven QPrinter.
+        Aanroeper is verantwoordelijk voor printer setup en p.end().
+        """
+        p = QPainter(printer)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        # Schaal van printer-coördinaten naar onze canvas-ruimte
+        pw = printer.width()
+        ph = printer.height()
+        sx = pw / self._IMG_W
+        sy = ph / self._IMG_H
+        scale = min(sx, sy)
+
+        def new_canvas():
+            """Reset transform en vul achtergrond."""
+            p.resetTransform()
+            p.scale(scale, scale)
+            p.fillRect(0, 0, self._IMG_W, self._IMG_H, QColor("#ffffff"))
+
+        # Pagina 1 — grondplan + overlay-cirkels
+        new_canvas()
+        self._draw_page1(p)
+
+        # Pagina 2 — gekoppelde punten (kaartjes)
+        printer.newPage()
+        new_canvas()
+        self._draw_page_coupled(p)
+
+        p.end()
+
+    # ==================================================================
+    # PAGINA 1 — SVG grondplan + overlays + legenda
+    # ==================================================================
+
+    def _draw_page1(self, p: "QPainter"):
+        y = self._draw_page_header(p, 0)
+        self._draw_svg_with_overlays(p, y)
+
+    def _draw_svg_with_overlays(self, p: "QPainter", y: int) -> int:
+        from app.services import floorplan_service, floorplan_svg_service
+
+        svg_path = floorplan_service.get_svg_path(self._floorplan)
+        if not svg_path.exists():
+            _draw_text(p, QRect(_MARGIN, y, self._IMG_W - 2*_MARGIN, 40*_SCALE),
+                       "⚠  SVG bestand ontbreekt", _C_OL_UNMAPPED, size=10)
+            return y + 60 * _SCALE
+
+        svg_img = self._render_svg_to_image(svg_path, floorplan_svg_service)
+        if svg_img is None or svg_img.isNull():
+            _draw_text(p, QRect(_MARGIN, y, self._IMG_W - 2*_MARGIN, 40*_SCALE),
+                       "⚠  SVG kon niet worden geladen", _C_OL_UNMAPPED, size=10)
+            return y + 60 * _SCALE
+
+        # Beschikbare ruimte: boven y, onder legenda + marge
+        avail_h = self._IMG_H - self._LEGEND_H - _MARGIN - y - _MARGIN
+        avail_h = max(avail_h, 100 * _SCALE)
+
+        src_w = svg_img.width()
+        src_h = svg_img.height()
+        max_w = self._IMG_W - 2 * _MARGIN
+        scale = min(max_w / max(src_w, 1), avail_h / max(src_h, 1))
+        dst_w = int(src_w * scale)
+        dst_h = int(src_h * scale)
+        dst_x = _MARGIN + (max_w - dst_w) // 2
+
+        p.drawImage(QRect(dst_x, y, dst_w, dst_h), svg_img)
+
+        # Overlays
+        from PySide6.QtSvg import QSvgRenderer as _QSvgRenderer
+        positions = floorplan_svg_service.detect_point_positions(svg_path)
+        rdr = _QSvgRenderer(str(svg_path))
+        vb  = rdr.viewBoxF()
+        vb_w = vb.width()  if vb.width()  > 0 else src_w
+        vb_h = vb.height() if vb.height() > 0 else src_h
+        sx = dst_w / max(vb_w, 1)
+        sy = dst_h / max(vb_h, 1)
+
+        r = _OVERLAY_R_EXP
+        for label, (ox, oy) in positions.items():
+            mapped_val = self._mappings.get(label, "")
+            if not mapped_val:
+                continue   # enkel gekoppelde punten tonen
+            px = dst_x + int(ox * sx)
+            py = y     + int(oy * sy)
+            color = self._overlay_color(mapped_val)
+            fill = QColor(color); fill.setAlpha(220)
+            p.setBrush(QBrush(fill))
+            p.setPen(QPen(QColor("#ffffff"), 1 * _SCALE))
+            p.drawEllipse(px - r, py - r, r * 2, r * 2)
+
+        return y + dst_h + _MARGIN
+
+    def _render_svg_to_image(self, svg_path, floorplan_svg_service) -> "QImage | None":
+        import tempfile, os
+        from PySide6.QtSvg import QSvgRenderer as _QSvgRenderer
+
+        cleaned = floorplan_svg_service.get_cleaned_svg_text(svg_path)
+        if not cleaned:
+            return None
+        tmp = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=".svg", delete=False, mode="w", encoding="utf-8"
+            ) as f:
+                f.write(cleaned)
+                tmp = f.name
+            rdr = _QSvgRenderer(tmp)
+            if not rdr.isValid():
+                return None
+            vb    = rdr.viewBoxF()
+            src_w = int(vb.width())  if vb.width()  > 0 else 800
+            src_h = int(vb.height()) if vb.height() > 0 else 600
+            rw = min(src_w * 2, self._IMG_W)
+            rh = int(src_h * (rw / max(src_w, 1)))
+            img = QImage(QSize(rw, rh), QImage.Format.Format_ARGB32)
+            img.fill(QColor("#ffffff"))
+            pp = QPainter(img)
+            pp.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            rdr.render(pp)
+            pp.end()
+            return img
+        except Exception:
+            return None
+        finally:
+            if tmp:
+                try: os.unlink(tmp)
+                except OSError: pass
+
+    def _draw_legend(self, p: "QPainter", y: int):
+        items = [
+            (_C_OL_MAPPED,   "Wandpunt"),
+            (_C_OL_ENDPOINT, "Eindapparaat (direct)"),
+            (_C_OL_PORT,     "Poort-koppeling"),
+            (_C_OL_UNMAPPED, "Ongekoppeld punt"),
+        ]
+        total_w = self._IMG_W - 2 * _MARGIN
+        p.fillRect(QRect(_MARGIN, y, total_w, self._LEGEND_H), _C_HEADER_BG)
+        item_w = total_w // len(items)
+        cx = _MARGIN
+        r  = 10 * _SCALE
+        cy = y + self._LEGEND_H // 2
+        for color, label in items:
+            fill = QColor(color); fill.setAlpha(200)
+            p.setBrush(QBrush(fill))
+            p.setPen(QPen(color, 2 * _SCALE))
+            p.drawEllipse(cx + 8*_SCALE, cy - r, r*2, r*2)
+            _draw_text(p, QRect(cx + 8*_SCALE + r*2 + 6*_SCALE, y,
+                                item_w - r*2 - 20*_SCALE, self._LEGEND_H),
+                       label, _C_TEXT_MAIN, size=7)
+            cx += item_w
+
+    # ==================================================================
+    # PAGINA 2 — Alle wandpunten van de site
+    # ==================================================================
+
+    def _draw_page_outlets_all(self, p: "QPainter"):
+        from app.helpers.i18n import t
+        y = self._draw_page_header(p, 0,
+            title=f"Alle wandpunten  —  {self._site.get('name', '')}")
+
+        # Kolommen: Ruimte | Naam | Locatie | Eindapparaat | Trace
+        cols = [
+            ("Ruimte",       0.16),
+            ("Wandpunt",     0.14),
+            ("Locatie",      0.20),
+            ("Eindapparaat", 0.22),
+            ("Trace",        0.28),
+        ]
+        y = self._draw_col_header(p, y, cols)
+
+        site_id = self._floorplan.get("site_id", "")
+        alt = False
+        for site in self._data.get("sites", []):
+            if site["id"] != site_id:
+                continue
+            for room in site.get("rooms", []):
+                room_name = room.get("name", "")
+                outlets   = room.get("wall_outlets", [])
+                if not outlets:
+                    continue
+                # Ruimte-scheidingsbalk
+                y = self._draw_group_row(p, y, f"🚪  {room_name}  ({len(outlets)})")
+                for wo in outlets:
+                    ep_name = ""
+                    ep_id   = wo.get("endpoint_id", "")
+                    if ep_id and ep_id in self._ep_map:
+                        ep_name = self._ep_map[ep_id].get("name", "")
+                    from app.services import tracing as _tr
+                    steps = _tr.trace_from_wall_outlet(self._data, wo["id"])
+                    trace = self._trace_summary(steps)
+                    row = [
+                        (room_name, 0.16),
+                        (wo.get("name", ""), 0.14),
+                        (wo.get("location_description", "—"), 0.20),
+                        (ep_name or "—", 0.22),
+                        (trace, 0.28),
+                    ]
+                    y = self._draw_data_row(p, y, row, alt)
+                    alt = not alt
+                    y = self._check_page_overflow(p, y)
+
+    # ==================================================================
+    # PAGINA 3 — Alle devices van de site
+    # ==================================================================
+
+    def _draw_page_devices_all(self, p: "QPainter"):
+        y = self._draw_page_header(p, 0,
+            title=f"Alle devices  —  {self._site.get('name', '')}")
+
+        cols = [
+            ("Rack",          0.18),
+            ("Device",        0.20),
+            ("Type",          0.14),
+            ("IP",            0.16),
+            ("Poorten",       0.10),
+            ("Verbindingen",  0.22),
+        ]
+        y = self._draw_col_header(p, y, cols)
+
+        site_id     = self._floorplan.get("site_id", "")
+        conn_ports  = _connected_ports(self._data)
+        alt = False
+
+        for site in self._data.get("sites", []):
+            if site["id"] != site_id:
+                continue
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    rack_name = f"{room['name']} / {rack['name']}"
+                    slots = rack.get("slots", [])
+                    if not slots:
+                        continue
+                    y = self._draw_group_row(p, y, f"🗄  {rack_name}  ({len(slots)} devices)")
+                    for slot in slots:
+                        dev = self._device_map.get(slot.get("device_id", ""))
+                        if not dev:
+                            continue
+                        ports     = [pp for pp in self._data.get("ports", [])
+                                     if pp.get("device_id") == dev["id"]]
+                        connected = sum(1 for pp in ports if pp["id"] in conn_ports)
+                        ip        = dev.get("ip", "—") or "—"
+                        dev_type  = dev.get("type", "—") or "—"
+                        row = [
+                            (rack_name,                    0.18),
+                            (dev.get("name", ""),          0.20),
+                            (dev_type,                     0.14),
+                            (ip,                           0.16),
+                            (f"{len(ports)}",              0.10),
+                            (f"{connected} verbonden",     0.22),
+                        ]
+                        y = self._draw_data_row(p, y, row, alt)
+                        alt = not alt
+                        y = self._check_page_overflow(p, y)
+
+    # ==================================================================
+    # PAGINA 4 — Gekoppelde punten — kaartjes per SVG-punt
+    # ==================================================================
+
+    # Kaartje-afmetingen (volledige breedte, leesbaar op A4)
+    _CARD_GAP    = 20 * _SCALE   # ruimte tussen kaartjes
+    _CARD_HDR_H  = 38 * _SCALE   # badge-balk hoogte
+    _CARD_ROW_H  = 26 * _SCALE   # rij-hoogte in kaartje
+    _CARD_SEC_H  = 22 * _SCALE   # sectie-label hoogte
+    _CARD_PAD    = 14 * _SCALE   # interne padding
+    _CARD_LBL_W  = 0.25           # fractie label-kolom breedte
+    _CARD_TXT_PX = 15             # font grootte data rijen (px)
+    _CARD_HDR_PX = 20             # font grootte badge (px)
+    _CARD_SEC_PX = 13             # font grootte sectie-kop (px)
+    _CARD_LBL_PX = 13             # font grootte label (px)
+
+    def _draw_page_coupled(self, p: "QPainter"):
+        y = self._draw_page_header(p, 0,
+            title=f"Gekoppelde punten  —  {self._site.get('name', '')}")
+
+        if not self._mappings:
+            _fp_draw_text(p, QRect(_MARGIN, y + _MARGIN, self._IMG_W - 2*_MARGIN, 40*_SCALE),
+                          "Geen koppelingen gevonden in dit grondplan.",
+                          self._C_DATE, size_pt=10)
+            return
+
+        from app.services import tracing as _tr
+
+        # Eén kaartje per rij — volledige breedte
+        card_w = self._IMG_W - 2 * _MARGIN
+
+        for svg_pt, mapped_val in sorted(self._mappings.items()):
+            card_h = self._calc_card_height(mapped_val)
+            self._draw_coupled_card(p, _MARGIN, y, card_w, svg_pt, mapped_val, _tr)
+            y += card_h + self._CARD_GAP
+
+    def _calc_card_height(self, mapped_val: str) -> int:
+        """Berekent de hoogte van een kaartje op basis van het type koppeling."""
+        R  = self._CARD_ROW_H
+        S  = self._CARD_SEC_H
+        P  = self._CARD_PAD
+        h  = self._CARD_HDR_H + P  # badge + top-padding
+
+        if mapped_val.startswith("port:"):
+            # Wandpunt (3) + Device (6) + Poort (2) als 3 kolommen naast elkaar
+            h += S + 6 * R   # hoogste kolom = device (naam,type,ip,mac,rack,model)
+            h += P
+            h += S + 5 * R   # trace: max 5 stappen
+        elif mapped_val.startswith("ep:"):
+            # Eindapparaat: naam,type,ip,mac,sn,merk,model,notities
+            h += S + 8 * R
+            h += P
+            h += S + 5 * R   # trace
+        else:
+            # Wandpunt (links) + Eindapparaat (rechts): max(5,8) = 8 rijen
+            h += S + 8 * R
+            h += P
+            h += S + 5 * R   # trace
+
+        h += P   # bottom padding
+        return h
+
+    def _draw_coupled_card(
+        self, p: "QPainter", cx: int, cy: int, cw: int,
+        svg_pt: str, mapped_val: str, _tracing
+    ):
+        """Tekent één kaartje voor een gekoppeld SVG-punt."""
+        card_h = self._calc_card_height(mapped_val)
+        color  = self._overlay_color(mapped_val)
+
+        # ── Kaartje-kader ─────────────────────────────────────────────
+        p.setPen(QPen(QColor("#cccccc"), 1 * _SCALE))
+        p.setBrush(QBrush(QColor("#ffffff")))
+        p.drawRoundedRect(QRect(cx, cy, cw, card_h), 6 * _SCALE, 6 * _SCALE)
+
+        # ── Badge-balk (gekleurde header) ──────────────────────────────
+        badge_rect = QRect(cx, cy, cw, self._CARD_HDR_H)
+        badge_color = QColor(color); badge_color.setAlpha(40)
+        p.fillRect(badge_rect, badge_color)
+
+        # Gekleurde cirkel
+        r  = 12 * _SCALE
+        bx = cx + self._CARD_PAD + r
+        by = cy + self._CARD_HDR_H // 2
+        fill = QColor(color); fill.setAlpha(220)
+        p.setBrush(QBrush(fill))
+        p.setPen(QPen(QColor("#ffffff"), 1 * _SCALE))
+        p.drawEllipse(bx - r, by - r, r * 2, r * 2)
+
+        # SVG-label en type
+        # Type label + object naam in badge
+        if mapped_val.startswith("ep:"):
+            type_lbl = "Eindapparaat"
+            ep = self._ep_map.get(mapped_val[3:])
+            obj_name = ep.get("name", "") if ep else ""
+        elif mapped_val.startswith("port:"):
+            type_lbl = "Poort"
+            port = self._port_map.get(mapped_val[5:])
+            dev  = self._device_map.get(port.get("device_id","")) if port else None
+            obj_name = dev.get("name","") if dev else ""
+        else:
+            type_lbl = "Wandpunt"
+            wo = self._outlet_map.get(mapped_val)
+            obj_name = wo.get("name","") if wo else ""
+
+        badge_text = f"{svg_pt}   {type_lbl}"
+        if obj_name:
+            badge_text += f"   |   {obj_name}"
+        lbl_rect = QRect(bx + r + 10*_SCALE, cy, self._IMG_W, self._CARD_HDR_H)
+        _fp_draw_pt(p, lbl_rect, badge_text, self._C_TITLE,
+                    size_pt=13, bold=True)
+
+        y = cy + self._CARD_HDR_H + self._CARD_PAD
+        inner_x = cx + self._CARD_PAD
+        inner_w = cw - 2 * self._CARD_PAD
+
+        # ── Inhoud op basis van type ───────────────────────────────────
+        if mapped_val.startswith("port:"):
+            y = self._card_section_port(p, inner_x, y, inner_w, mapped_val, _tracing)
+        elif mapped_val.startswith("ep:"):
+            y = self._card_section_ep(p, inner_x, y, inner_w, mapped_val, _tracing)
+        else:
+            y = self._card_section_outlet(p, inner_x, y, inner_w, mapped_val, _tracing)
+
+    # ------------------------------------------------------------------
+    # Kaartje-secties
+    # ------------------------------------------------------------------
+
+    def _card_label_row(self, p, x, y, w, label, value, size_px=None):
+        """Één label:waarde rij in een kaartje."""
+        if size_px is None:
+            size_px = self._CARD_TXT_PX
+        lw = int(w * self._CARD_LBL_W)
+        vw = w - lw
+        _fp_draw_pt(p, QRect(x, y, lw, self._CARD_ROW_H),
+                    label, self._C_DATE, size_pt=9)
+        _fp_draw_pt(p, QRect(x + lw, y, vw, self._CARD_ROW_H),
+                    value or "—", self._C_TITLE, size_pt=10, bold=True)
+        return y + self._CARD_ROW_H
+
+    def _card_section_header(self, p, x, y, w, label):
+        """Grijze sectietitel binnen een kaartje."""
+        p.fillRect(QRect(x, y, w, self._CARD_SEC_H), QColor("#eeeeee"))
+        _fp_draw_pt(p, QRect(x + 6*_SCALE, y, w, self._CARD_SEC_H),
+                    label, QColor("#444444"), size_pt=9, bold=True)
+        return y + self._CARD_SEC_H
+
+    def _card_section_outlet(self, p, x, y, w, mapped_val, _tracing):
+        """Wandpunt + Eindapparaat naast elkaar, daarna Trace."""
+        wo  = self._outlet_map.get(mapped_val)
+        ep  = self._ep_map.get(wo.get("endpoint_id", "")) if wo else None
+
+        # 2 kolommen
+        col_w = (w - 8*_SCALE) // 2
+
+        # Kolom 1: Wandpunt
+        y1 = self._card_section_header(p, x, y, col_w, "Wandpunt")
+        from app.helpers.settings_storage import get_outlet_location_label
+        wo_loc_key = wo.get("location_description", "") if wo else ""
+        wo_loc_lbl = get_outlet_location_label(wo_loc_key) if wo_loc_key else "—"
+        y1 = self._card_label_row(p, x, y1, col_w, "Naam:",    wo.get("name", "—") if wo else "—")
+        y1 = self._card_label_row(p, x, y1, col_w, "Locatie:", wo_loc_lbl)
+        y1 = self._card_label_row(p, x, y1, col_w, "VLAN:",    wo.get("vlan", "—") if wo else "—")
+        y1 = self._card_label_row(p, x, y1, col_w, "Notities:", wo.get("notes", "—") if wo else "—")
+
+        # Kolom 2: Eindapparaat
+        ex = x + col_w + 8*_SCALE
+        y2 = self._card_section_header(p, ex, y, col_w, "Eindapparaat")
+        if ep:
+            y2 = self._card_label_row(p, ex, y2, col_w, "Naam:",     ep.get("name", "—"))
+            y2 = self._card_label_row(p, ex, y2, col_w, "Type:",     ep.get("type", "—"))
+            y2 = self._card_label_row(p, ex, y2, col_w, "IP:",       ep.get("ip", "—") or "—")
+            y2 = self._card_label_row(p, ex, y2, col_w, "MAC:",      ep.get("mac", "—") or "—")
+            y2 = self._card_label_row(p, ex, y2, col_w, "S/N:",      ep.get("serial", "—") or "—")
+            y2 = self._card_label_row(p, ex, y2, col_w, "Merk:",     ep.get("brand", "—") or "—")
+            y2 = self._card_label_row(p, ex, y2, col_w, "Model:",    ep.get("model", "—") or "—")
+            y2 = self._card_label_row(p, ex, y2, col_w, "Notities:", ep.get("notes", "—") or "—")
+        else:
+            _fp_draw_text(p, QRect(ex, y2, col_w, self._CARD_ROW_H),
+                          "Geen eindapparaat", self._C_DATE, size_pt=9)
+            y2 += self._CARD_ROW_H
+
+        # Trace — onder beide kolommen
+        y_after = max(y1, y2) + self._CARD_PAD
+        steps = _tracing.trace_from_wall_outlet(self._data, mapped_val)
+        y_after = self._card_trace(p, x, y_after, w, steps)
+        return y_after
+
+    def _card_section_ep(self, p, x, y, w, mapped_val, _tracing):
+        """Eindapparaat-info + Trace."""
+        ep_id = mapped_val[3:]
+        ep    = self._ep_map.get(ep_id)
+
+        y = self._card_section_header(p, x, y, w, "Eindapparaat")
+        if ep:
+            # 2 kolommen naast elkaar voor compactheid
+            col_w = (w - 8*_SCALE) // 2
+            col2  = x + col_w + 8*_SCALE
+            ya = y; yb = y
+            ya = self._card_label_row(p, x,    ya, col_w, "Naam:",     ep.get("name", "—"))
+            ya = self._card_label_row(p, x,    ya, col_w, "Type:",     ep.get("type", "—"))
+            ya = self._card_label_row(p, x,    ya, col_w, "IP adres:", ep.get("ip", "—") or "—")
+            ya = self._card_label_row(p, x,    ya, col_w, "MAC adres:",ep.get("mac", "—") or "—")
+            yb = self._card_label_row(p, col2, yb, col_w, "S/N:",      ep.get("serial", "—") or "—")
+            yb = self._card_label_row(p, col2, yb, col_w, "Merk:",     ep.get("brand", "—") or "—")
+            yb = self._card_label_row(p, col2, yb, col_w, "Model:",    ep.get("model", "—") or "—")
+            yb = self._card_label_row(p, col2, yb, col_w, "Locatie:",  ep.get("location", "—") or "—")
+            yb = self._card_label_row(p, col2, yb, col_w, "Notities:", ep.get("notes", "—") or "—")
+            y  = max(ya, yb)
+        else:
+            _fp_draw_text(p, QRect(x, y, w, self._CARD_ROW_H),
+                          "Eindapparaat niet gevonden", self._C_DATE, size_pt=9)
+            y += self._CARD_ROW_H
+
+        y += self._CARD_PAD
+        conn = next(
+            (c for c in self._data.get("connections", [])
+             if (c.get("to_type") == "endpoint" and c["to_id"] == ep_id) or
+                (c.get("from_type") == "endpoint" and c["from_id"] == ep_id)),
+            None,
+        )
+        steps = []
+        if conn:
+            pid   = conn["from_id"] if conn.get("to_type") == "endpoint" else conn["to_id"]
+            steps = _tracing.trace_from_port(self._data, pid)
+        y = self._card_trace(p, x, y, w, steps)
+        return y
+
+    def _card_section_port(self, p, x, y, w, mapped_val, _tracing):
+        """Wandpunt (indien van toepassing) + Device + Poort + Trace in 3 kolommen."""
+        from app.helpers.settings_storage import get_outlet_location_label
+
+        port_id = mapped_val[5:]
+        port    = self._port_map.get(port_id)
+        dev     = self._device_map.get(port.get("device_id", "")) if port else None
+
+        # Wandpunt zoeken dat aan deze poort gekoppeld is
+        wo = None
+        for s in self._data.get("sites", []):
+            for r in s.get("rooms", []):
+                for outlet in r.get("wall_outlets", []):
+                    if outlet.get("port_id") == port_id:
+                        wo = outlet
+                        break
+
+        # Rack-locatie
+        loc = "—"
+        if dev:
+            for s in self._data.get("sites", []):
+                for r in s.get("rooms", []):
+                    for ra in r.get("racks", []):
+                        for sl in ra.get("slots", []):
+                            if sl.get("device_id") == dev["id"]:
+                                loc = f"{r['name']} / {ra['name']}"
+
+        # 3 kolommen als wandpunt beschikbaar, anders 2
+        if wo:
+            col_w = (w - 16*_SCALE) // 3
+            # Kolom 1: Wandpunt
+            loc_key = wo.get("location_description", "") or ""
+            loc_lbl = get_outlet_location_label(loc_key) if loc_key else "—"
+            y1 = self._card_section_header(p, x, y, col_w, "Wandpunt")
+            y1 = self._card_label_row(p, x, y1, col_w, "Naam:",     wo.get("name", "—"))
+            y1 = self._card_label_row(p, x, y1, col_w, "Locatie:",  loc_lbl)
+            y1 = self._card_label_row(p, x, y1, col_w, "VLAN:",     wo.get("vlan", "—") or "—")
+            y1 = self._card_label_row(p, x, y1, col_w, "Notities:", wo.get("notes", "—") or "—")
+            x2 = x + col_w + 8*_SCALE
+            x3 = x2 + col_w + 8*_SCALE
+        else:
+            col_w = (w - 8*_SCALE) // 2
+            y1 = y
+            x2 = x
+            x3 = x + col_w + 8*_SCALE
+
+        # Kolom 2: Device
+        y2 = self._card_section_header(p, x2, y, col_w, "Device")
+        if dev:
+            y2 = self._card_label_row(p, x2, y2, col_w, "Naam:",  dev.get("name", "—"))
+            y2 = self._card_label_row(p, x2, y2, col_w, "Type:",  dev.get("type", "—"))
+            y2 = self._card_label_row(p, x2, y2, col_w, "IP:",    dev.get("ip", "—") or "—")
+            y2 = self._card_label_row(p, x2, y2, col_w, "MAC:",   dev.get("mac", "—") or "—")
+            y2 = self._card_label_row(p, x2, y2, col_w, "Rack:",  loc)
+        else:
+            _fp_draw_text(p, QRect(x2, y2, col_w, self._CARD_ROW_H),
+                          "Device niet gevonden", self._C_DATE, size_pt=9)
+            y2 += self._CARD_ROW_H
+
+        # Kolom 3: Poort
+        y3 = self._card_section_header(p, x3, y, col_w, "Poort")
+        if port:
+            side = port.get("side", "")
+            y3 = self._card_label_row(p, x3, y3, col_w, "Naam:", port.get("name", "—"))
+            y3 = self._card_label_row(p, x3, y3, col_w, "Kant:", side.upper() if side else "—")
+        else:
+            _fp_draw_text(p, QRect(x3, y3, col_w, self._CARD_ROW_H),
+                          "Poort niet gevonden", self._C_DATE, size_pt=9)
+            y3 += self._CARD_ROW_H
+
+        y_after = max(y1, y2, y3) + self._CARD_PAD
+        steps   = _tracing.trace_from_port(self._data, port_id)
+        return self._card_trace(p, x, y_after, w, steps)
+
+    def _card_trace(self, p, x, y, w, steps: list) -> int:
+        """Trace-sectie onderaan een kaartje."""
+        y = self._card_section_header(p, x, y, w, "Trace")
+        if not steps:
+            _fp_draw_text(p, QRect(x, y, w, self._CARD_ROW_H),
+                          "Geen trace beschikbaar", self._C_DATE, size_pt=9)
+            return y + self._CARD_ROW_H + self._CARD_PAD
+
+        # Toon max 4 stappen, daarna "..."
+        shown = steps[:4]
+        for step in shown:
+            label = step.get("label", "")
+            stype = step.get("obj_type", "")
+            prefix = {"port": "⬡", "endpoint": "💻", "wall_outlet": "◈"}.get(stype, "→")
+            # Geen emoji — gebruik ASCII alternatieven die altijd renderen
+            prefix = {"port": "->", "endpoint": ">", "wall_outlet": ">>"}.get(stype, "->")
+            _fp_draw_text(p, QRect(x + 8*_SCALE, y, w - 8*_SCALE, self._CARD_ROW_H),
+                          f"{prefix}  {label}", self._C_TBL_SUB, size_pt=10)
+            y += self._CARD_ROW_H
+
+        if len(steps) > 4:
+            _fp_draw_text(p, QRect(x + 8*_SCALE, y, w, self._CARD_ROW_H),
+                          f"... (+{len(steps)-4} stappen)", self._C_DATE, size_pt=9)
+            y += self._CARD_ROW_H
+
+        return y + self._CARD_PAD
+
+    # ==================================================================
+    # PAGINA 5 — Niet-gekoppelde wandpunten & devices
+    # ==================================================================
+
+    def _draw_page_uncoupled(self, p: "QPainter"):
+        y = self._draw_page_header(p, 0,
+            title=f"Niet-gekoppelde punten  —  {self._site.get('name', '')}")
+
+        # Gemapte outlet/ep/port IDs verzamelen
+        mapped_outlet_ids: set[str] = set()
+        mapped_ep_ids:     set[str] = set()
+        mapped_port_ids:   set[str] = set()
+        for mv in self._mappings.values():
+            if mv.startswith("ep:"):
+                mapped_ep_ids.add(mv[3:])
+            elif mv.startswith("port:"):
+                mapped_port_ids.add(mv[5:])
+            else:
+                mapped_outlet_ids.add(mv)
+
+        site_id = self._floorplan.get("site_id", "")
+        alt = False
+
+        # ── Niet-gekoppelde wandpunten ────────────────────────────────
+        y = self._draw_group_row(p, y, "🌐  Wandpunten zonder SVG-koppeling")
+
+        cols_wo = [
+            ("Ruimte",      0.18),
+            ("Wandpunt",    0.16),
+            ("Locatie",     0.24),
+            ("Eindapparaat",0.22),
+            ("Trace",       0.20),
+        ]
+        y = self._draw_col_header(p, y, cols_wo)
+
+        from app.services import tracing as _tr
+        any_wo = False
+        for site in self._data.get("sites", []):
+            if site["id"] != site_id:
+                continue
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo["id"] in mapped_outlet_ids:
+                        continue
+                    any_wo = True
+                    ep_name = ""
+                    ep_id   = wo.get("endpoint_id", "")
+                    if ep_id and ep_id in self._ep_map:
+                        ep_name = self._ep_map[ep_id].get("name", "")
+                    steps = _tr.trace_from_wall_outlet(self._data, wo["id"])
+                    trace = self._trace_summary(steps)
+                    row = [
+                        (room.get("name", ""),               0.18),
+                        (wo.get("name", ""),                 0.16),
+                        (wo.get("location_description", "—"),0.24),
+                        (ep_name or "—",                     0.22),
+                        (trace,                              0.20),
+                    ]
+                    y = self._draw_data_row(p, y, row, alt)
+                    alt = not alt
+                    y = self._check_page_overflow(p, y)
+
+        if not any_wo:
+            y = self._draw_data_row(p, y, [("Alle wandpunten zijn gekoppeld.", 1.0)], False)
+
+        # ── Niet-gekoppelde devices ───────────────────────────────────
+        y += _MARGIN
+        y = self._draw_group_row(p, y, "🗄  Devices zonder SVG-koppeling (via poort)")
+
+        cols_dev = [
+            ("Rack",    0.20),
+            ("Device",  0.22),
+            ("Type",    0.14),
+            ("IP",      0.16),
+            ("Poorten", 0.10),
+            ("",        0.18),
+        ]
+        y = self._draw_col_header(p, y, cols_dev)
+
+        conn_ports = _connected_ports(self._data)
+        any_dev    = False
+        alt        = False
+        for site in self._data.get("sites", []):
+            if site["id"] != site_id:
+                continue
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    rack_name = f"{room['name']} / {rack['name']}"
+                    for slot in rack.get("slots", []):
+                        dev = self._device_map.get(slot.get("device_id", ""))
+                        if not dev:
+                            continue
+                        ports = [pp for pp in self._data.get("ports", [])
+                                 if pp.get("device_id") == dev["id"]]
+                        # Device is niet-gekoppeld als geen van zijn poorten in mapped_port_ids zit
+                        if any(pp["id"] in mapped_port_ids for pp in ports):
+                            continue
+                        any_dev = True
+                        connected = sum(1 for pp in ports if pp["id"] in conn_ports)
+                        row = [
+                            (rack_name,                0.20),
+                            (dev.get("name", ""),      0.22),
+                            (dev.get("type", "—"),     0.14),
+                            (dev.get("ip", "—") or "—",0.16),
+                            (f"{len(ports)}",          0.10),
+                            (f"{connected} verbonden", 0.18),
+                        ]
+                        y = self._draw_data_row(p, y, row, alt)
+                        alt = not alt
+                        y = self._check_page_overflow(p, y)
+
+        if not any_dev:
+            self._draw_data_row(p, y, [("Alle devices zijn gekoppeld.", 1.0)], False)
+
+    # ==================================================================
+    # Gedeelde teken-helpers
+    # ==================================================================
+
+    def _draw_page_header(self, p: "QPainter", y: int, title: str = "") -> int:
+        """Paginaheader: grondplan-naam (of custom titel), site, datum."""
+        if not title:
+            fp_name   = self._floorplan.get("name", "") or self._floorplan.get("outlet_location_key", "")
+            site_name = self._site.get("name", "")
+            title = f"{fp_name}  |  {site_name}" if site_name else fp_name
+
+        y += _MARGIN
+        hdr_h = 28 * _SCALE
+        rect = QRect(_MARGIN, y, self._IMG_W - 2*_MARGIN, hdr_h)
+        # Pixel-fonts: niet beïnvloed door QPainter.scale()
+        _fp_draw_text(p, rect, title, self._C_TITLE, size_px=22, bold=True)
+        datum = datetime.date.today().strftime("%d/%m/%Y")
+        _fp_draw_text(p, rect, datum, self._C_DATE, size_px=16,
+                      align=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        y += hdr_h + 3 * _SCALE
+        p.setPen(QPen(self._C_BORDER_FP, 1 * _SCALE))
+        p.drawLine(_MARGIN, y, self._IMG_W - _MARGIN, y)
+        p.setPen(QPen(_C_BORDER, 1))   # reset pen
+        return y + _MARGIN
+
+    def _draw_group_row(self, p: "QPainter", y: int, label: str) -> int:
+        """Gekleurde groep-scheidingsbalk met label."""
+        total_w = self._IMG_W - 2 * _MARGIN
+        h = self._SEC_HDR_H
+        p.fillRect(QRect(_MARGIN, y, total_w, h), _C_UNIT_DEV)
+        _fp_draw_text(p, QRect(_MARGIN + 8*_SCALE, y, total_w, h),
+                      label, self._C_GRP_TXT, size_px=16, bold=True)
+        return y + h
+
+    def _draw_col_header(self, p: "QPainter", y: int,
+                         cols: list[tuple[str, float]]) -> int:
+        """Kolomkoptekst-balk."""
+        total_w = self._IMG_W - 2 * _MARGIN
+        h = self._COL_HDR_H
+        p.fillRect(QRect(_MARGIN, y, total_w, h), _C_TABLE_HDR)
+        cx = _MARGIN + 4 * _SCALE
+        for label, frac in cols:
+            cw = int(total_w * frac)
+            _fp_draw_text(p, QRect(cx, y, cw, h), label, self._C_TBL_MAIN, size_px=14, bold=True)
+            cx += cw
+        return y + h
+
+    def _draw_data_row(self, p: "QPainter", y: int,
+                       cols: list[tuple[str, float]], alt: bool) -> int:
+        """Één tabelrij met alternerende achtergrond."""
+        total_w = self._IMG_W - 2 * _MARGIN
+        h = self._ROW_H
+        bg = _C_TABLE_ALT if alt else _C_BG
+        p.fillRect(QRect(_MARGIN, y, total_w, h), bg)
+        cx = _MARGIN + 4 * _SCALE
+        for text, frac in cols:
+            cw = int(total_w * frac)
+            _fp_draw_text(p, QRect(cx, y, cw - 4*_SCALE, h), text, self._C_TBL_SUB, size_px=13)
+            cx += cw
+        return y + h
+
+    def _check_page_overflow(self, p: "QPainter", y: int) -> int:
+        """
+        Simpele overflow-beveiliging: als y dicht bij de onderkant komt,
+        teken een indicatie. Echte paginaoverloop bij tabellen is
+        zelden nodig voor het huidige datavolume; bij grote datasets
+        kan dit uitgebreid worden met printer.newPage().
+        """
+        limit = self._IMG_H - self._LEGEND_H - _MARGIN * 3
+        if y > limit:
+            # Clip stil — rijen die over de rand gaan worden gewoon niet getoond
+            return limit + 1  # signaal dat overflow optrad
+        return y
+
+    # ==================================================================
+    # Data-resolvers
+    # ==================================================================
+
+    @staticmethod
+    def _overlay_color(mapped_val: str) -> "QColor":
+        if mapped_val.startswith("port:"):
+            return _C_OL_PORT
+        if mapped_val.startswith("ep:"):
+            return _C_OL_ENDPOINT
+        if mapped_val:
+            return _C_OL_MAPPED
+        return _C_OL_UNMAPPED
+
+    def _resolve_full(
+        self, mapped_val: str, _tracing
+    ) -> tuple[str, str, str, str]:
+        """Geeft (type, naam, locatie, trace) terug voor één mapping-waarde."""
+        data = self._data
+
+        if mapped_val.startswith("port:"):
+            port_id  = mapped_val[5:]
+            port     = self._port_map.get(port_id)
+            dev      = self._device_map.get(port.get("device_id", "")) if port else None
+            dev_name = dev.get("name", "") if dev else ""
+            pname    = port.get("name", port_id) if port else port_id
+            side     = port.get("side", "") if port else ""
+            name     = f"{dev_name} — {pname} ({side.upper()})" if dev_name else pname
+            loc      = ""
+            # Zoek rack-locatie
+            for s in data.get("sites", []):
+                for r in s.get("rooms", []):
+                    for ra in r.get("racks", []):
+                        for sl in ra.get("slots", []):
+                            if sl.get("device_id") == (dev["id"] if dev else ""):
+                                loc = f"{r['name']} / {ra['name']}"
+            steps = _tracing.trace_from_port(data, port_id)
+            return "Poort", name, loc, self._trace_summary(steps)
+
+        if mapped_val.startswith("ep:"):
+            ep_id = mapped_val[3:]
+            ep    = self._ep_map.get(ep_id)
+            name  = ep.get("name", ep_id) if ep else ep_id
+            loc   = ep.get("location", "—") if ep else "—"
+            conn  = next(
+                (c for c in data.get("connections", [])
+                 if (c.get("to_type") == "endpoint" and c["to_id"] == ep_id) or
+                    (c.get("from_type") == "endpoint" and c["from_id"] == ep_id)),
+                None,
+            )
+            steps = []
+            if conn:
+                pid   = conn["from_id"] if conn.get("to_type") == "endpoint" else conn["to_id"]
+                steps = _tracing.trace_from_port(data, pid)
+            return "Eindapparaat", name, loc, self._trace_summary(steps)
+
+        # Wandpunt
+        wo = self._outlet_map.get(mapped_val)
+        if wo:
+            name = wo.get("name", mapped_val)
+            loc  = wo.get("location_description", "—") or "—"
+            steps = _tracing.trace_from_wall_outlet(data, mapped_val)
+            return "Wandpunt", name, loc, self._trace_summary(steps)
+
+        return "?", mapped_val, "—", "—"
+
+    @staticmethod
+    def _trace_summary(steps: list) -> str:
+        if not steps:
+            return "—"
+        last_port = next((s for s in reversed(steps) if s["obj_type"] == "port"), None)
+        first_ep  = next((s for s in steps          if s["obj_type"] == "endpoint"), None)
+        parts = []
+        if first_ep:
+            parts.append(f"💻 {first_ep['label']}")
+        if last_port:
+            parts.append(f"⬡ {last_port['label']}")
+        return "  →  ".join(parts) if parts else "—"
+
+
+# ===========================================================================
+# PUBLIEKE API — FloorplanRenderer entry points
+# ===========================================================================
+
+def render_floorplan_image(
+    floorplan: dict,
+    site: dict,
+    data: dict,
+    filepath: str,
+) -> tuple[bool, str]:
+    """
+    G-OPEN-8 — Exporteer grondplan pagina 1 als PNG.
+    """
+    try:
+        renderer = FloorplanRenderer(floorplan, site, data)
+        img      = renderer.render_image()
+        ext      = filepath.rsplit(".", 1)[-1].lower() if "." in filepath else "png"
+        fmt      = "JPEG" if ext in ("jpg", "jpeg") else "PNG"
+        ok       = img.save(filepath, fmt)
+        return (ok, "" if ok else "Opslaan mislukt")
+    except Exception as e:
+        return (False, str(e))
+
+
+def render_floorplan_pdf(
+    floorplans: list[dict],
+    site: dict,
+    data: dict,
+    filepath: str,
+) -> tuple[bool, str]:
+    """
+    G-OPEN-8 — Exporteer één of meerdere grondplannen als PDF.
+    Per grondplan: 5 pagina's (grondplan, alle WP, alle devices,
+    gekoppeld, niet-gekoppeld).
+    """
+    try:
+        from PySide6.QtGui import QPageLayout, QPageSize
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(filepath)
+        printer.setPageOrientation(QPageLayout.Orientation.Landscape)
+        printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+        printer.setFullPage(True)
+
+        first = True
+        for floorplan in floorplans:
+            renderer = FloorplanRenderer(floorplan, site, data)
+            if first:
+                renderer.render_pdf_pages(printer)
+                first = False
+            else:
+                # Volgende grondplan: nieuwe reeks pagina's
+                printer.newPage()
+                renderer.render_pdf_pages(printer)
+
         return (True, "")
     except Exception as e:
         return (False, str(e))

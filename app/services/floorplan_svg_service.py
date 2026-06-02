@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/services/floorplan_svg_service.py
 # Role:    SVG analyse voor floorplans — detectie van puntlabels + posities
-# Version: 1.7.0
+# Version: 1.8.0
 # Author:  Barremans
-# Changes: 1.7.0 — Bug fix: overlay label linksboven bij geneste g-structuur (draw.io)
+# Changes: 1.8.0 — point_re uitgebreid: WAP-P01, WAP_P01, M-A1 stijl labels herkend
+#                   ^(?:prefix)[-_]?[A-Z]?\d+$ ipv ^(?:prefix)\d+$
+#          1.7.0 — Bug fix: overlay label linksboven bij geneste g-structuur (draw.io)
 #                   _parse_drawio_svg_positions gebruikt nu _walk_drawio_g() die
 #                   cumulatieve parent-translate accumuleert per niveau.
 #                   Geneste labels (D20 in D20A) krijgen nu correcte absolute positie.
@@ -44,6 +46,9 @@ def _build_label_regexes():
     """
     Bouw de label regex patronen op vanuit settings_storage.
     Fallback naar hardcoded defaults als settings niet beschikbaar zijn.
+
+    1.8.0 — point_re uitgebreid: ook labels met koppelteken/underscore+letter
+            bv. WAP-P01, WAP_P01, M-A1 worden nu herkend naast WAP01, M1
     """
     try:
         from app.helpers.settings_storage import load_outlet_label_prefixes
@@ -53,8 +58,10 @@ def _build_label_regexes():
 
     prefix_pattern = "|".join(re.escape(p) for p in prefixes)
 
+    # 1.8.0 — uitgebreid: prefix + optioneel [-_] + optionele letter(s) + verplichte cijfers
+    # Matcht: WAP01, WAP-P01, WAP_P01, M1, M-A1, WO-12
     point_re = re.compile(
-        rf"^(?:{prefix_pattern})\d+$",
+        rf"^(?:{prefix_pattern})[-_]?[A-Z]?\d+$",
         re.IGNORECASE,
     )
     token_re = re.compile(

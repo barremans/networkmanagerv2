@@ -2,9 +2,17 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.20.0
+# Version: 1.24.0
 # Author:  Barremans
-# Changes: 1.20.0 — "+ SVG Prefix" knop in toolbar
+# Changes: 1.24.0 — Site-scope volledig geïmplementeerd via export_all_floorplans_docx
+#                   PNG per grondplan exporteren bij site-scope
+#                   Tijdelijke PNG-bestanden opruimen na export
+#          1.23.0 — PNG grondplan + popup na export
+#                   Pagina 1 per grondplan: grondplan-SVG als PDF (apart)
+#                   Pagina 2+: gekoppelde punten kaartjes in Word
+#                   FloorplanExportDialog: .docx extensie ipv .pdf
+#          1.21.0 — G-OPEN-8: Exportknop in toolbar
+#          1.20.0 — " SVG Prefix" knop in toolbar
 #                   Prefix toevoegen zonder naar Settings te gaan
 #                   Herlaadt overlays meteen na toevoegen
 #          1.19.0 — Poort-koppeling ondersteuning (port: prefix)
@@ -353,6 +361,12 @@ class FloorplanView(QWidget):
         self._btn_add_prefix.clicked.connect(self._on_add_prefix)
         viewer_btn_row.addWidget(self._btn_add_prefix)
 
+        # 1.21.0 — Exportknop grondplan PNG/PDF (G-OPEN-8)
+        self._btn_export = QPushButton("⬇  " + t("fp_export_btn_export"))
+        self._btn_export.setToolTip(t("fp_export_btn_tip"))
+        self._btn_export.clicked.connect(self._on_export_clicked)
+        viewer_btn_row.addWidget(self._btn_export)
+
         viewer_btn_row.addStretch(1)
 
         viewer_layout.addLayout(viewer_btn_row)
@@ -656,6 +670,113 @@ class FloorplanView(QWidget):
 
         # Herlaad overlays zodat nieuw prefix meteen herkend wordt
         self._load_svg()
+
+    def _on_export_clicked(self):
+        """
+        1.22.0 — G-OPEN-8: exporteer grondplan.
+        Pagina 1 (grondplan SVG): PDF via export_renderer.render_floorplan_image()
+        Pagina 2+ (gekoppelde punten): Word-document via floorplan_docx_renderer
+        """
+        from app.gui.dialogs.floorplan_export_dialog import FloorplanExportDialog
+        from app.services import export_renderer, floorplan_docx_renderer
+
+        site_id = self._floorplan.get("site_id", "")
+        site    = next(
+            (s for s in self._data.get("sites", []) if s["id"] == site_id),
+            {"id": site_id, "name": ""},
+        )
+
+        dlg = FloorplanExportDialog(
+            floorplan=self._floorplan,
+            site=site,
+            parent=self,
+        )
+        if not dlg.exec():
+            return
+
+        if not dlg.filepath:
+            return
+
+        filepath = dlg.filepath  # .docx pad
+        import os as _os
+
+        if dlg.scope == "site":
+            # ── Alle grondplannen van de site exporteren ───────────────
+            from app.services import floorplan_service as _fps
+            floorplans = _fps.get_floorplans_for_site(site_id)
+
+            # PNG per grondplan exporteren
+            png_paths = {}
+            for fp in floorplans:
+                fp_id   = fp.get("id", "")
+                png_tmp = filepath.replace(".docx", f"_{fp_id}.png")
+                ok_png, _ = export_renderer.render_floorplan_image(
+                    floorplan=fp, site=site, data=self._data, filepath=png_tmp,
+                )
+                if ok_png and _os.path.exists(png_tmp):
+                    png_paths[fp_id] = png_tmp
+
+            ok, err = floorplan_docx_renderer.export_all_floorplans_docx(
+                floorplans=floorplans,
+                site=site,
+                data=self._data,
+                filepath=filepath,
+                png_paths=png_paths,
+            )
+
+            # Tijdelijke PNG's opruimen
+            for png_tmp in png_paths.values():
+                try: _os.unlink(png_tmp)
+                except OSError: pass
+
+        else:
+            # ── Huidig grondplan exporteren ───────────────────────────
+            png_tmp = filepath.replace(".docx", "_grondplan.png")
+            ok_png, _ = export_renderer.render_floorplan_image(
+                floorplan=self._floorplan,
+                site=site,
+                data=self._data,
+                filepath=png_tmp,
+            )
+            png_path = png_tmp if ok_png and _os.path.exists(png_tmp) else None
+
+            ok, err = floorplan_docx_renderer.export_floorplan_docx(
+                floorplan=self._floorplan,
+                site=site,
+                data=self._data,
+                filepath=filepath,
+                png_path=png_path,
+            )
+
+            # Tijdelijke PNG opruimen
+            if png_path:
+                try: _os.unlink(png_path)
+                except OSError: pass
+
+        if not ok:
+            QMessageBox.warning(self, t("title_floorplan_view"),
+                                f"{t('msg_export_failed')}\n{err}")
+            return
+
+        # ── Popup: document openen? ───────────────────────────────────
+        reply = QMessageBox.question(
+            self,
+            t("title_floorplan_view"),
+            f"{t('msg_pdf_exported')}\n{filepath}\n\nDocument nu openen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            import subprocess, sys
+            try:
+                if sys.platform == "win32":
+                    _os.startfile(filepath)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", filepath])
+                else:
+                    subprocess.run(["xdg-open", filepath])
+            except Exception:
+                pass
 
     def _on_reset_zoom(self):
         self._graphics_view.resetTransform()

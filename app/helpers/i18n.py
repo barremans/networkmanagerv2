@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.24.0
+# Version: 1.26.0
 # Author:  Barremans
-# Changes: 1.24.0 — ctx_duplicate toegevoegd (NL + EN), ctx_edit/ctx_delete iconen verwijderd
+# Changes: 1.26.0 — G-OPEN-8: fp_export_* sleutels toegevoegd (NL + EN)
+#          1.25.1 — menu_outlet_locator NL/EN bijgewerkt
 #          1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
 #          F1 — msg_connect_cancelled
 #          F2 — settings_tab_device_types, settings_dt_*, device_* types
@@ -651,6 +652,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "rack_export_select_site":  "Site",
         "rack_export_select_rack":  "Rack",
         "rack_export_btn_export":   "Exporteren",
+
+        # G-OPEN-8 — Grondplan export
+        "fp_export_dialog_title":    "Grondplan exporteren",
+        "fp_export_hint":            "Exporteer het grondplan als PNG-afbeelding of PDF. De overlay-kleuren en tracetabel worden mee opgenomen.",
+        "fp_export_scope_group":     "Bereik",
+        "fp_export_scope_current":   "Huidig grondplan (PNG of PDF)",
+        "fp_export_scope_site":      "Alle grondplannen van de site (PDF)",
+        "fp_export_format_group":    "Formaat",
+        "fp_export_options_group":   "Opties",
+        "fp_export_opt_legend":      "Kleurenlegenda",
+        "fp_export_opt_legend_tip":  "Voeg een legenda toe met de betekenis van de overlay-kleuren",
+        "fp_export_opt_table":       "Tracetabel",
+        "fp_export_opt_table_tip":   "Voeg een tabel toe met per gekoppeld punt de naam en trace-samenvatting",
+        "fp_export_btn_export":      "Exporteren",
+        "fp_export_btn_tip":         "Grondplan exporteren als PNG of PDF",
+        "fp_export_table_title":     "Koppelingen en tracering",
+        "fp_export_col_point":       "SVG Punt",
+        "fp_export_col_type":        "Type",
+        "fp_export_col_name":        "Naam",
+        "fp_export_col_trace":       "Trace",
+        "msg_export_failed":         "Export mislukt.",
     },
 
     # -------------------------------------------------------------------------
@@ -1256,6 +1278,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "rack_export_select_site":  "Site",
         "rack_export_select_rack":  "Rack",
         "rack_export_btn_export":   "Export",
+
+        # G-OPEN-8 — Floorplan export
+        "fp_export_dialog_title":    "Export floorplan",
+        "fp_export_hint":            "Export the floorplan as a PNG image or PDF. Overlay colours and the trace table are included.",
+        "fp_export_scope_group":     "Scope",
+        "fp_export_scope_current":   "Current floorplan (PNG or PDF)",
+        "fp_export_scope_site":      "All floorplans for this site (PDF)",
+        "fp_export_format_group":    "Format",
+        "fp_export_options_group":   "Options",
+        "fp_export_opt_legend":      "Colour legend",
+        "fp_export_opt_legend_tip":  "Include a legend explaining the overlay colours",
+        "fp_export_opt_table":       "Trace table",
+        "fp_export_opt_table_tip":   "Include a table with the name and trace summary for each mapped point",
+        "fp_export_btn_export":      "Export",
+        "fp_export_btn_tip":         "Export floorplan as PNG or PDF",
+        "fp_export_table_title":     "Mappings and tracing",
+        "fp_export_col_point":       "SVG Point",
+        "fp_export_col_type":        "Type",
+        "fp_export_col_name":        "Name",
+        "fp_export_col_trace":       "Trace",
+        "msg_export_failed":         "Export failed.",
     },
 }
 
