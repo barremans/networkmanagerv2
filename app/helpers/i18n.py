@@ -5,6 +5,8 @@
 # Version: 1.26.0
 # Author:  Barremans
 # Changes: 1.26.0 — G-OPEN-8: fp_export_* sleutels toegevoegd (NL + EN)
+#          1.27.0 — label_url, btn_open_url toegevoegd (NL + EN)
+#          1.28.0 — ctx_edit_endpoint toegevoegd (NL + EN)
 #          1.25.1 — menu_outlet_locator NL/EN bijgewerkt
 #          1.16.0 — G-OPEN-2: floorplan_tab_info toegevoegd (NL + EN)
 #          F1 — msg_connect_cancelled
@@ -125,6 +127,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_subnet":             "Subnetmasker",
         "label_mac":                "MAC adres",
         "label_serial":             "Serienummer",
+        "label_url":                "URL",
+        "btn_open_url":             "Link openen in browser",
         "label_notes":              "Notities",
         "label_floor":              "Verdiep",
         "label_place":              "Plaats",
@@ -485,10 +489,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_edit_device":          "✏  Toestel bewerken",
         "ctx_delete_device":        "🗑  Toestel verwijderen",
         "ctx_edit_outlet":          "✏  Wandpunt bewerken",
+        "ctx_edit_endpoint":        "🖥  Eindapparaat bewerken",
         "ctx_delete_outlet":        "🗑  Wandpunt verwijderen",
 
         # Site wandpunten-overzicht
         "tree_site_outlets":            "Alle wandpunten",
+        "tree_endpoints":               "Eindapparaten",
+        "ctx_open_rack":                "Open rack",
+        "ctx_open_floorplan":           "Open grondplan",
         "site_outlets_title":           "Wandpunten overzicht",
         "site_outlets_room":            "Ruimte",
         "site_outlets_no_connection":   "Geen verbinding",
@@ -751,6 +759,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_subnet":             "Subnet Mask",
         "label_mac":                "MAC Address",
         "label_serial":             "Serial Number",
+        "label_url":                "URL",
+        "btn_open_url":             "Open link in browser",
         "label_notes":              "Notes",
         "label_floor":              "Floor",
         "label_place":              "Location",
@@ -1111,10 +1121,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_edit_device":          "✏  Edit Device",
         "ctx_delete_device":        "🗑  Delete Device",
         "ctx_edit_outlet":          "✏  Edit Wall Outlet",
+        "ctx_edit_endpoint":        "🖥  Edit Endpoint",
         "ctx_delete_outlet":        "🗑  Delete Wall Outlet",
 
         # Site wall outlets overview
         "tree_site_outlets":            "All Wall Outlets",
+        "tree_endpoints":               "Endpoints",
+        "ctx_open_rack":                "Open rack",
+        "ctx_open_floorplan":           "Open floor plan",
         "site_outlets_title":           "Wall Outlets Overview",
         "site_outlets_room":            "Room",
         "site_outlets_no_connection":   "No connection",

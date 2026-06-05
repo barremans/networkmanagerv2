@@ -2,16 +2,19 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/endpoint_dialog.py
 # Role:    Endpoint aanmaken en bewerken
-# Version: 1.4.0
+# Version: 1.5.0
 # Author:  Barremans
 # Changes: 1.3.0 — S/N (serienummer) veld toegevoegd
 #          1.4.0 — location veld toegevoegd (optioneel, voor direct endpoint)
+#          1.5.0 — url veld toegevoegd (aanklikbare link, opent in browser)
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QTextEdit, QPushButton, QMessageBox
 )
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from app.helpers.i18n import t, get_language
 from app.helpers import settings_storage
 
@@ -55,6 +58,19 @@ class EndpointDialog(QDialog):
         self._location = QLineEdit()
         self._location.setPlaceholderText(t("endpoint_location_placeholder"))
 
+        # 1.5.0 — URL veld met knop om link te openen in browser
+        self._url = QLineEdit()
+        self._url.setPlaceholderText("https://...")
+        self._url.setClearButtonEnabled(True)
+        self._btn_open_url = QPushButton("↗")
+        self._btn_open_url.setFixedWidth(30)
+        self._btn_open_url.setToolTip(t("btn_open_url"))
+        self._btn_open_url.clicked.connect(self._on_open_url)
+        url_row = QHBoxLayout()
+        url_row.setSpacing(4)
+        url_row.addWidget(self._url, 1)
+        url_row.addWidget(self._btn_open_url)
+
         form.addRow(t("label_name")        + " *:", self._name)
         form.addRow(t("label_type")        + ":",   self._ddl_type)
         form.addRow(t("label_ip")          + ":",   self._ip)
@@ -63,6 +79,7 @@ class EndpointDialog(QDialog):
         form.addRow(t("label_brand")       + ":",   self._brand)
         form.addRow(t("label_model")       + ":",   self._model)
         form.addRow(t("endpoint_location") + ":",   self._location)
+        form.addRow(t("label_url") + ":",          url_row)
         form.addRow(t("label_notes")       + ":",   self._notes)
         layout.addLayout(form)
 
@@ -90,6 +107,7 @@ class EndpointDialog(QDialog):
         self._model.setText(self._endpoint.get("model", ""))
         self._notes.setPlainText(self._endpoint.get("notes", ""))
         self._location.setText(self._endpoint.get("location", ""))
+        self._url.setText(self._endpoint.get("url", ""))
 
     def _on_save(self):
         name = self._name.text().strip()
@@ -106,9 +124,19 @@ class EndpointDialog(QDialog):
             "brand":    self._brand.text().strip(),
             "model":    self._model.text().strip(),
             "location": self._location.text().strip(),
+            "url":      self._url.text().strip(),
             "notes":    self._notes.toPlainText().strip(),
         }
         self.accept()
+
+    def _on_open_url(self):
+        """Open de ingevulde URL in de standaardbrowser."""
+        url_str = self._url.text().strip()
+        if not url_str:
+            return
+        if not url_str.startswith(("http://", "https://")):
+            url_str = "https://" + url_str
+        QDesktopServices.openUrl(QUrl(url_str))
 
     def get_result(self) -> dict | None:
         return self._result

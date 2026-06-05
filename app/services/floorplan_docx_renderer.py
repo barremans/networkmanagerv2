@@ -4,9 +4,13 @@
 # Role:    G-OPEN-8 — Grondplan export als Word-document (.docx)
 #          Pure Python via python-docx — geen Node.js of externe runtime nodig.
 #          Vereiste: pip install python-docx
-# Version: 2.13.0
+# Version: 2.14.0
 # Author:  Barremans
-# Changes: 2.13.0 — _safe_save() toegevoegd: PermissionError als Word het bestand
+# Changes: 2.14.0 — FE-NEW-1: _resolve port-type: trace-stappen correct tonen
+#                   inclusief wandpunt en eindapparaat.
+#                   Back-poort: reversed() toegepast (zelfde logica als main_window).
+#                   _add_trace: slice verhoogd van 6 naar 8 voor volledige trace.
+#          2.13.0 — _safe_save() toegevoegd: PermissionError als Word het bestand
 #                    al open heeft → leesbare foutmelding ipv crash
 #          2.12.0 — header_distance vergroot zodat 20pt titel volledig zichtbaar is
 #                    Datum blijft rechts op dezelfde regel via tab
@@ -640,7 +644,7 @@ def _add_trace(doc, steps: list):
         r.italic      = True
         return
 
-    for step in steps[:6]:
+    for step in steps[:8]:
         obj_type = step.get("obj_type", "")
         label    = step.get("label", "")
         prefix   = "->" if obj_type == "port" else (">" if obj_type == "endpoint" else ">>")
@@ -652,10 +656,10 @@ def _add_trace(doc, steps: list):
         rp.font.size      = Pt(9)
         rp.font.color.rgb = _C_ZWART
 
-    if len(steps) > 6:
+    if len(steps) > 8:
         p = doc.add_paragraph(style='Normal')
         p.paragraph_format.left_indent = Cm(0.5)
-        r = p.add_run(f"... (+{len(steps)-6} stappen)")
+        r = p.add_run(f"... (+{len(steps)-8} stappen)")
         r.font.size      = Pt(9)
         r.font.color.rgb = _C_SUBTXT
         r.italic         = True
@@ -1341,6 +1345,17 @@ def _resolve(svg_pt, mapped_val, data, outlet_map, device_map,
             loc_key = wo.get("location_description", "") or ""
             loc_lbl = get_outlet_location_label(loc_key) if loc_key else None
         steps = _tr.trace_from_port(data, port_id)
+        # 2.14.0 — FE-NEW-1: back-poort trace loopt van poort → PP_front → switch,
+        # maar wandpunt + eindapparaat zitten langs de back-kant.
+        # Zelfde reversed()-logica als main_window._on_port_clicked:
+        # reversed() alleen als de eerste stap de startpoort zelf is.
+        port_side = (port.get("side", "") or "").lower()
+        first_is_start = (
+            steps and steps[0].get("obj_type") == "port"
+            and steps[0].get("obj_id") == port_id
+        )
+        if port_side == "back" and first_is_start:
+            steps = list(reversed(steps))
         return {
             "svg_pt": svg_pt, "mapped_val": mapped_val, "type": "port",
             "type_label": "Poort", "obj_name": dev.get("name", ""),

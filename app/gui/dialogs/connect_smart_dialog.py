@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_smart_dialog.py
 # Role:    Poort koppelen aan wandpunt, eindapparaat of poort — met zoekfunctie
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #                   3 tabs: Wandpunt / Eindapparaat / Poort
@@ -10,6 +10,8 @@
 #          1.1.0 — "⊕ Nieuw wandpunt" knop in wandpunt-tab
 #                   Aparte in-gebruik tekst per type (wandpunt / eindapparaat / poort)
 #                   Vrije wandpunten sorteren vóór in-gebruik wandpunten
+#          1.2.0 — Auto-focus op zoekveld bij openen dialoog
+#                   Auto-focus op zoekveld bij wisselen van tab
 # =============================================================================
 
 import re
@@ -205,6 +207,9 @@ class ConnectSmartDialog(QDialog):
 
         root.addWidget(self._tabs, 1)
 
+        # 1.2.0 — Focus op zoekveld bij tab-wissel
+        self._tabs.currentChanged.connect(self._focus_search)
+
         # ── Scheidingslijn ───────────────────────────────────────────
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -240,6 +245,26 @@ class ConnectSmartDialog(QDialog):
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_save)
         root.addLayout(btn_row)
+
+    # ------------------------------------------------------------------
+    # Focus helpers — 1.2.0
+    # ------------------------------------------------------------------
+
+    def showEvent(self, event):
+        """Auto-focus op het zoekveld van de initieel actieve tab."""
+        super().showEvent(event)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._focus_search)
+
+    def _focus_search(self):
+        """Geef focus aan het zoekveld van de huidige tab."""
+        idx = self._tabs.currentIndex()
+        if idx == _TAB_OUTLET:
+            self._search_outlet.setFocus()
+        elif idx == _TAB_ENDPOINT:
+            self._search_endpoint.setFocus()
+        else:
+            self._search_port.setFocus()
 
     # ------------------------------------------------------------------
     # Populeren — Wandpunten

@@ -2,10 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.22.0
+# Version: 1.24.0
 # Author:  Barremans
 # Changes: 1.22.0 — Rechtsklik verbonden wandpunt: "✂ Verbinding verwijderen"
 #                   outlet_disconnect_requested signaal + handler in main_window
+#          1.23.0 — _OutletDetailDialog: wandpunt-knop = ctx_edit_outlet,
+#                   eindapparaat-knop = ctx_edit_endpoint (ipv ctx_edit)
+#          1.24.0 — outlet_endpoint_edit_requested(str) signaal toegevoegd
+#                   "Eindapparaat bewerken" knop opent direct EndpointDialog
+#                   (beide knoppen toonden anders "Bewerken")
 #          1.21.2 — Fix: QTimer.singleShot(0) voor detail-dialoog callbacks
 #                   zodat tweede dialoog pas opent nadat eerste volledig gesloten is
 #          1.21.1 — Fix: callback vóór accept() aanroepen
@@ -136,6 +141,7 @@ class WallOutletView(QWidget):
     outlet_delete_requested = Signal(str)     # 1.11.0: rechtsklik → verwijderen
     outlet_duplicate_requested = Signal(str)  # 1.17.0: rechtsklik → dupliceren (ruimte+locatie)
     outlet_endpoint_requested = Signal(str)   # W1: eindapparaat toevoegen/bewerken
+    outlet_endpoint_edit_requested = Signal(str)  # 1.24.0: eindapparaat direct bewerken (outlet_id)
     outlet_connect_port_requested = Signal(str)  # 1.21.0: koppelen aan poort
     outlet_disconnect_requested = Signal(str)    # 1.22.0: verbinding verwijderen
     endpoint_edit_requested = Signal(str)     # 1.8.1: rechtsklik endpoint-kaartje → bewerken
@@ -1048,9 +1054,13 @@ class WallOutletView(QWidget):
         def _emit_ep():
             QTimer.singleShot(0, lambda: self.outlet_endpoint_requested.emit(outlet_id))
 
+        def _emit_ep_edit():
+            # 1.24.0 — direct EndpointDialog openen voor gekoppeld eindapparaat
+            QTimer.singleShot(0, lambda: self.outlet_endpoint_edit_requested.emit(outlet_id))
+
         dlg = _OutletDetailDialog(
             outlet, ep, self._data, parent=self,
-            on_endpoint_clicked=_emit_ep,
+            on_endpoint_clicked=_emit_ep_edit if ep else _emit_ep,
             on_edit_clicked=_emit_edit,
             on_connect_clicked=_emit_connect,
         )
@@ -1216,9 +1226,9 @@ class _OutletDetailDialog(QDialog):
 
         # ── Sluitknop ──────────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        # 1.19.0 — Bewerken knop (wandpunt)
+        # 1.19.0 — Bewerken knop (wandpunt); 1.23.0 — ctx_edit_outlet ipv ctx_edit
         if self._on_edit_clicked:
-            btn_edit = QPushButton("✏  " + t("ctx_edit"))
+            btn_edit = QPushButton(t("ctx_edit_outlet"))
             btn_edit.clicked.connect(self._on_edit_btn_clicked)
             btn_row.addWidget(btn_edit)
         # 1.21.0 — Koppelen aan poort (alleen als nog geen verbinding)
@@ -1232,10 +1242,9 @@ class _OutletDetailDialog(QDialog):
                 btn_connect = QPushButton("🔌  " + t("ctx_connect_outlet_to_port"))
                 btn_connect.clicked.connect(self._on_connect_btn_clicked)
                 btn_row.addWidget(btn_connect)
-        # W1: knop eindapparaat toevoegen/bewerken
-        if self._on_endpoint_clicked:
-            ep_label = t("ctx_edit") if self._endpoint else t("btn_new_endpoint")
-            btn_ep = QPushButton(f"🖥  {ep_label}")
+        # W1: knop eindapparaat toevoegen — alleen als nog geen eindapparaat (1.24.0: bewerken verwijderd)
+        if self._on_endpoint_clicked and not self._endpoint:
+            btn_ep = QPushButton("🖥  " + t("btn_new_endpoint"))
             btn_ep.clicked.connect(self._on_ep_btn_clicked)
             btn_row.addWidget(btn_ep)
         btn_row.addStretch()

@@ -2,8 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.24.0
+# Version: 1.25.0
 # Author:  Barremans
+# Changes: 1.25.0 — select_by_target_val(target_val): selecteer svg-punt via
+#                   omgekeerde mapping-lookup op actuele self._floorplan data.
+#                   Gebruikt door main_window na navigatie vanuit eindapparaten-overzicht.
 # Changes: 1.24.0 — Site-scope volledig geïmplementeerd via export_all_floorplans_docx
 #                   PNG per grondplan exporteren bij site-scope
 #                   Tijdelijke PNG-bestanden opruimen na export
@@ -625,6 +628,47 @@ class FloorplanView(QWidget):
                 self._overlay_items[svg_point].set_selected(True)
 
         self._refresh_sidepanel()
+
+    def select_by_target_val(self, target_val: str) -> bool:
+        """
+        1.25.0 — Selecteer het svg-punt dat gekoppeld is aan target_val.
+        target_val: outlet_id OF "ep:ep_id".
+
+        Zoekstrategie (in volgorde):
+        1. Directe match op target_val in mappings
+        2. Als target_val = "ep:ep_id": zoek ook het wandpunt dat dit eindapparaat
+           heeft (endpoint_id == ep_id) en probeer de mapping via outlet_id
+        """
+        if not target_val:
+            return False
+        mappings = self._floorplan.get("mappings", {})
+
+        # Stap 1: directe match
+        svg_point = next((k for k, v in mappings.items() if v == target_val), None)
+
+        # Stap 2: ep:ep_id → zoek via gekoppeld wandpunt
+        if not svg_point and target_val.startswith("ep:"):
+            ep_id = target_val[3:]
+            # Zoek outlet_id van het wandpunt dat dit eindapparaat heeft
+            for site in self._data.get("sites", []):
+                for room in site.get("rooms", []):
+                    for wo in room.get("wall_outlets", []):
+                        if wo.get("endpoint_id") == ep_id:
+                            outlet_id = wo.get("id", "")
+                            svg_point = next(
+                                (k for k, v in mappings.items() if v == outlet_id),
+                                None,
+                            )
+                            break
+                    if svg_point:
+                        break
+                if svg_point:
+                    break
+
+        if svg_point:
+            self.set_selected_svg_point(svg_point)
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Events

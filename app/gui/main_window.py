@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.59.1
+# Version: 1.62.0
 # Author:  Barremans
-# Changes: 1.59.1 — DeviceInfoDialog: slot parameter fix (TypeError opgelost)
+# Changes: 1.60.0 — RV-NEW-1: Eindapparaat detail via trace bij rechtsklik op
+#                   élke verbonden poort (niet enkel direct endpoint).
+#                   _on_port_context_menu: trace_from_port() volgen om ep te vinden.
+#                   "ℹ Eindapparaat detail..." verschijnt ook bij PP-back / switch-poort.
+#          1.59.1 — DeviceInfoDialog: slot parameter fix (TypeError opgelost)
 #          1.59.0 — Zoekvenster fixes fase 2:
 #                   Endpoint detail tonen: endpoint_double_clicked gekoppeld in alle WallOutletView modi
 #                   Poort navigatie: duidelijk statusbericht als device niet in rack-slot
@@ -156,6 +160,7 @@ from app.helpers.settings_storage import get_last_folder, set_last_folder
 from app.helpers.i18n import t
 from app.gui.rack_view import RackView, _rack_occupancy, _occupancy_color
 from app.gui.wall_outlet_view import WallOutletView
+from app.gui.endpoint_overview_widget import EndpointOverviewWidget
 from app.gui.outlet_locator_view import OutletLocatorView
 from app.gui.wire_detail_view import WireDetailView
 from app.gui.search_window import SearchWindow
@@ -219,6 +224,7 @@ _TYPE_OUTLETS     = "outlets"
 _TYPE_OUTLET      = "outlet"       # individueel wandpunt in boom
 _TYPE_SITE_OUTLETS  = "site_outlets"  # alle wandpunten van een site (E3)
 _TYPE_DIRECT_EPS    = "direct_endpoints"  # direct verbonden endpoints (1.43.2)
+_TYPE_SITE_ENDPOINTS = "site_endpoints"   # alle eindapparaten van een site
 
 
 class MainWindow(QMainWindow):
@@ -756,6 +762,25 @@ class MainWindow(QMainWindow):
                 f"{len(all_site_outlets)} wandpunten in {len(site.get('rooms', []))} ruimtes")
             site_item.addChild(site_outlets_item)
 
+            # Alle eindapparaten van de site
+            all_site_eps = [
+                ep for ep in self._data.get("endpoints", [])
+                if self._ep_belongs_to_site(ep["id"], site)
+            ]
+            site_eps_item = QTreeWidgetItem([
+                f"🖥  {t('tree_endpoints')}  ({len(all_site_eps)})"
+                if t("tree_endpoints") != "tree_endpoints"
+                else f"🖥  Eindapparaten  ({len(all_site_eps)})"
+            ])
+            site_eps_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                "type":    _TYPE_SITE_ENDPOINTS,
+                "id":      site["id"],
+                "site_id": site["id"],
+            })
+            site_eps_item.setToolTip(_COL,
+                f"{len(all_site_eps)} eindapparaten")
+            site_item.addChild(site_eps_item)
+
             self._tree.addTopLevelItem(site_item)
 
             if site["id"] in expanded:
@@ -771,6 +796,137 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Klik handler
     # ------------------------------------------------------------------
+
+    def _ep_belongs_to_site(self, ep_id: str, site: dict) -> bool:
+        """Geeft True als endpoint_id tot deze site behoort."""
+        # Via wandpunt
+        for room in site.get("rooms", []):
+            for wo in room.get("wall_outlets", []):
+                if wo.get("endpoint_id") == ep_id:
+                    return True
+        # Via directe poortverbinding
+        site_device_ids = {
+            slot.get("device_id", "")
+            for room in site.get("rooms", [])
+            for rack in room.get("racks", [])
+            for slot in rack.get("slots", [])
+        }
+        site_port_ids = {
+            p["id"] for p in self._data.get("ports", [])
+            if p.get("device_id") in site_device_ids
+        }
+        for conn in self._data.get("connections", []):
+            if conn.get("from_type") == "endpoint" and \
+               conn.get("from_id") == ep_id and \
+               conn.get("to_id") in site_port_ids:
+                return True
+            if conn.get("to_type") == "endpoint" and \
+               conn.get("to_id") == ep_id and \
+               conn.get("from_id") in site_port_ids:
+                return True
+        return False
+
+    def _show_site_endpoints_view(self, site: dict):
+        """Toon EndpointOverviewWidget voor alle eindapparaten van de site."""
+        self._wire_detail.clear()
+        while self._mid_layout.count():
+            item = self._mid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        view = EndpointOverviewWidget(site, self._data, parent=self._mid_frame)
+        view.endpoint_changed.connect(self._on_endpoint_overview_changed)
+        view.navigate_to_rack.connect(self._on_ep_overview_open_rack_with_ep)
+        view.navigate_to_floorplan.connect(self._on_ep_overview_open_floorplan)
+        self._mid_layout.addWidget(view)
+        self._current_view = view
+
+    def _on_ep_overview_open_floorplan(self, site_id: str, loc_key: str, target_val: str):
+        """
+        Open grondplan vanuit eindapparaten-overzicht en selecteer het
+        bijhorende punt automatisch via select_by_target_val (v1.25.0).
+        """
+        from app.gui.floorplan_view import FloorplanView
+        fp = floorplan_service.get_floorplan_for_location(site_id, loc_key)
+        if not fp or not floorplan_service.svg_exists(fp):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, t("title_floorplan_view"),
+                                    t("msg_floorplan_not_found"))
+            return
+
+        self._show_floorplan_view(fp)
+
+        if target_val and isinstance(self._current_view, FloorplanView):
+            view = self._current_view
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, lambda: view.select_by_target_val(target_val))
+
+    def _on_endpoint_overview_changed(self):
+        """Na bewerken eindapparaat vanuit overzicht: opslaan + tree refresh."""
+        self._save_and_backup()
+        self._populate_tree()
+
+    def _on_ep_overview_open_rack(self, rack_id: str):
+        """Navigeer naar rack + selecteer in boom + highlight gekoppelde poorten."""
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    if rack["id"] == rack_id:
+                        self._show_rack_view(rack, room, site)
+                        self._select_tree_item_by_id(rack_id, "rack")
+                        return
+
+    def _on_ep_overview_open_rack_with_ep(self, rack_id: str, ep_id: str):
+        """
+        Navigeer naar rack, selecteer in boom én highlight de poort(en)
+        die verbonden zijn met het eindapparaat ep_id.
+        """
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    if rack["id"] == rack_id:
+                        self._show_rack_view(rack, room, site)
+                        self._select_tree_item_by_id(rack_id, "rack")
+                        # Zoek poorten in dit rack die verbonden zijn met ep_id
+                        rack_device_ids = {
+                            slot.get("device_id", "")
+                            for slot in rack.get("slots", [])
+                        }
+                        rack_port_ids = {
+                            p["id"] for p in self._data.get("ports", [])
+                            if p.get("device_id") in rack_device_ids
+                        }
+                        highlight_pids = []
+                        for conn in self._data.get("connections", []):
+                            ft, fid = conn.get("from_type",""), conn.get("from_id","")
+                            tt, tid = conn.get("to_type",  ""), conn.get("to_id",  "")
+                            # Direct: endpoint ↔ poort in dit rack
+                            if ft == "endpoint" and fid == ep_id and tid in rack_port_ids:
+                                highlight_pids.append(tid)
+                            if tt == "endpoint" and tid == ep_id and fid in rack_port_ids:
+                                highlight_pids.append(fid)
+                            # Via wandpunt: endpoint → wandpunt → poort in dit rack
+                            if ft == "wall_outlet" and tid in rack_port_ids:
+                                wo_id = fid
+                                # check of dit wandpunt ep_id heeft
+                                for s2 in self._data.get("sites", []):
+                                    for r2 in s2.get("rooms", []):
+                                        for wo in r2.get("wall_outlets", []):
+                                            if wo["id"] == wo_id and wo.get("endpoint_id") == ep_id:
+                                                highlight_pids.append(tid)
+                            if tt == "wall_outlet" and fid in rack_port_ids:
+                                wo_id = tid
+                                for s2 in self._data.get("sites", []):
+                                    for r2 in s2.get("rooms", []):
+                                        for wo in r2.get("wall_outlets", []):
+                                            if wo["id"] == wo_id and wo.get("endpoint_id") == ep_id:
+                                                highlight_pids.append(fid)
+                        if highlight_pids:
+                            view = self._current_view
+                            pids = highlight_pids
+                            from PySide6.QtCore import QTimer
+                            QTimer.singleShot(0, lambda p=pids: view.highlight_trace(p))
+                        return
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         data = item.data(_COL, Qt.ItemDataRole.UserRole)
@@ -802,6 +958,14 @@ class MainWindow(QMainWindow):
                     f"({len(all_outlets)} {t('tree_wall_outlets').lower()})"
                 )
                 self._show_site_outlets_view(site)
+
+        elif item_type == _TYPE_SITE_ENDPOINTS:
+            site = self._find_site(data["site_id"])
+            if site:
+                self.set_status(
+                    f"🖥  Eindapparaten  —  {site['name']}"
+                )
+                self._show_site_endpoints_view(site)
 
         elif item_type == _TYPE_DIRECT_EPS:
             site = self._find_site(data["site_id"])
@@ -1874,6 +2038,18 @@ class MainWindow(QMainWindow):
             act_move_conn  = menu.addAction(t("ctx_move_port_connection"))
             act_disconnect = menu.addAction(t("ctx_disconnect_port"))
 
+        # 1.60.0 — RV-NEW-1: eindapparaat detail via trace (ook voor PP-back / switch-poort)
+        # Enkel toevoegen als niet-direct-endpoint maar trace WEL een eindapparaat bereikt.
+        act_trace_ep_info = None
+        _trace_ep_id      = None
+        if is_connected and not is_direct_endpoint:
+            from app.services import tracing as _tracing_mod
+            _tr_steps = _tracing_mod.trace_from_port(self._data, port_id)
+            _ep_step  = next((s for s in _tr_steps if s.get("obj_type") == "endpoint"), None)
+            if _ep_step:
+                _trace_ep_id      = _ep_step["obj_id"]
+                act_trace_ep_info = menu.addAction("ℹ  " + t("label_endpoint") + " detail...")
+
         chosen = menu.exec(global_pos)
         if chosen is None:
             return
@@ -1890,6 +2066,10 @@ class MainWindow(QMainWindow):
                      if existing_conn.get("to_type") == "endpoint"
                      else existing_conn["from_id"])
             self._on_show_endpoint_detail(port_id, ep_id)
+
+        elif act_trace_ep_info and chosen == act_trace_ep_info:
+            # 1.60.0 — RV-NEW-1: eindapparaat detail via trace-keten
+            self._on_show_endpoint_detail(port_id, _trace_ep_id)
 
         elif act_endpoint_direct and chosen == act_endpoint_direct:
             if is_direct_endpoint:
