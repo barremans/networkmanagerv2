@@ -2,15 +2,22 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.24.0
+# Version: 1.27.1
 # Author:  Barremans
-# Changes: 1.22.0 — Rechtsklik verbonden wandpunt: "✂ Verbinding verwijderen"
-#                   outlet_disconnect_requested signaal + handler in main_window
-#          1.23.0 — _OutletDetailDialog: wandpunt-knop = ctx_edit_outlet,
-#                   eindapparaat-knop = ctx_edit_endpoint (ipv ctx_edit)
+# Changes: 1.27.1 — Direct verbonden sectie verborgen bij actieve ruimte- of
+#                   locatiefilter in site-modus (niet relevant voor gefilterde WP)
+#          1.27.0 — Site-modus: tweede knop voor wandpunt locatiefilter
+#                   _LocationPickerDialog, _btn_location, _location_filter,
+#                   _on_location_picker_clicked()
+#                   _collect_site_outlets() filtert ook op _location_filter
+#          1.26.0 — Site-modus: QComboBox ruimtefilter vervangen door knop +
 #          1.24.0 — outlet_endpoint_edit_requested(str) signaal toegevoegd
 #                   "Eindapparaat bewerken" knop opent direct EndpointDialog
 #                   (beide knoppen toonden anders "Bewerken")
+#          1.23.0 — _OutletDetailDialog: wandpunt-knop = ctx_edit_outlet,
+#                   eindapparaat-knop = ctx_edit_endpoint (ipv ctx_edit)
+#          1.22.0 — Rechtsklik verbonden wandpunt: "✂ Verbinding verwijderen"
+#                   outlet_disconnect_requested signaal + handler in main_window
 #          1.21.2 — Fix: QTimer.singleShot(0) voor detail-dialoog callbacks
 #                   zodat tweede dialoog pas opent nadat eerste volledig gesloten is
 #          1.21.1 — Fix: callback vóór accept() aanroepen
@@ -81,7 +88,7 @@ from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QScrollArea,
     QVBoxLayout, QHBoxLayout, QSizePolicy, QGridLayout,
     QDialog, QMenu, QFormLayout, QTextBrowser,
-    QPushButton, QLineEdit
+    QPushButton, QLineEdit, QListWidget, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QCursor
@@ -116,6 +123,208 @@ def _name_prefix(name: str) -> str:
     """
     m = re.match(r"^([A-Za-z]+)", name or "")
     return m.group(1).upper() if m else "__num__"
+
+
+# =============================================================================
+# _RoomPickerDialog — v1.26.0
+# Popup dialoog om een ruimte te kiezen met zoekbalk.
+# Zelfde patroon als FloorplanPickerDialog in main_window.py.
+# =============================================================================
+
+class _RoomPickerDialog(QDialog):
+    """
+    Dialoog om een ruimte te kiezen uit een doorzoekbare lijst.
+
+    Parameters
+    ----------
+    rooms  : list[dict]  — ruimte-dicts met 'id' en 'name'
+    parent : QWidget
+    """
+
+    def __init__(self, rooms: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("label_room"))
+        self.setModal(True)
+        self.setMinimumWidth(320)
+        self.setMinimumHeight(300)
+
+        self._rooms = rooms          # [{"id": ..., "name": ...}, ...]
+        self._selected_id   = ""
+        self._selected_name = ""
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        # Zoekbalk
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(f"🔍  {t('search_placeholder_outlet_location')}")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._filter)
+        layout.addWidget(self._search)
+
+        # Lijst
+        self._list = QListWidget()
+        self._list.addItem(f"— {t('label_room')} —")
+        self._list.item(0).setData(Qt.ItemDataRole.UserRole, "")
+        for room in rooms:
+            from PySide6.QtWidgets import QListWidgetItem
+            item = QListWidgetItem(room.get("name", "?"))
+            item.setData(Qt.ItemDataRole.UserRole, room.get("id", ""))
+            self._list.addItem(item)
+        layout.addWidget(self._list)
+
+        # "Geen resultaten" label
+        self._lbl_empty = QLabel(t("lbl_no_outlet_location_match"))
+        self._lbl_empty.setObjectName("secondary")
+        self._lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_empty.setVisible(False)
+        layout.addWidget(self._lbl_empty)
+
+        # Knoppen
+        self._buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        layout.addWidget(self._buttons)
+
+        self._list.setCurrentRow(0)
+        self._search.textChanged.connect(self._filter)
+        self._list.itemDoubleClicked.connect(self._on_double_click)
+        self._buttons.accepted.connect(self._on_ok)
+        self._buttons.rejected.connect(self.reject)
+
+    def _filter(self, text: str):
+        needle  = text.strip().lower()
+        visible = 0
+        first   = None
+        for i in range(self._list.count()):
+            item  = self._list.item(i)
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match:
+                visible += 1
+                if first is None:
+                    first = i
+        self._lbl_empty.setVisible(visible == 0)
+        if first is not None:
+            self._list.setCurrentRow(first)
+
+    def _on_double_click(self, item):
+        self._selected_id   = item.data(Qt.ItemDataRole.UserRole) or ""
+        self._selected_name = item.text()
+        self.accept()
+
+    def _on_ok(self):
+        item = self._list.currentItem()
+        if item and not item.isHidden():
+            self._selected_id   = item.data(Qt.ItemDataRole.UserRole) or ""
+            self._selected_name = item.text()
+        self.accept()
+
+    def selected_id(self) -> str:
+        return self._selected_id
+
+    def selected_name(self) -> str:
+        return self._selected_name
+
+
+# =============================================================================
+# _LocationPickerDialog — v1.27.0
+# Popup dialoog om een wandpunt locatie te kiezen met zoekbalk.
+# Gevuld met locaties die effectief voorkomen in de huidige outlet-set.
+# =============================================================================
+
+class _LocationPickerDialog(QDialog):
+    """
+    Dialoog om een wandpunt locatie te kiezen uit een doorzoekbare lijst.
+
+    Parameters
+    ----------
+    locations : list[tuple[str, str]]  — (loc_key, loc_label) tuples
+    parent    : QWidget
+    """
+
+    def __init__(self, locations: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("settings_tab_outlet_locations"))
+        self.setModal(True)
+        self.setMinimumWidth(320)
+        self.setMinimumHeight(300)
+
+        self._selected_key   = ""
+        self._selected_label = ""
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(f"🔍  {t('search_placeholder_outlet_location')}")
+        self._search.setClearButtonEnabled(True)
+        layout.addWidget(self._search)
+
+        self._list = QListWidget()
+        # Eerste item = "alle locaties"
+        from PySide6.QtWidgets import QListWidgetItem
+        all_item = QListWidgetItem(f"— {t('settings_tab_outlet_locations').strip()} —")
+        all_item.setData(Qt.ItemDataRole.UserRole, ("", ""))
+        self._list.addItem(all_item)
+        for key, label in locations:
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, (key, label))
+            self._list.addItem(item)
+        layout.addWidget(self._list)
+
+        self._lbl_empty = QLabel(t("lbl_no_outlet_location_match"))
+        self._lbl_empty.setObjectName("secondary")
+        self._lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_empty.setVisible(False)
+        layout.addWidget(self._lbl_empty)
+
+        self._buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        layout.addWidget(self._buttons)
+
+        self._list.setCurrentRow(0)
+        self._search.textChanged.connect(self._filter)
+        self._list.itemDoubleClicked.connect(self._on_double_click)
+        self._buttons.accepted.connect(self._on_ok)
+        self._buttons.rejected.connect(self.reject)
+
+    def _filter(self, text: str):
+        needle  = text.strip().lower()
+        visible = 0
+        first   = None
+        for i in range(self._list.count()):
+            item  = self._list.item(i)
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match:
+                visible += 1
+                if first is None:
+                    first = i
+        self._lbl_empty.setVisible(visible == 0)
+        if first is not None:
+            self._list.setCurrentRow(first)
+
+    def _on_double_click(self, item):
+        key, label = item.data(Qt.ItemDataRole.UserRole)
+        self._selected_key, self._selected_label = key, label
+        self.accept()
+
+    def _on_ok(self):
+        item = self._list.currentItem()
+        if item and not item.isHidden():
+            key, label = item.data(Qt.ItemDataRole.UserRole)
+            self._selected_key, self._selected_label = key, label
+        self.accept()
+
+    def selected_key(self) -> str:
+        return self._selected_key
+
+    def selected_label(self) -> str:
+        return self._selected_label
 
 
 class WallOutletView(QWidget):
@@ -178,6 +387,8 @@ class WallOutletView(QWidget):
         self._selected_id    = None
         self._last_col_count = 0   # 1.18.0 — voor resize rebuild detectie
         self._search_text    = ""  # 1.20.0 — actieve zoekterm
+        self._room_filter        = ""  # 1.25.0 — ruimtefilter (site-modus only)
+        self._location_filter    = ""  # 1.27.0 — wandpunt locatiefilter (site-modus only)
         # 1.18.0 — debounce timer: rebuild pas na 150ms stilstand resize
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
@@ -276,8 +487,42 @@ class WallOutletView(QWidget):
             self._search_bar.textChanged.connect(self._on_search_changed)
             title_layout.addWidget(self._search_bar)
             title_layout.addSpacing(8)
+
+            # 1.26.0 — Ruimte-knop opent _RoomPickerDialog (site-modus only)
+            if self._mode == "site":
+                room_label = t("label_room")
+                if self._room_filter:
+                    room = next(
+                        (r for r in self._site.get("rooms", [])
+                         if r.get("id") == self._room_filter), None
+                    )
+                    room_label = room.get("name", t("label_room")) if room else t("label_room")
+                self._btn_room = QPushButton(f"🚪  {room_label}")
+                self._btn_room.setFixedHeight(26)
+                self._btn_room.setMinimumWidth(160)
+                self._btn_room.clicked.connect(self._on_room_picker_clicked)
+                title_layout.addWidget(self._btn_room)
+                title_layout.addSpacing(4)
+
+                # 1.27.0 — Wandpunt locatiefilter knop
+                loc_btn_label = t("settings_tab_outlet_locations").strip()
+                if self._location_filter:
+                    loc_btn_label = get_outlet_location_label(
+                        self._location_filter, get_language()
+                    ) or self._location_filter
+                self._btn_location = QPushButton(f"🌐  {loc_btn_label}")
+                self._btn_location.setFixedHeight(26)
+                self._btn_location.setMinimumWidth(160)
+                self._btn_location.clicked.connect(self._on_location_picker_clicked)
+                title_layout.addWidget(self._btn_location)
+                title_layout.addSpacing(8)
+            else:
+                self._btn_room     = None
+                self._btn_location = None
         else:
-            self._search_bar = None
+            self._search_bar   = None
+            self._btn_room     = None
+            self._btn_location = None
 
         title_layout.addWidget(count_lbl)
         outer.addWidget(title_bar)
@@ -357,7 +602,9 @@ class WallOutletView(QWidget):
                         grid_row += 1
 
         # 1.8.0 — Direct verbonden endpoints sectie
-        self._build_direct_endpoints_section(body_layout)
+        # 1.27.0 — Verborgen bij actieve locatie- of ruimtefilter (niet relevant)
+        if self._mode != "site" or (not self._room_filter and not self._location_filter):
+            self._build_direct_endpoints_section(body_layout)
 
         body_layout.addStretch()
         scroll.setWidget(body)
@@ -435,7 +682,146 @@ class WallOutletView(QWidget):
                     if grid_col >= col_count:
                         grid_col, grid_row = 0, grid_row + 1
 
-        self._build_direct_endpoints_section(body_layout)
+        # 1.27.0 — Verborgen bij actieve locatie- of ruimtefilter
+        if self._mode != "site" or (not self._room_filter and not self._location_filter):
+            self._build_direct_endpoints_section(body_layout)
+        body_layout.addStretch()
+        scroll.setWidget(body)
+        layout.addWidget(scroll)
+
+    def _on_room_picker_clicked(self):
+        """1.26.0 — Ruimte-knop geklikt — open _RoomPickerDialog."""
+        rooms = self._site.get("rooms", [])
+        dlg   = _RoomPickerDialog(rooms, parent=self)
+        if not dlg.exec():
+            return
+        self._room_filter = dlg.selected_id()
+        if self._btn_room:
+            label = dlg.selected_name() if self._room_filter else t("label_room")
+            self._btn_room.setText(f"🚪  {label}")
+        # Locatiefilter resetten: bij nieuwe ruimte kan de locatie niet meer geldig zijn
+        self._location_filter = ""
+        if self._btn_location:
+            self._btn_location.setText(
+                f"🌐  {t('settings_tab_outlet_locations').strip()}"
+            )
+        if self._search_bar and self._search_text:
+            self._search_bar.blockSignals(True)
+            self._search_bar.clear()
+            self._search_bar.blockSignals(False)
+            self._search_text = ""
+        self._rebuild_scroll()
+
+    def _on_location_picker_clicked(self):
+        """1.27.0 — Locatiefilter knop — open _LocationPickerDialog."""
+        lang = get_language()
+        all_for_loc = self._collect_site_outlets_unfiltered_location()
+        seen_keys: dict[str, str] = {}
+        for _room, wo in all_for_loc:
+            key = wo.get("location_description", "").strip()
+            if key and key not in seen_keys:
+                seen_keys[key] = get_outlet_location_label(key, lang) or key
+
+        defined_keys = [loc["key"] for loc in load_outlet_locations()]
+        ordered = [(k, seen_keys[k]) for k in defined_keys if k in seen_keys]
+        known = set(defined_keys)
+        for k, lbl in seen_keys.items():
+            if k not in known:
+                ordered.append((k, lbl))
+
+        dlg = _LocationPickerDialog(ordered, parent=self)
+        if not dlg.exec():
+            return
+
+        self._location_filter = dlg.selected_key()
+        if self._btn_location:
+            lbl = dlg.selected_label() if self._location_filter \
+                  else t("settings_tab_outlet_locations").strip()
+            self._btn_location.setText(f"🌐  {lbl}")
+
+        if self._search_bar and self._search_text:
+            self._search_bar.blockSignals(True)
+            self._search_bar.clear()
+            self._search_bar.blockSignals(False)
+            self._search_text = ""
+
+        self._rebuild_scroll()
+
+    def _collect_site_outlets_unfiltered_location(self) -> list[tuple[dict, dict]]:
+        """Outlets gefilterd op ruimte, NIET op locatie — voor de locatiepicker."""
+        result = []
+        for site in self._data.get("sites", []):
+            if site["id"] == self._site["id"]:
+                for room in site.get("rooms", []):
+                    if self._room_filter and room.get("id") != self._room_filter:
+                        continue
+                    for wo in room.get("wall_outlets", []):
+                        result.append((room, wo))
+        return result
+
+    def _rebuild_scroll(self):
+        """1.27.0 — Gemeenschappelijke scroll-rebuild na filter- of zoekaanpassing."""
+        layout = self.layout()
+        if not layout:
+            return
+        while layout.count() > 1:
+            item = layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+        self._outlet_widgets.clear()
+
+        ep_map      = {e["id"]: e for e in self._data.get("endpoints", [])}
+        all_outlets = self._collect_site_outlets()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body        = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(12, 12, 12, 12)
+        body_layout.setSpacing(16)
+        body_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        if self._search_text.strip():
+            self._build_search_results(body_layout, all_outlets, ep_map)
+        elif not all_outlets:
+            empty_lbl = QLabel(t("site_outlets_empty"))
+            empty_lbl.setObjectName("secondary")
+            empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            body_layout.addWidget(empty_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+        else:
+            col_count = self._col_count()
+            groups    = self._group_by_location(all_outlets)
+            for loc_key, loc_label, outlets_in_group in groups:
+                header = self._build_group_header(loc_label, len(outlets_in_group))
+                body_layout.addWidget(header)
+                grid_widget = QWidget()
+                grid = QGridLayout(grid_widget)
+                grid.setContentsMargins(0, 0, 0, 0)
+                grid.setSpacing(_CARD_SPACING)
+                for col in range(col_count):
+                    grid.setColumnStretch(col, 1)
+                body_layout.addWidget(grid_widget)
+                grid_row, grid_col, cur_prefix = 0, 0, None
+                for room, outlet in outlets_in_group:
+                    prefix = _name_prefix(outlet.get("name", ""))
+                    if prefix != cur_prefix:
+                        if cur_prefix is not None and grid_col > 0:
+                            grid_row += 1
+                        grid_col, cur_prefix = 0, prefix
+                    endpoint = ep_map.get(outlet.get("endpoint_id", ""))
+                    trace    = tracing.trace_from_wall_outlet(self._data, outlet["id"])
+                    card     = self._build_outlet_card(
+                        outlet, endpoint, trace,
+                        room_name=room["name"] if self._mode == "site" else None
+                    )
+                    grid.addWidget(card, grid_row, grid_col)
+                    grid_col += 1
+                    if grid_col >= col_count:
+                        grid_col, grid_row = 0, grid_row + 1
+
+        # 1.27.0 — Verborgen bij actieve locatie- of ruimtefilter
+        if self._mode != "site" or (not self._room_filter and not self._location_filter):
+            self._build_direct_endpoints_section(body_layout)
         body_layout.addStretch()
         scroll.setWidget(body)
         layout.addWidget(scroll)
@@ -670,12 +1056,20 @@ class WallOutletView(QWidget):
         return frame
 
     def _collect_site_outlets(self) -> list[tuple[dict, dict]]:
-        """Verzamel alle (room, outlet) tuples voor de huidige site."""
+        """Verzamel alle (room, outlet) tuples voor de huidige site.
+        1.25.0 — filtert op _room_filter indien ingesteld.
+        1.27.0 — filtert ook op _location_filter indien ingesteld."""
         result = []
         for site in self._data.get("sites", []):
             if site["id"] == self._site["id"]:
                 for room in site.get("rooms", []):
+                    if self._room_filter and room.get("id") != self._room_filter:
+                        continue
                     for wo in room.get("wall_outlets", []):
+                        if self._location_filter:
+                            wo_loc = wo.get("location_description", "").strip()
+                            if wo_loc != self._location_filter:
+                                continue
                         result.append((room, wo))
         return result
 

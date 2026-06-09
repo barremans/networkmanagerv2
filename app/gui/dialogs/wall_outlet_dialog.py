@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.10.0
+# Version: 1.11.0
 # Author:  Barremans
-# Changes: 1.10.0 — Eindapparaat DDL vervangen door zoekbalk + QListWidget
+# Changes: 1.11.0 — Locatie en VLAN: QComboBox vervangen door QLineEdit +
+#                   QListWidget met real-time zoekfilter
+#          1.10.0 — Eindapparaat DDL vervangen door zoekbalk + QListWidget
 #                   Zoeken op naam en type, directe selectie via klik
 #                   ＋/✏/🗑 knoppen blijven behouden naast zoekbalk
 #          1.9.0  — Ruimte DDL: wandpunt verplaatsen naar andere ruimte
@@ -18,28 +20,13 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QTextEdit, QPushButton,
     QMessageBox, QFrame, QLabel, QSpinBox,
-    QListWidget, QListWidgetItem
+    QListWidget, QListWidgetItem, QWidget
 )
+from PySide6.QtCore import Qt
 from app.helpers.i18n import t
 from app.services.vlan_service import load_vlans
 from app.gui.dialogs.device_dialog import _bind_uppercase
 from app.helpers.settings_storage import load_outlet_locations
-
-
-def _build_vlan_ddl(current_vlan=None) -> QComboBox:
-    ddl = QComboBox()
-    ddl.addItem("— geen VLAN —", None)
-    for v in load_vlans():
-        label = f"VLAN {v['id']}"
-        if v.get("name"):
-            label += f"  —  {v['name']}"
-        ddl.addItem(label, v["id"])
-    if current_vlan is not None:
-        for i in range(ddl.count()):
-            if ddl.itemData(i) == int(current_vlan):
-                ddl.setCurrentIndex(i)
-                break
-    return ddl
 
 
 class WallOutletDialog(QDialog):
@@ -93,14 +80,37 @@ class WallOutletDialog(QDialog):
                     lbl = f"{_site['name']}  /  {_room['name']}"
                     self._ddl_room.addItem(lbl, _room["id"])
 
-        # Locatie — keuzelijst uit settings (configureerbaar)
-        self._ddl_location = QComboBox()
-        self._ddl_location.addItem("— " + t("label_location") + " —", "")
+        # Locatie — zoekbaar (v1.11.0)
+        loc_widget = QWidget()
+        loc_layout = QVBoxLayout(loc_widget)
+        loc_layout.setContentsMargins(0, 0, 0, 0)
+        loc_layout.setSpacing(3)
+
+        self._search_location = QLineEdit()
+        self._search_location.setPlaceholderText(
+            f"🔍  {t('search_placeholder_outlet_location')}"
+        )
+        self._search_location.setClearButtonEnabled(True)
+        self._search_location.textChanged.connect(self._filter_locations)
+        loc_layout.addWidget(self._search_location)
+
+        self._list_location = QListWidget()
+        self._list_location.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._list_location.setFixedHeight(110)
+        loc_layout.addWidget(self._list_location)
+
+        # Vul locatielijst
+        from app.helpers.i18n import get_language
+        lang = get_language()
+        none_item = QListWidgetItem("— " + t("label_location") + " —")
+        none_item.setData(Qt.ItemDataRole.UserRole, "")
+        self._list_location.addItem(none_item)
         for loc in load_outlet_locations():
-            from app.helpers.i18n import get_language
-            lang  = get_language()
             label = loc.get(f"label_{lang}", loc.get("label_nl", loc["key"]))
-            self._ddl_location.addItem(label, loc["key"])
+            item  = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, loc["key"])
+            self._list_location.addItem(item)
+        self._list_location.setCurrentRow(0)
 
         self._notes    = QTextEdit()
         self._notes.setFixedHeight(56)
@@ -111,14 +121,41 @@ class WallOutletDialog(QDialog):
         self._sort_id.setSpecialValueText("—")   # 0 toont als "—"
         self._sort_id.setToolTip("Sorteervolgorde binnen locatiegroep (0 = achteraan)")
 
-        # VLAN DDL
-        self._ddl_vlan = _build_vlan_ddl()
+        # VLAN — zoekbaar (v1.11.0)
+        vlan_widget = QWidget()
+        vlan_layout = QVBoxLayout(vlan_widget)
+        vlan_layout.setContentsMargins(0, 0, 0, 0)
+        vlan_layout.setSpacing(3)
+
+        self._search_vlan = QLineEdit()
+        self._search_vlan.setPlaceholderText("🔍  VLAN...")
+        self._search_vlan.setClearButtonEnabled(True)
+        self._search_vlan.textChanged.connect(self._filter_vlans)
+        vlan_layout.addWidget(self._search_vlan)
+
+        self._list_vlan = QListWidget()
+        self._list_vlan.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._list_vlan.setFixedHeight(110)
+        vlan_layout.addWidget(self._list_vlan)
+
+        # Vul VLAN lijst
+        none_vlan = QListWidgetItem("— geen VLAN —")
+        none_vlan.setData(Qt.ItemDataRole.UserRole, None)
+        self._list_vlan.addItem(none_vlan)
+        for v in load_vlans():
+            label = f"VLAN {v['id']}"
+            if v.get("name"):
+                label += f"  —  {v['name']}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, v["id"])
+            self._list_vlan.addItem(item)
+        self._list_vlan.setCurrentRow(0)
 
         if self._show_room_ddl:
             form.addRow(t("label_room") + " *:", self._ddl_room)
         form.addRow(t("label_name")     + " *:", self._name)
-        form.addRow(t("label_location") + ":",   self._ddl_location)
-        form.addRow("VLAN:",                     self._ddl_vlan)
+        form.addRow(t("label_location") + ":",   loc_widget)
+        form.addRow("VLAN:",                     vlan_widget)
         form.addRow("Volgorde:",                 self._sort_id)
         form.addRow(t("label_notes")    + ":",   self._notes)
         layout.addLayout(form)
@@ -318,6 +355,46 @@ class WallOutletDialog(QDialog):
         self._refresh_ddl(select_id="")
 
     # ------------------------------------------------------------------
+    # Zoekfilters locatie + VLAN — v1.11.0
+    # ------------------------------------------------------------------
+
+    def _filter_locations(self, text: str):
+        needle = text.strip().lower()
+        first  = None
+        for i in range(self._list_location.count()):
+            item  = self._list_location.item(i)
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match and first is None:
+                first = i
+        if first is not None:
+            self._list_location.setCurrentRow(first)
+
+    def _filter_vlans(self, text: str):
+        needle = text.strip().lower()
+        first  = None
+        for i in range(self._list_vlan.count()):
+            item  = self._list_vlan.item(i)
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match and first is None:
+                first = i
+        if first is not None:
+            self._list_vlan.setCurrentRow(first)
+
+    def _current_location_key(self) -> str:
+        item = self._list_location.currentItem()
+        if item and not item.isHidden():
+            return item.data(Qt.ItemDataRole.UserRole) or ""
+        return ""
+
+    def _current_vlan_value(self):
+        item = self._list_vlan.currentItem()
+        if item and not item.isHidden():
+            return item.data(Qt.ItemDataRole.UserRole)
+        return None
+
+    # ------------------------------------------------------------------
     # Invullen bij bewerken
     # ------------------------------------------------------------------
 
@@ -330,20 +407,21 @@ class WallOutletDialog(QDialog):
             if idx >= 0:
                 self._ddl_room.setCurrentIndex(idx)
 
-        # Locatie DDL instellen
+        # Locatie lijst instellen
         loc_key = self._outlet.get("location_description", "")
-        idx = self._ddl_location.findData(loc_key)
-        if idx >= 0:
-            self._ddl_location.setCurrentIndex(idx)
+        for i in range(self._list_location.count()):
+            if self._list_location.item(i).data(Qt.ItemDataRole.UserRole) == loc_key:
+                self._list_location.setCurrentRow(i)
+                break
         self._notes.setPlainText(self._outlet.get("notes", ""))
         self._sort_id.setValue(int(self._outlet.get("sort_id", 0)))
 
-        # VLAN
+        # VLAN lijst instellen
         current_vlan = self._outlet.get("vlan")
         if current_vlan is not None:
-            for i in range(self._ddl_vlan.count()):
-                if self._ddl_vlan.itemData(i) == int(current_vlan):
-                    self._ddl_vlan.setCurrentIndex(i)
+            for i in range(self._list_vlan.count()):
+                if self._list_vlan.item(i).data(Qt.ItemDataRole.UserRole) == int(current_vlan):
+                    self._list_vlan.setCurrentRow(i)
                     break
 
         ep_id = self._outlet.get("endpoint_id", "")
@@ -371,7 +449,7 @@ class WallOutletDialog(QDialog):
             effective_room_id = self._room_id
 
         current_id  = self._outlet.get("id", "")
-        new_loc_key = self._ddl_location.currentData() or ""
+        new_loc_key = self._current_location_key()
         # Duplicate check: gebruik data van de effectieve doelruimte (1.9.0)
         if self._data and effective_room_id:
             check_room = next(
@@ -398,13 +476,13 @@ class WallOutletDialog(QDialog):
             self._name.selectAll()
             return
 
-        vlan_val = self._ddl_vlan.currentData()
+        vlan_val = self._current_vlan_value()
 
         self._result = {
             "id":                   self._outlet.get("id", ""),
             "room_id":              effective_room_id,
             "name":                 name,
-            "location_description": self._ddl_location.currentData() or "",
+            "location_description": self._current_location_key(),
             "endpoint_id":          self._get_selected_ep_id() or "",
             "notes":                self._notes.toPlainText().strip(),
             "sort_id":              self._sort_id.value(),
@@ -423,7 +501,7 @@ class WallOutletDialog(QDialog):
 
     def get_vlan(self) -> int | None:
         """Geeft het geselecteerde VLAN ID terug (of None)."""
-        return self._ddl_vlan.currentData()
+        return self._current_vlan_value()
 
     def get_endpoints_result(self) -> list:
         return self._endpoints_data

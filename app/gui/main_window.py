@@ -2,9 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.66.0
+# Version: 1.68.0
 # Author:  Barremans
-# Changes: 1.66.0 — FloorplanPickerDialog: vervangt QInputDialog.getItem() in
+# Changes: 1.68.0 — Wandpunten overzicht toolbar-knop hidden: ruimtefilter
+#                   beschikbaar in wall_outlet_view site-modus (v1.25.0)
+#          1.67.0 — Toolbar opgeschoond: Nieuw/Bewerken/Verwijderen/Dupliceren/
+#                   Verbinding hidden (volledig gedekt door contextmenu).
+#                   Dupliceren toegevoegd aan device-contextmenu via rack_view.
+#                   Bekijk grondplan verplaatst van Grondplannen-menu naar toolbar.
+#          1.66.0 — FloorplanPickerDialog: vervangt QInputDialog.getItem() in
 #                   _on_floorplan_view(). Eigen dialoog met zoekbalk (real-time
 #                   filter), lijstweergave en OK/Cancel. QDialog toegevoegd aan
 #                   PySide6.QtWidgets import.
@@ -376,7 +382,7 @@ class MainWindow(QMainWindow):
         self._build_central()
         self._build_statusbar()
         self._apply_read_only_mode()  # F5 — pas UI aan op basis van modus
-        self._attach_new_menu()
+        # self._attach_new_menu()  # v1.67.0 — Nieuw-knop hidden, dropdown niet nodig
         self._populate_tree()
         self._startup_sync()      # F3 — sync lokaal ↔ netwerk bij opstarten
         self._init_mtime()        # F2 — sla initiële mtime op na laden
@@ -461,8 +467,9 @@ class MainWindow(QMainWindow):
         act_fp_new = self._menu_floorplan.addAction(t("menu_floorplan_new"))
         act_fp_new.triggered.connect(self._on_floorplan_new)
 
-        act_fp_view = self._menu_floorplan.addAction(t("menu_floorplan_view"))
-        act_fp_view.triggered.connect(self._on_floorplan_view)
+        # v1.67.0 — Bekijk grondplan verplaatst naar toolbar. Bewaard voor restore.
+        # act_fp_view = self._menu_floorplan.addAction(t("menu_floorplan_view"))
+        # act_fp_view.triggered.connect(self._on_floorplan_view)
 
         self._menu_floorplan.addSeparator()
 
@@ -487,31 +494,33 @@ class MainWindow(QMainWindow):
         tb.setIconSize(QSize(16, 16))
         tb.setObjectName("main_toolbar")
 
-        self._act_new       = QAction(t("menu_new"),       self)
-        self._act_new.setShortcut(QKeySequence.StandardKey.New)
-        self._act_new.setEnabled(True)
-        self._act_new.triggered.connect(self._on_new)
+        # v1.67.0 — Nieuw/Bewerken/Verwijderen/Dupliceren hidden: volledig
+        # gedekt door contextmenu per object. Code bewaard voor eventuele restore.
+        # self._act_new       = QAction(t("menu_new"),       self)
+        # self._act_new.setShortcut(QKeySequence.StandardKey.New)
+        # self._act_new.setEnabled(True)
+        # self._act_new.triggered.connect(self._on_new)
+        # self._tb = tb
+        # tb.addAction(self._act_new)
+
+        # self._act_edit      = QAction(t("menu_edit"),      self)
+        # self._act_edit.setEnabled(True)
+        # self._act_edit.triggered.connect(self._on_edit)
+        # tb.addAction(self._act_edit)
+
+        # self._act_delete    = QAction(t("menu_delete"),    self)
+        # self._act_delete.setShortcut(QKeySequence.StandardKey.Delete)
+        # self._act_delete.setEnabled(True)
+        # self._act_delete.triggered.connect(self._on_delete)
+        # tb.addAction(self._act_delete)
+
+        # self._act_duplicate = QAction(t("menu_duplicate"), self)
+        # self._act_duplicate.setEnabled(True)
+        # self._act_duplicate.triggered.connect(self._on_duplicate)
+        # tb.addAction(self._act_duplicate)
+
         # Sla toolbar referentie op voor menu koppeling na build
         self._tb = tb
-        tb.addAction(self._act_new)
-
-        self._act_edit      = QAction(t("menu_edit"),      self)
-        self._act_edit.setEnabled(True)
-        self._act_edit.triggered.connect(self._on_edit)
-        tb.addAction(self._act_edit)
-
-        self._act_delete    = QAction(t("menu_delete"),    self)
-        self._act_delete.setShortcut(QKeySequence.StandardKey.Delete)
-        self._act_delete.setEnabled(True)
-        self._act_delete.triggered.connect(self._on_delete)
-        tb.addAction(self._act_delete)
-
-        self._act_duplicate = QAction(t("menu_duplicate"), self)
-        self._act_duplicate.setEnabled(True)
-        self._act_duplicate.triggered.connect(self._on_duplicate)
-        tb.addAction(self._act_duplicate)
-
-        tb.addSeparator()
 
         self._act_search    = QAction(t("menu_search"),    self)
         self._act_search.setShortcut(QKeySequence.StandardKey.Find)
@@ -519,21 +528,29 @@ class MainWindow(QMainWindow):
         self._act_search.triggered.connect(self._on_search)
         tb.addAction(self._act_search)
 
-        # 2.0.0 — "Wandpunten zoeken" hernoemd naar "Wandpuntenkaart"
-        # Zoekfunctionaliteit zit nu in het unified zoekvenster (Ctrl+F)
-        self._act_outlet_locator = QAction(t("menu_outlet_locator"), self)
-        self._act_outlet_locator.setShortcut("Ctrl+W")
-        self._act_outlet_locator.setEnabled(True)
-        self._act_outlet_locator.triggered.connect(self._on_outlet_locator)
-        tb.addAction(self._act_outlet_locator)
+        # v1.67.0 — Wandpunten overzicht hidden: ruimtefilter zit nu in
+        # "Alle wandpunten" (wall_outlet_view site-modus). Code bewaard voor restore.
+        # self._act_outlet_locator = QAction(t("menu_outlet_locator"), self)
+        # self._act_outlet_locator.setShortcut("Ctrl+W")
+        # self._act_outlet_locator.setEnabled(True)
+        # self._act_outlet_locator.triggered.connect(self._on_outlet_locator)
+        # tb.addAction(self._act_outlet_locator)
 
-        self._act_connect   = QAction(t("menu_connect"),   self)
-        self._act_connect.setCheckable(True)
-        self._act_connect.setEnabled(True)
-        self._act_connect.triggered.connect(self._on_connect_mode_toggled)
-        tb.addAction(self._act_connect)
+        # v1.67.0 — Bekijk grondplan verplaatst van Grondplannen-menu naar toolbar
+        self._act_fp_view_tb = QAction(t("menu_floorplan_view"), self)
+        self._act_fp_view_tb.setEnabled(True)
+        self._act_fp_view_tb.triggered.connect(self._on_floorplan_view)
+        tb.addAction(self._act_fp_view_tb)
 
         tb.addSeparator()
+
+        # v1.67.0 — Verbinding hidden: opgevangen door 'Koppelen' via poort-contextmenu.
+        # Code bewaard voor eventuele restore.
+        # self._act_connect   = QAction(t("menu_connect"),   self)
+        # self._act_connect.setCheckable(True)
+        # self._act_connect.setEnabled(True)
+        # self._act_connect.triggered.connect(self._on_connect_mode_toggled)
+        # tb.addAction(self._act_connect)
 
         self._act_settings  = QAction(t("menu_settings"),  self)
         self._act_settings.setEnabled(True)
@@ -686,11 +703,12 @@ class MainWindow(QMainWindow):
         read_only = settings_storage.get_read_only_mode()
 
         # Toolbar / menu acties
-        self._act_new.setEnabled(not read_only)
-        self._act_edit.setEnabled(not read_only)
-        self._act_delete.setEnabled(not read_only)
-        self._act_duplicate.setEnabled(not read_only)
-        self._act_connect.setEnabled(not read_only)
+        # v1.67.0 — hidden toolbar acties: geen setEnabled nodig, maar bewaard
+        # self._act_new.setEnabled(not read_only)
+        # self._act_edit.setEnabled(not read_only)
+        # self._act_delete.setEnabled(not read_only)
+        # self._act_duplicate.setEnabled(not read_only)
+        # self._act_connect.setEnabled(not read_only)
         self._act_import.setEnabled(not read_only)
 
         # In read-only mogen exports nog wel
@@ -707,9 +725,10 @@ class MainWindow(QMainWindow):
             self._lbl_access_mode.setStyleSheet("color: #56B4E9; font-weight: bold; padding: 0 8px;")
 
         # Als verbindingsmodus actief was en we naar read-only gaan → annuleren
+        # v1.67.0 — _act_connect hidden, setChecked niet meer nodig
         if read_only and self._connect_mode:
             self._on_connect_mode_toggled(False)
-            self._act_connect.setChecked(False)
+            # self._act_connect.setChecked(False)
 
     # ------------------------------------------------------------------
     # Toetsenbord — F1
@@ -719,7 +738,7 @@ class MainWindow(QMainWindow):
         """ESC annuleert verbindingsmodus. F1 opent Help."""
         if event.key() == Qt.Key.Key_Escape and self._connect_mode:
             self._on_connect_mode_toggled(False)
-            self._act_connect.setChecked(False)
+            # self._act_connect.setChecked(False)  # v1.67.0 hidden
             self.set_status(t("msg_connect_cancelled"))
             event.accept()
             return
@@ -1809,6 +1828,69 @@ class MainWindow(QMainWindow):
                     self._current_view.refresh(self._data)
                 self.set_status(f"✓  Poorten bijgewerkt: {device['name']}")
 
+        elif action == "duplicate":
+            # Zoek het rack op voor dit device
+            dup_rack = None
+            for site in self._data.get("sites", []):
+                for room in site.get("rooms", []):
+                    for rack in room.get("racks", []):
+                        if any(s.get("device_id") == device_id for s in rack.get("slots", [])):
+                            dup_rack = rack
+                            break
+
+            if not dup_rack:
+                self.set_status("Rack niet gevonden voor dit device.")
+                return
+
+            src = device
+            new_dev = {
+                "id":          self._gen_id("dev"),
+                "name":        src["name"] + " (kopie)",
+                "type":        src["type"],
+                "front_ports": src.get("front_ports", 0),
+                "back_ports":  src.get("back_ports",  0),
+                "brand":       src.get("brand",  ""),
+                "model":       src.get("model",  ""),
+                "ip":          "",
+                "mac":         "",
+                "serial":      "",
+                "notes":       src.get("notes",  ""),
+            }
+            self._data.setdefault("devices", []).append(new_dev)
+            self._generate_ports(new_dev)
+
+            dlg = PlaceDeviceDialog(parent=self, rack=dup_rack, data=self._data)
+            dlg._name.setText(new_dev["name"])
+            dlg._ddl_type.setCurrentIndex(dlg._ddl_type.findData(new_dev["type"]))
+            dlg._front_ports.setValue(new_dev["front_ports"])
+            dlg._back_ports.setValue(new_dev["back_ports"])
+
+            if dlg.exec() and dlg.get_result():
+                result = dlg.get_result()
+                slot   = result["slot"]
+                slot["id"]        = self._gen_id("slot")
+                slot["rack_id"]   = dup_rack["id"]
+                slot["device_id"] = new_dev["id"]
+                dup_rack.setdefault("slots", []).append(slot)
+                self._save_and_backup()
+                log_change(
+                    action=ACTION_ADD,
+                    entity=ENTITY_DEVICE,
+                    entity_id=new_dev["id"],
+                    label=f"{new_dev['type']} — {new_dev['name']} ({dup_rack['name']})",
+                    details={"duplicated_from": device_id}
+                )
+                if isinstance(self._current_view, RackView):
+                    self._current_view.refresh(self._data)
+                self.set_status(f"✓  '{new_dev['name']}' gedupliceerd.")
+            else:
+                self._data["devices"] = [
+                    d for d in self._data["devices"] if d["id"] != new_dev["id"]
+                ]
+                self._data["ports"] = [
+                    p for p in self._data.get("ports", []) if p["device_id"] != new_dev["id"]
+                ]
+
         elif action == "delete":
             from PySide6.QtWidgets import QMessageBox
             reply = QMessageBox.warning(
@@ -2022,7 +2104,7 @@ class MainWindow(QMainWindow):
             )
 
             self._connect_mode = False
-            self._act_connect.setChecked(False)
+            # self._act_connect.setChecked(False)  # v1.67.0 hidden
             if isinstance(self._current_view, RackView):
                 self._current_view.set_connect_mode(False)
                 self._current_view.refresh(self._data)
@@ -4441,12 +4523,13 @@ class MainWindow(QMainWindow):
         self._menu_settings_mb.setTitle("Settings")
         self._menu_floorplan.setTitle(t("menu_floorplan"))   # G1/G2
         self._menu_help.setTitle(t("menubar_help"))
-        self._act_new.setText(t("menu_new"))
-        self._act_edit.setText(t("menu_edit"))
-        self._act_delete.setText(t("menu_delete"))
-        self._act_duplicate.setText(t("menu_duplicate"))
+        # v1.67.0 — hidden toolbar acties: geen setText nodig, bewaard voor restore
+        # self._act_new.setText(t("menu_new"))
+        # self._act_edit.setText(t("menu_edit"))
+        # self._act_delete.setText(t("menu_delete"))
+        # self._act_duplicate.setText(t("menu_duplicate"))
         self._act_search.setText(t("menu_search"))
-        self._act_connect.setText(t("menu_connect"))
+        # self._act_connect.setText(t("menu_connect"))
         self._act_import.setText(t("menu_import"))
         self._act_export.setText(t("menu_export"))
         self._act_export_image.setText(t("menu_export_image"))

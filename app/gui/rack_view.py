@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.26.0
+# Version: 1.27.0
 # Author:  Barremans
-# Changes: 1.26.0 — Direct endpoint: poort-widget toont 🖥-label en aparte
+# Changes: 1.27.0 — Dupliceren toegevoegd aan device contextmenu (_ACT_DUPLICATE)
+#          1.26.0 — Direct endpoint: poort-widget toont 🖥-label en aparte
 #                   objectName "port-endpoint" voor gele kleur (zelfde als verbonden)
 #                   direct_endpoint_ports set doorgegeven door _populate
 #          1.25.0 — V3: vaste ruimte tussen devices via _DEVICE_GAP constante
@@ -34,9 +35,10 @@ _PORT_SIZE     = 14
 _PORT_GAP      = 2
 _MAX_PORTS_ROW = 12
 
-_ACT_EDIT   = "edit"
-_ACT_DELETE = "delete"
-_ACT_PORTS  = "ports"
+_ACT_EDIT      = "edit"
+_ACT_DELETE    = "delete"
+_ACT_PORTS     = "ports"
+_ACT_DUPLICATE = "duplicate"
 
 _OCC_WARN     = 0.75
 _OCC_CRITICAL = 0.90
@@ -390,15 +392,19 @@ class RackView(QWidget):
 
     def _show_device_context_menu(self, device_id: str, global_pos):
         menu = QMenu(self)
-        act_ports  = menu.addAction(t("ctx_ports_device"))
+        act_ports     = menu.addAction(t("ctx_ports_device"))
         menu.addSeparator()
-        act_edit   = menu.addAction(t("ctx_edit_device"))
-        act_delete = menu.addAction(t("ctx_delete_device"))
+        act_edit      = menu.addAction(t("ctx_edit_device"))
+        act_duplicate = menu.addAction(t("ctx_duplicate"))
+        menu.addSeparator()
+        act_delete    = menu.addAction(t("ctx_delete_device"))
         chosen = menu.exec(global_pos)
         if chosen == act_ports:
             self.device_context_menu.emit(device_id, _ACT_PORTS)
         elif chosen == act_edit:
             self.device_context_menu.emit(device_id, _ACT_EDIT)
+        elif chosen == act_duplicate:
+            self.device_context_menu.emit(device_id, _ACT_DUPLICATE)
         elif chosen == act_delete:
             self.device_context_menu.emit(device_id, _ACT_DELETE)
 
