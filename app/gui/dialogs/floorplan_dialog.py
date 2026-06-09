@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_dialog.py
 # Role:    Dialoog — nieuw grondplan koppelen aan site en wandpunt locatie
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.5.0 — Naam en notities velden toegevoegd
+# Changes: 1.6.0 — Wandpunt locaties: QComboBox vervangen door zoekbare
+#                   QLineEdit + QListWidget combinatie (real-time filter)
+#          1.5.0 — Naam en notities velden toegevoegd
 #          1.4.0 — bugfix: outlet_locations ipv rooms
 #                   gebruikt settings_storage.load_outlet_locations()
 #                   slaat outlet_location_key op i.p.v. room_id
@@ -30,12 +32,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QTextEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtCore import Qt
 
 from app.helpers import settings_storage
 from app.helpers.i18n import t
@@ -132,9 +137,30 @@ class FloorplanDialog(QDialog):
         self._cmb_site = QComboBox()
         form.addRow(f"{t('label_floorplan_site')}:", self._cmb_site)
 
-        # Wandpunt locaties
-        self._cmb_location = QComboBox()
-        form.addRow(f"{t('settings_tab_outlet_locations')}:", self._cmb_location)
+        # Wandpunt locaties — zoekbaar (v1.6.0)
+        loc_widget = QWidget()
+        loc_layout = QVBoxLayout(loc_widget)
+        loc_layout.setContentsMargins(0, 0, 0, 0)
+        loc_layout.setSpacing(4)
+
+        self._search_location = QLineEdit()
+        self._search_location.setPlaceholderText(t("search_placeholder_outlet_location"))
+        self._search_location.setClearButtonEnabled(True)
+        self._search_location.textChanged.connect(self._filter_locations)
+        loc_layout.addWidget(self._search_location)
+
+        self._list_location = QListWidget()
+        self._list_location.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._list_location.setFixedHeight(130)
+        loc_layout.addWidget(self._list_location)
+
+        self._lbl_loc_empty = QLabel(t("lbl_no_outlet_location_match"))
+        self._lbl_loc_empty.setObjectName("secondary")
+        self._lbl_loc_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_loc_empty.setVisible(False)
+        loc_layout.addWidget(self._lbl_loc_empty)
+
+        form.addRow(f"{t('settings_tab_outlet_locations')}:", loc_widget)
 
         root.addLayout(form)
 
@@ -171,13 +197,35 @@ class FloorplanDialog(QDialog):
             self._cmb_site.addItem(site_name, site_id)
 
     def _populate_outlet_locations(self):
-        self._cmb_location.clear()
+        self._list_location.clear()
 
         language = settings_storage.load_settings().get("language", "nl")
         for loc in settings_storage.load_outlet_locations():
-            key = loc.get("key", "")
+            key   = loc.get("key", "")
             label = loc.get(f"label_{language}") or loc.get("label_nl") or key
-            self._cmb_location.addItem(label, key)
+            item  = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            self._list_location.addItem(item)
+
+        if self._list_location.count():
+            self._list_location.setCurrentRow(0)
+
+    def _filter_locations(self, text: str):
+        """Real-time filter op wandpunt locatie lijst."""
+        needle  = text.strip().lower()
+        visible = 0
+        first   = None
+        for i in range(self._list_location.count()):
+            item  = self._list_location.item(i)
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match:
+                visible += 1
+                if first is None:
+                    first = i
+        self._lbl_loc_empty.setVisible(visible == 0)
+        if first is not None:
+            self._list_location.setCurrentRow(first)
 
     def _apply_preselection(self):
         if self._preselected_site_id:
@@ -186,9 +234,10 @@ class FloorplanDialog(QDialog):
                 self._cmb_site.setCurrentIndex(idx)
 
         if self._preselected_location_key:
-            idx = self._find_combo_index_by_data(self._cmb_location, self._preselected_location_key)
-            if idx >= 0:
-                self._cmb_location.setCurrentIndex(idx)
+            for i in range(self._list_location.count()):
+                if self._list_location.item(i).data(Qt.ItemDataRole.UserRole) == self._preselected_location_key:
+                    self._list_location.setCurrentRow(i)
+                    break
 
     def _apply_read_only_mode(self):
         read_only = settings_storage.get_read_only_mode()
@@ -196,7 +245,8 @@ class FloorplanDialog(QDialog):
             self._btn_browse.setEnabled(False)
             self._btn_save.setEnabled(False)
             self._cmb_site.setEnabled(False)
-            self._cmb_location.setEnabled(False)
+            self._list_location.setEnabled(False)
+            self._search_location.setEnabled(False)
 
     # ------------------------------------------------------------------
     # Events
@@ -315,7 +365,10 @@ class FloorplanDialog(QDialog):
         return self._cmb_site.currentData()
 
     def _current_location_key(self) -> str | None:
-        return self._cmb_location.currentData()
+        item = self._list_location.currentItem()
+        if item and not item.isHidden():
+            return item.data(Qt.ItemDataRole.UserRole)
+        return None
 
     def _find_combo_index_by_data(self, combo: QComboBox, value: str) -> int:
         for i in range(combo.count()):

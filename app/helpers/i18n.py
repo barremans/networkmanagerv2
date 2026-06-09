@@ -2,9 +2,19 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.26.0
+# Version: 1.32.0
 # Author:  Barremans
-# Changes: 1.26.0 — G-OPEN-8: fp_export_* sleutels toegevoegd (NL + EN)
+# Changes: 1.32.0 — Zoekbalk wandpunt locaties: search_placeholder_outlet_location,
+#                   lbl_no_outlet_location_match (NL + EN)
+#          1.31.0 — FloorplanPickerDialog: dlg_floorplan_picker_title,
+#                   search_placeholder_floorplan, lbl_no_floorplan_match (NL + EN)
+#          1.30.0 — Ongebruikte wandpunten v1.2.0: status_active_with_device,
+#                   label_switch, label_switch_port toegevoegd (NL + EN)
+#          1.29.0 — Ongebruikte wandpunten overzicht: tree_unused_outlets,
+#                   search_placeholder_unused_outlet, status_active_no_device,
+#                   status_not_connected, label_unused_connected_to,
+#                   label_conn_type, label_status, conn_type_* (NL + EN)
+#          1.26.0 — G-OPEN-8: fp_export_* sleutels toegevoegd (NL + EN)
 #          1.27.0 — label_url, btn_open_url toegevoegd (NL + EN)
 #          1.28.0 — ctx_edit_endpoint toegevoegd (NL + EN)
 #          1.25.1 — menu_outlet_locator NL/EN bijgewerkt
@@ -495,6 +505,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Site wandpunten-overzicht
         "tree_site_outlets":            "Alle wandpunten",
         "tree_endpoints":               "Eindapparaten",
+        "tree_unused_outlets":          "Ongebruikte wandpunten",
         "ctx_open_rack":                "Open rack",
         "ctx_open_floorplan":           "Open grondplan",
         "site_outlets_title":           "Wandpunten overzicht",
@@ -546,6 +557,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "dlg_connect_smart_title":          "Poort koppelen",
         "search_placeholder_outlet":        "Zoek site, ruimte of wandpunt...",
         "search_placeholder_endpoint":      "Zoek naam, type, locatie of IP...",
+        "search_placeholder_unused_outlet": "Zoek naam, ruimte of verbonden toestel...",
+
+        # Ongebruikte wandpunten overzicht — status labels (1.29.0)
+        "status_active_no_device":      "🟠  Actief — geen device",
+        "status_active_with_device":    "🟢  Actief — met device",
+        "status_not_connected":         "🔴  Niet verbonden",
+        "label_unused_connected_to":    "Verbonden met",
+        "label_conn_type":              "Type verbinding",
+        "label_status":                 "Status",
+        "label_switch":                 "Switch",
+        "label_switch_port":            "Switch poort",
+        "conn_type_direct_switch":      "Direct switch",
+        "conn_type_via_patchpanel":     "Via patchpanel",
+        "conn_type_via_device":         "Via toestel",
         "search_placeholder_port":          "Zoek site, rack, device of poort...",
         "err_no_endpoint_selected":         "Selecteer eerst een eindapparaat.",
         "warn_endpoint_already_connected":  "Dit eindapparaat is al verbonden. Toch doorgaan?",
@@ -681,6 +706,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fp_export_col_name":        "Naam",
         "fp_export_col_trace":       "Trace",
         "msg_export_failed":         "Export mislukt.",
+
+        # FloorplanPickerDialog — v1.31.0
+        "dlg_floorplan_picker_title":   "Kies grondplan",
+        "search_placeholder_floorplan": "Zoek site of grondplan...",
+        "lbl_no_floorplan_match":       "Geen grondplannen gevonden.",
+        "search_placeholder_outlet_location": "Zoek locatie...",
+        "lbl_no_outlet_location_match": "Geen locaties gevonden.",
     },
 
     # -------------------------------------------------------------------------
@@ -1127,6 +1159,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Site wall outlets overview
         "tree_site_outlets":            "All Wall Outlets",
         "tree_endpoints":               "Endpoints",
+        "tree_unused_outlets":          "Unused Wall Outlets",
         "ctx_open_rack":                "Open rack",
         "ctx_open_floorplan":           "Open floor plan",
         "site_outlets_title":           "Wall Outlets Overview",
@@ -1178,6 +1211,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "dlg_connect_smart_title":          "Connect port",
         "search_placeholder_outlet":        "Search site, room or outlet...",
         "search_placeholder_endpoint":      "Search name, type, location or IP...",
+        "search_placeholder_unused_outlet": "Search name, room or connected device...",
+
+        # Unused wall outlets overview — status labels (1.29.0)
+        "status_active_no_device":      "🟠  Active — no device",
+        "status_active_with_device":    "🟢  Active — with device",
+        "status_not_connected":         "🔴  Not connected",
+        "label_unused_connected_to":    "Connected to",
+        "label_conn_type":              "Connection type",
+        "label_status":                 "Status",
+        "label_switch":                 "Switch",
+        "label_switch_port":            "Switch port",
+        "conn_type_direct_switch":      "Direct switch",
+        "conn_type_via_patchpanel":     "Via patch panel",
+        "conn_type_via_device":         "Via device",
         "search_placeholder_port":          "Search site, rack, device or port...",
         "err_no_endpoint_selected":         "Please select an endpoint first.",
         "warn_endpoint_already_connected":  "This endpoint is already connected. Continue anyway?",
@@ -1313,6 +1360,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fp_export_col_name":        "Name",
         "fp_export_col_trace":       "Trace",
         "msg_export_failed":         "Export failed.",
+
+        # FloorplanPickerDialog — v1.31.0
+        "dlg_floorplan_picker_title":   "Select floorplan",
+        "search_placeholder_floorplan": "Search site or floorplan...",
+        "lbl_no_floorplan_match":       "No floorplans found.",
+        "search_placeholder_outlet_location": "Search location...",
+        "lbl_no_outlet_location_match": "No locations found.",
     },
 }
 

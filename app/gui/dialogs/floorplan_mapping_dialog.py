@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_mapping_dialog.py
 # Role:    Dialoog — SVG punt koppelen aan wandpunt, eindapparaat of poort
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
-# Changes: 1.6.0 — _populate_port_devices: filter op device-definitie
+# Changes: 1.7.0 — Auto-focus op zoekveld bij openen en bij wisselen van tab:
+#                   showEvent + _focus_search + currentChanged gekoppeld
+#          1.6.0 — _populate_port_devices: filter op device-definitie
 #                   _port_sort_key: front poorten eerst (was back eerst)
 #                   back_ports=0 → back poorten niet tonen
 #                   front+sfp max → overbodige front poorten niet tonen
@@ -153,6 +155,7 @@ class FloorplanMappingDialog(QDialog):
         self._tabs.addTab(tab_port, t("label_port"))
 
         root.addWidget(self._tabs)
+        self._tabs.currentChanged.connect(self._focus_search)
 
         # Knoppen
         btn_row = QHBoxLayout()
@@ -164,6 +167,24 @@ class FloorplanMappingDialog(QDialog):
         btn_row.addWidget(self._btn_save)
         btn_row.addWidget(self._btn_cancel)
         root.addLayout(btn_row)
+
+    # ------------------------------------------------------------------
+    # Focus
+    # ------------------------------------------------------------------
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._focus_search)
+
+    def _focus_search(self):
+        idx = self._tabs.currentIndex()
+        if idx == 0:
+            self._search_outlet.setFocus()
+        elif idx == 1:
+            self._search_endpoint.setFocus()
+        else:
+            self._search_port.setFocus()
 
     # ------------------------------------------------------------------
     # Populeren

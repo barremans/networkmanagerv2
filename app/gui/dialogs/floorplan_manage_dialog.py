@@ -2,9 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_manage_dialog.py
 # Role:    Dialoog — grondplan beheren (naam, site, locatie, verwijderen)
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
-# Changes: 1.3.0 — SVG vervangen: preview vóór bevestiging
+# Changes: 1.4.0 — Zoekbalk boven de tabel: real-time filter op naam, site
+#                   en wandpunt locatie. Rijen worden verborgen/getoond zonder
+#                   de onderliggende _floorplans lijst te wijzigen.
+#          1.3.0 — SVG vervangen: preview vóór bevestiging
 #                   Toont welke koppelingen verloren gaan met Ja/Nee dialoog
 #                   Geen koppelingen? → eenvoudige bevestiging
 #          1.2.0 — G-OPEN-5/6: knop "SVG vervangen" naast SVG label
@@ -91,6 +94,13 @@ class FloorplanManageDialog(QDialog):
         lbl = QLabel(t("menu_floorplan_manage"))
         lbl.setObjectName("secondary")
         left_layout.addWidget(lbl)
+
+        # 1.4.0 — Zoekbalk
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("🔍  " + t("search_placeholder_floorplan"))
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._filter_table)
+        left_layout.addWidget(self._search)
 
         self._table = QTableWidget()
         self._table.setColumnCount(3)
@@ -244,12 +254,38 @@ class FloorplanManageDialog(QDialog):
             self._table.setItem(row, 1, QTableWidgetItem(site))
             self._table.setItem(row, 2, QTableWidgetItem(loc))
 
+        # Hertoepas actieve zoekfilter na herladen
+        if hasattr(self, '_search'):
+            self._filter_table(self._search.text())
+
         if self._table.rowCount() > 0:
-            self._table.selectRow(0)
+            # Selecteer eerste zichtbare rij
+            for row in range(self._table.rowCount()):
+                if not self._table.isRowHidden(row):
+                    self._table.selectRow(row)
+                    break
 
     # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
+
+    def _filter_table(self, text: str = ""):
+        """1.4.0 — Verberg rijen die niet overeenkomen met de zoektekst."""
+        needle = text.strip().lower()
+        for row in range(self._table.rowCount()):
+            match = not needle or any(
+                needle in (self._table.item(row, col).text().lower() if self._table.item(row, col) else "")
+                for col in range(self._table.columnCount())
+            )
+            self._table.setRowHidden(row, not match)
+
+        # Selecteer eerste zichtbare rij als huidige selectie verborgen is
+        cur = self._table.currentRow()
+        if cur < 0 or self._table.isRowHidden(cur):
+            for row in range(self._table.rowCount()):
+                if not self._table.isRowHidden(row):
+                    self._table.selectRow(row)
+                    break
 
     def _on_selection_changed(self):
         row = self._table.currentRow()

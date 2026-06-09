@@ -1,33 +1,64 @@
 # =============================================================================
 # Networkmap_Creator
 # File:    app/gui/dialogs/rack_export_dialog.py
-# Role:    Scopekeuze dialog voor MD rack-export (E2)
-# Version: 1.0.1
+# Role:    Scopekeuze + exportopties dialog voor MD rack-export (E2)
+# Version: 2.1.0
 # Author:  Barremans
-# Changes: 1.0.0 — E2: initiële versie
-#          1.0.1 — Bugfix: radiobutton signals direct gekoppeld (idClicked
-#                  onbetrouwbaar in PySide6); QFrame site/rack rows correct
-#                  aangemaakt; _update_ui() aangeroepen bij initialisatie
+# Changes: 2.1.0 — Tracing-only checkbox toegevoegd
+#                  _update_tracing_mode: schakelt andere opties uit
+#          2.0.2 — setMaximumHeight(640) om scherm-overflow te vermijden
+#          2.0.1 — QSS radiobutton fluo-geel
+#          2.0.0 — Exportopties toegevoegd: vrije poorten, patchpanels,
+#                  switches, aandachtspunten, controlelog
+#                  Detailniveau: kort / technisch / volledig
+#                  options-property beschikbaar na accept()
+#          1.0.1 — Bugfix: radiobutton signals direct gekoppeld
+#          1.0.0 — E2: initiële versie
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QLabel, QComboBox, QRadioButton,
-    QButtonGroup, QPushButton, QFrame, QWidget,
+    QButtonGroup, QPushButton, QFrame, QWidget, QCheckBox,
 )
 from PySide6.QtCore import Qt
 
 from app.helpers.i18n import t
 
 
+_RADIO_QSS = """
+QRadioButton {
+    spacing: 8px;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    border: 2px solid #666666;
+    background-color: transparent;
+}
+QRadioButton::indicator:checked {
+    border: 2px solid #D4FF00;
+    background-color: #D4FF00;
+}
+QRadioButton:checked {
+    color: #D4FF00;
+    font-weight: bold;
+}
+"""
+
+
 class RackExportDialog(QDialog):
     """
-    Dialog voor scopekeuze bij Markdown rack-export.
+    Dialog voor scopekeuze en exportopties bij Markdown rack-export.
 
     Na accept() zijn beschikbaar:
         .scope    : "all" | "site" | "rack"
         .site_id  : str (alleen bij scope=="site")
         .rack_id  : str (alleen bij scope=="rack")
+        .options  : dict met exportopties voor rack_export_md.export_md()
     """
 
     def __init__(self, data: dict, parent=None):
@@ -36,10 +67,13 @@ class RackExportDialog(QDialog):
         self.scope   = "all"
         self.site_id = ""
         self.rack_id = ""
+        self.options: dict = {}
 
         self.setWindowTitle(t("rack_export_dialog_title"))
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(460)
+        self.setMaximumHeight(640)
         self.setModal(True)
+        self.setStyleSheet(_RADIO_QSS)
         self._build()
         self._update_ui()
 
@@ -67,7 +101,6 @@ class RackExportDialog(QDialog):
         self._btn_rack = QRadioButton(t("rack_export_scope_rack"))
         self._btn_all.setChecked(True)
 
-        # QButtonGroup puur voor exclusiviteit — signals direct per knop
         self._grp_btns = QButtonGroup(self)
         self._grp_btns.addButton(self._btn_all,  0)
         self._grp_btns.addButton(self._btn_site, 1)
@@ -97,6 +130,63 @@ class RackExportDialog(QDialog):
         rack_form.addRow(t("rack_export_select_rack") + ":", self._ddl_rack)
         layout.addWidget(self._rack_row)
 
+        # --- Detailniveau ---
+        grp_level = QGroupBox("Detailniveau")
+        level_layout = QHBoxLayout(grp_level)
+        level_layout.setSpacing(16)
+        self._btn_short    = QRadioButton("Kort")
+        self._btn_tech     = QRadioButton("Technisch")
+        self._btn_full     = QRadioButton("Volledig")
+        self._btn_tech.setChecked(True)
+        self._grp_level = QButtonGroup(self)
+        self._grp_level.addButton(self._btn_short, 0)
+        self._grp_level.addButton(self._btn_tech,  1)
+        self._grp_level.addButton(self._btn_full,  2)
+        level_layout.addWidget(self._btn_short)
+        level_layout.addWidget(self._btn_tech)
+        level_layout.addWidget(self._btn_full)
+        level_layout.addStretch()
+        layout.addWidget(grp_level)
+
+        # --- Exportopties ---
+        grp_opts = QGroupBox("Exportopties")
+        opts_layout = QVBoxLayout(grp_opts)
+        opts_layout.setSpacing(6)
+
+        self._chk_tracing_only = QCheckBox("📋 Tracing-only (rackfiche voor aan het rack)")
+        self._chk_tracing_only.setChecked(False)
+        self._chk_tracing_only.setToolTip(
+            "Compacte export met alleen U-layout, aandachtspunten en volledige\n"
+            "switchpoort-tracing. Ideaal om uitgedrukt bij het rack te leggen.\n"
+            "Patchpanelmatrix, wandpunttabel en controlelog worden weggelaten."
+        )
+        opts_layout.addWidget(self._chk_tracing_only)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        opts_layout.addWidget(sep2)
+
+        self._chk_free_ports   = QCheckBox("Vrije poorten tonen")
+        self._chk_switches     = QCheckBox("Switchpoortdetails tonen")
+        self._chk_patchpanels  = QCheckBox("Patchpaneldetails tonen")
+        self._chk_attention    = QCheckBox("Aandachtspunten tonen")
+        self._chk_control_log  = QCheckBox("Controlelog toevoegen")
+
+        self._chk_free_ports.setChecked(True)
+        self._chk_switches.setChecked(True)
+        self._chk_patchpanels.setChecked(True)
+        self._chk_attention.setChecked(True)
+        self._chk_control_log.setChecked(True)
+
+        for chk in (self._chk_free_ports, self._chk_switches,
+                    self._chk_patchpanels, self._chk_attention,
+                    self._chk_control_log):
+            opts_layout.addWidget(chk)
+
+        # Tracing-only schakelt andere opties uit
+        self._chk_tracing_only.toggled.connect(self._update_tracing_mode)
+        layout.addWidget(grp_opts)
+
         layout.addStretch()
 
         # --- Knoppen ---
@@ -115,13 +205,15 @@ class RackExportDialog(QDialog):
         btn_row.addWidget(btn_export)
         layout.addLayout(btn_row)
 
-        # Signals — direct per radiobutton (betrouwbaarder dan idClicked)
+        # Signals
         self._btn_all.toggled.connect(self._update_ui)
         self._btn_site.toggled.connect(self._update_ui)
         self._btn_rack.toggled.connect(self._update_ui)
+        self._btn_short.toggled.connect(self._update_options_ui)
+        self._btn_tech.toggled.connect(self._update_options_ui)
+        self._btn_full.toggled.connect(self._update_options_ui)
 
     def _populate_racks(self):
-        """Vul de rack-dropdown met alle racks over alle sites."""
         self._ddl_rack.clear()
         for site in self._data.get("sites", []):
             for room in site.get("rooms", []):
@@ -136,9 +228,32 @@ class RackExportDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _update_ui(self, _checked=None):
-        """Toon alleen de relevante dropdown op basis van geselecteerde scope."""
         self._site_row.setVisible(self._btn_site.isChecked())
         self._rack_row.setVisible(self._btn_rack.isChecked())
+        self.adjustSize()
+
+    def _update_options_ui(self, _checked=None):
+        """Bij 'Kort' zijn switch- en patchpaneldetails niet relevant."""
+        is_short    = self._btn_short.isChecked()
+        is_tracing  = self._chk_tracing_only.isChecked()
+        self._chk_switches.setEnabled(not is_short and not is_tracing)
+        self._chk_patchpanels.setEnabled(not is_short and not is_tracing)
+        self._chk_free_ports.setEnabled(not is_short and not is_tracing)
+        self._chk_attention.setEnabled(not is_tracing)
+        self._chk_control_log.setEnabled(not is_tracing)
+        self.adjustSize()
+
+    def _update_tracing_mode(self, checked: bool):
+        """Tracing-only: schakel andere opties uit en zet detailniveau op volledig."""
+        self._chk_switches.setEnabled(not checked)
+        self._chk_patchpanels.setEnabled(not checked)
+        self._chk_free_ports.setEnabled(not checked)
+        self._chk_attention.setEnabled(not checked)
+        self._chk_control_log.setEnabled(not checked)
+        self._btn_level_group = getattr(self, "_grp_level", None)
+        if self._btn_level_group:
+            for btn in [self._btn_short, self._btn_tech, self._btn_full]:
+                btn.setEnabled(not checked)
         self.adjustSize()
 
     def _on_export(self):
@@ -150,4 +265,21 @@ class RackExportDialog(QDialog):
         else:
             self.scope   = "rack"
             self.rack_id = self._ddl_rack.currentData() or ""
+
+        if self._btn_short.isChecked():
+            level = "short"
+        elif self._btn_full.isChecked():
+            level = "full"
+        else:
+            level = "technical"
+
+        self.options = {
+            "include_free_ports":       self._chk_free_ports.isChecked(),
+            "include_switches":         self._chk_switches.isChecked(),
+            "include_patchpanels":      self._chk_patchpanels.isChecked(),
+            "include_attention_points": self._chk_attention.isChecked(),
+            "include_control_log":      self._chk_control_log.isChecked(),
+            "detail_level":             level,
+            "tracing_only":             self._chk_tracing_only.isChecked(),
+        }
         self.accept()

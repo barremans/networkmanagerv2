@@ -4,9 +4,13 @@
 # Role:    G-OPEN-8 — Grondplan export als Word-document (.docx)
 #          Pure Python via python-docx — geen Node.js of externe runtime nodig.
 #          Vereiste: pip install python-docx
-# Version: 2.14.0
+# Version: 2.15.0
 # Author:  Barremans
-# Changes: 2.14.0 — FE-NEW-1: _resolve port-type: trace-stappen correct tonen
+# Changes: 2.15.0 — Lege pagina's ALL-export opgelost:
+#                   page_break_after=True bij PNG vervangen door False;
+#                   één expliciete _add_page_break na PNG/sectietitel.
+#                   Dubbele break (sectietitel-break + PNG-break) vermeden.
+#          2.14.0 — FE-NEW-1: _resolve port-type: trace-stappen correct tonen
 #                   inclusief wandpunt en eindapparaat.
 #                   Back-poort: reversed() toegepast (zelfde logica als main_window).
 #                   _add_trace: slice verhoogd van 6 naar 8 voor volledige trace.
@@ -1009,21 +1013,27 @@ def _build_all_document(floorplans: list, site: dict, data: dict,
         if not mappings:
             continue  # Grondplannen zonder koppelingen overslaan
 
+        fp_name = fp.get("name", "") or fp.get("outlet_location_key", fp.get("id", ""))
+
+        # Sectietitel op nieuwe pagina.
+        # De page break staat HIER (voor de sectietitel), niet na de PNG.
+        # Zo ontstaat er nooit een dubbele break (= lege pagina):
+        #   oud: page_break_after=True in PNG + _add_page_break volgende iteratie
+        #   nieuw: één _add_page_break hier, PNG met page_break_after=False,
+        #          daarna één _add_page_break voor de kaartjes.
         if not first_fp:
             _add_page_break(doc)
         first_fp = False
 
-        fp_name = fp.get("name", "") or fp.get("outlet_location_key", fp.get("id", ""))
-
         # Sectietitel — prominente banner + paginanummer-ankerpunt
         _add_fp_section_title(doc, fp_name, site.get("name", ""), show_subtitle=True)
 
-        # PNG — page break zit ingebakken in de afbeeldingsparagraaf
+        # PNG — page_break_after=False: de break naar de kaartjespagina
+        # volgt hieronder via één expliciete _add_page_break.
         png = png_paths.get(fp.get("id", ""))
         if png and Path(png).exists():
-            _add_floorplan_image(doc, png, page_break_after=True)
-        else:
-            _add_page_break(doc)
+            _add_floorplan_image(doc, png, page_break_after=False)
+        _add_page_break(doc)
 
         # Kaartjes
         items        = sorted(mappings.items())

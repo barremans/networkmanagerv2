@@ -3,10 +3,12 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.11.0
+# Version: 1.12.0
 # Author:  Barremans
-# Changes: 1.10.0 — R-1: restore-sectie in backup tabblad
+# Changes: 1.12.0 — Zoekbalk toegevoegd aan wandpunt locaties tab (_loc_search,
+#                   _on_loc_search_changed, _refresh_loc_list gefilterd)
 #          1.11.0 — vlan_config.json checkbox toegevoegd aan restore
+#          1.10.0 — R-1: restore-sectie in backup tabblad
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -895,6 +897,13 @@ class SettingsWindow(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
+        # Zoekbalk — v1.12.0
+        self._loc_search = QLineEdit()
+        self._loc_search.setPlaceholderText(t("search_placeholder_outlet_location"))
+        self._loc_search.setClearButtonEnabled(True)
+        self._loc_search.textChanged.connect(self._on_loc_search_changed)
+        layout.addWidget(self._loc_search)
+
         list_row = QHBoxLayout()
         self._loc_list = QListWidget()
         self._loc_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
@@ -934,16 +943,31 @@ class SettingsWindow(QDialog):
         return tab
 
     def _refresh_loc_list(self, select_idx: int = -1):
-        lang = self._ddl_lang.currentData() or "nl"
+        lang   = self._ddl_lang.currentData() or "nl"
+        needle = getattr(self, "_loc_search", None)
+        needle = needle.text().strip().lower() if needle else ""
         self._loc_list.clear()
-        for loc in self._loc_types:
+        filtered_idx = -1
+        display_idx  = 0
+        for i, loc in enumerate(self._loc_types):
             label = loc.get(f"label_{lang}", loc.get("label_nl", loc.get("key", "?")))
-            item  = QListWidgetItem(label)
+            if needle and needle not in label.lower():
+                continue
+            item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, loc)
             self._loc_list.addItem(item)
-        if select_idx >= 0 and select_idx < self._loc_list.count():
-            self._loc_list.setCurrentRow(select_idx)
+            if i == select_idx:
+                filtered_idx = display_idx
+            display_idx += 1
+        if filtered_idx >= 0:
+            self._loc_list.setCurrentRow(filtered_idx)
+        elif self._loc_list.count():
+            self._loc_list.setCurrentRow(0)
         self._on_loc_row_changed(self._loc_list.currentRow())
+
+    def _on_loc_search_changed(self, _text: str):
+        """Real-time filter op zoekbalk — v1.12.0."""
+        self._refresh_loc_list()
 
     def _on_loc_row_changed(self, row: int):
         has = row >= 0

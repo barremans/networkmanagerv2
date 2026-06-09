@@ -2,9 +2,17 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.25.0
+# Version: 1.27.0
 # Author:  Barremans
-# Changes: 1.25.0 — select_by_target_val(target_val): selecteer svg-punt via
+# Changes: 1.27.0 — select_by_target_val: stap 3 volledig uitgewerkt (3a/3b/3c)
+#                   3a: wo_id → PP back-poort → directe mapping
+#                   3b: PP back → PP front via zelfde device+number, andere side
+#                   3c: PP front → switch-poort via connection → mapping
+#                   Fix: wandpunt → PP back → PP front → switch → SVG punt ✅
+#          1.26.0 — select_by_target_val: stap 3 + 4 toegevoegd
+#                   Stap 3: wo_id → verbinding → "port:port_id" in mappings
+#                   Stap 4: wo_id → endpoint_id → "ep:ep_id" in mappings
+#          1.25.0 — select_by_target_val(target_val): selecteer svg-punt via
 #                   omgekeerde mapping-lookup op actuele self._floorplan data.
 #                   Gebruikt door main_window na navigatie vanuit eindapparaten-overzicht.
 # Changes: 1.24.0 — Site-scope volledig geïmplementeerd via export_all_floorplans_docx
@@ -631,13 +639,17 @@ class FloorplanView(QWidget):
 
     def select_by_target_val(self, target_val: str) -> bool:
         """
-        1.25.0 — Selecteer het svg-punt dat gekoppeld is aan target_val.
+        1.27.0 — Selecteer het svg-punt dat gekoppeld is aan target_val.
         target_val: outlet_id OF "ep:ep_id".
 
         Zoekstrategie (in volgorde):
         1. Directe match op target_val in mappings
-        2. Als target_val = "ep:ep_id": zoek ook het wandpunt dat dit eindapparaat
-           heeft (endpoint_id == ep_id) en probeer de mapping via outlet_id
+        2. "ep:ep_id" → wandpunt met dat endpoint_id → outlet_id in mappings
+        3. wo_id → volledige poort-keten:
+           3a. wo → PP back-poort → directe mapping (port:back_id)
+           3b. PP back → PP front via zelfde device+number, andere side → mapping
+           3c. PP front → switch-poort via connection → mapping (port:switch_id)
+        4. wo_id → endpoint_id → "ep:ep_id" in mappings
         """
         if not target_val:
             return False
@@ -646,10 +658,9 @@ class FloorplanView(QWidget):
         # Stap 1: directe match
         svg_point = next((k for k, v in mappings.items() if v == target_val), None)
 
-        # Stap 2: ep:ep_id → zoek via gekoppeld wandpunt
+        # Stap 2: "ep:ep_id" → zoek via gekoppeld wandpunt outlet_id
         if not svg_point and target_val.startswith("ep:"):
             ep_id = target_val[3:]
-            # Zoek outlet_id van het wandpunt dat dit eindapparaat heeft
             for site in self._data.get("sites", []):
                 for room in site.get("rooms", []):
                     for wo in room.get("wall_outlets", []):
@@ -659,6 +670,89 @@ class FloorplanView(QWidget):
                                 (k for k, v in mappings.items() if v == outlet_id),
                                 None,
                             )
+                            break
+                    if svg_point:
+                        break
+                if svg_point:
+                    break
+
+        # Stap 3: wo_id → volledige poort-keten → mapping
+        if not svg_point and target_val and not target_val.startswith(("ep:", "port:")):
+            port_id = None
+            for conn in self._data.get("connections", []):
+                ft = conn.get("from_type", "")
+                fid = conn.get("from_id", "")
+                tt = conn.get("to_type", "")
+                tid = conn.get("to_id", "")
+                if ft == "wall_outlet" and fid == target_val and tt == "port":
+                    port_id = tid
+                    break
+                if tt == "wall_outlet" and tid == target_val and ft == "port":
+                    port_id = fid
+                    break
+
+            if port_id:
+                # 3a — directe mapping op de gevonden poort
+                port_key = f"port:{port_id}"
+                svg_point = next(
+                    (k for k, v in mappings.items() if v == port_key), None
+                )
+
+                # 3b — PP back → PP front via zelfde device+number, andere side
+                if not svg_point:
+                    port_map     = {p["id"]: p for p in self._data.get("ports", [])}
+                    back_port    = port_map.get(port_id, {})
+                    dev_id       = back_port.get("device_id", "")
+                    number       = back_port.get("number")
+                    side         = back_port.get("side", "")
+                    partner_side = "front" if side == "back" else "back"
+                    partner_port_id = next(
+                        (p["id"] for p in self._data.get("ports", [])
+                         if p.get("device_id") == dev_id
+                         and p.get("number") == number
+                         and p.get("side") == partner_side),
+                        None,
+                    )
+                    if partner_port_id:
+                        partner_key = f"port:{partner_port_id}"
+                        svg_point = next(
+                            (k for k, v in mappings.items() if v == partner_key), None
+                        )
+
+                        # 3c — PP front → switch-poort via connection
+                        if not svg_point:
+                            switch_port_id = None
+                            for conn in self._data.get("connections", []):
+                                ft = conn.get("from_type", "")
+                                fid = conn.get("from_id", "")
+                                tt = conn.get("to_type", "")
+                                tid = conn.get("to_id", "")
+                                if ft == "port" and fid == partner_port_id and tt == "port":
+                                    switch_port_id = tid
+                                    break
+                                if tt == "port" and tid == partner_port_id and ft == "port":
+                                    switch_port_id = fid
+                                    break
+                            if switch_port_id:
+                                switch_key = f"port:{switch_port_id}"
+                                svg_point = next(
+                                    (k for k, v in mappings.items() if v == switch_key),
+                                    None,
+                                )
+
+        # Stap 4: wo_id → endpoint_id → "ep:ep_id" in mappings
+        if not svg_point and target_val and not target_val.startswith(("ep:", "port:")):
+            for site in self._data.get("sites", []):
+                for room in site.get("rooms", []):
+                    for wo in room.get("wall_outlets", []):
+                        if wo.get("id") == target_val:
+                            ep_id = wo.get("endpoint_id", "")
+                            if ep_id:
+                                ep_key = f"ep:{ep_id}"
+                                svg_point = next(
+                                    (k for k, v in mappings.items() if v == ep_key),
+                                    None,
+                                )
                             break
                     if svg_point:
                         break

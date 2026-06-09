@@ -2,9 +2,25 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.62.0
+# Version: 1.66.0
 # Author:  Barremans
-# Changes: 1.60.0 — RV-NEW-1: Eindapparaat detail via trace bij rechtsklik op
+# Changes: 1.66.0 — FloorplanPickerDialog: vervangt QInputDialog.getItem() in
+#                   _on_floorplan_view(). Eigen dialoog met zoekbalk (real-time
+#                   filter), lijstweergave en OK/Cancel. QDialog toegevoegd aan
+#                   PySide6.QtWidgets import.
+#          1.65.0 — Debug prints verwijderd uit _on_ep_overview_open_floorplan
+#                   Docstring bijgewerkt naar v1.27.0 verwijzing
+#          1.64.0 — Ongebruikte wandpunten: poort-highlight bij Open rack
+#                   _on_unused_outlet_open_rack uitgebreid met switch_port_id
+#                   trace_from_port + highlight_trace via QTimer (zelfde patroon
+#                   als _on_ep_overview_open_rack_with_ep)
+#          1.63.0 — Ongebruikte wandpunten overzicht toegevoegd
+#                   Nieuw boom-item per site: "🔌 Ongebruikte wandpunten (N)"
+#                   _TYPE_UNUSED_OUTLETS constante toegevoegd
+#                   _show_unused_outlets_view, _on_unused_outlet_changed,
+#                   _on_unused_outlet_open_rack, _on_unused_outlet_open_floorplan
+#                   Klik handler uitgebreid met _TYPE_UNUSED_OUTLETS case
+#          1.60.0 — RV-NEW-1: Eindapparaat detail via trace bij rechtsklik op
 #                   élke verbonden poort (niet enkel direct endpoint).
 #                   _on_port_context_menu: trace_from_port() volgen om ep te vinden.
 #                   "ℹ Eindapparaat detail..." verschijnt ook bij PP-back / switch-poort.
@@ -150,7 +166,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QSplitter,
     QVBoxLayout, QHBoxLayout, QToolBar, QLabel,
     QSizePolicy, QStatusBar, QTreeWidget, QTreeWidgetItem,
-    QPushButton
+    QPushButton, QDialog
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush
@@ -161,6 +177,7 @@ from app.helpers.i18n import t
 from app.gui.rack_view import RackView, _rack_occupancy, _occupancy_color
 from app.gui.wall_outlet_view import WallOutletView
 from app.gui.endpoint_overview_widget import EndpointOverviewWidget
+from app.gui.unused_outlet_overview_widget import UnusedOutletOverviewWidget
 from app.gui.outlet_locator_view import OutletLocatorView
 from app.gui.wire_detail_view import WireDetailView
 from app.gui.search_window import SearchWindow
@@ -225,6 +242,111 @@ _TYPE_OUTLET      = "outlet"       # individueel wandpunt in boom
 _TYPE_SITE_OUTLETS  = "site_outlets"  # alle wandpunten van een site (E3)
 _TYPE_DIRECT_EPS    = "direct_endpoints"  # direct verbonden endpoints (1.43.2)
 _TYPE_SITE_ENDPOINTS = "site_endpoints"   # alle eindapparaten van een site
+_TYPE_UNUSED_OUTLETS  = "unused_outlets"   # wandpunten zonder eindapparaat (1.63.0)
+
+
+# =============================================================================
+# FloorplanPickerDialog — v1.66.0
+# Vervangt QInputDialog.getItem() in _on_floorplan_view().
+# Toont een filterbare lijst van grondplannen (site — naam).
+# =============================================================================
+
+class FloorplanPickerDialog(QDialog):
+    """
+    Dialoog om een grondplan te kiezen uit een lijst met zoekfunctie.
+
+    Parameters
+    ----------
+    items   : list[str]   — weergavelabels  ("Site A  —  Laagbouw")
+    title   : str         — venstertitel
+    parent  : QWidget     — oudervenster
+    """
+
+    def __init__(self, items: list, title: str = "", parent=None):
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout,
+            QLineEdit, QListWidget, QDialogButtonBox, QLabel
+        )
+        super().__init__(parent)
+        self.setWindowTitle(title or t("dlg_floorplan_picker_title"))
+        self.setMinimumWidth(420)
+        self.setMinimumHeight(340)
+
+        self._items = items
+        self._selected: str | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        # Zoekbalk
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(t("search_placeholder_floorplan"))
+        self._search.setClearButtonEnabled(True)
+        layout.addWidget(self._search)
+
+        # Lijst
+        self._list = QListWidget()
+        self._list.addItems(items)
+        layout.addWidget(self._list)
+
+        # Label "geen resultaten"
+        self._lbl_empty = QLabel(t("lbl_no_floorplan_match"))
+        self._lbl_empty.setAlignment(Qt.AlignCenter)
+        self._lbl_empty.setVisible(False)
+        layout.addWidget(self._lbl_empty)
+
+        # Knoppen
+        self._buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        layout.addWidget(self._buttons)
+
+        # Verbindingen
+        self._search.textChanged.connect(self._filter)
+        self._list.itemDoubleClicked.connect(self._on_double_click)
+        self._buttons.accepted.connect(self._on_ok)
+        self._buttons.rejected.connect(self.reject)
+
+        # Standaard selectie = eerste item
+        if self._list.count():
+            self._list.setCurrentRow(0)
+
+    # ------------------------------------------------------------------
+
+    def _filter(self, text: str):
+        """Verberg items die niet overeenkomen met de zoektekst."""
+        needle = text.strip().lower()
+        visible = 0
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match:
+                visible += 1
+
+        self._lbl_empty.setVisible(visible == 0)
+
+        # Zet selectie op eerste zichtbaar item
+        if visible:
+            for i in range(self._list.count()):
+                item = self._list.item(i)
+                if not item.isHidden():
+                    self._list.setCurrentItem(item)
+                    break
+
+    def _on_double_click(self, item):
+        self._selected = item.text()
+        self.accept()
+
+    def _on_ok(self):
+        current = self._list.currentItem()
+        if current and not current.isHidden():
+            self._selected = current.text()
+            self.accept()
+
+    def selected_item(self) -> str | None:
+        """Geeft het gekozen label terug, of None bij annuleren."""
+        return self._selected
 
 
 class MainWindow(QMainWindow):
@@ -781,6 +903,44 @@ class MainWindow(QMainWindow):
                 f"{len(all_site_eps)} eindapparaten")
             site_item.addChild(site_eps_item)
 
+            # Ongebruikte wandpunten van de site (1.63.0)
+            all_unused = [
+                wo
+                for room in site.get("rooms", [])
+                for wo in room.get("wall_outlets", [])
+                if not wo.get("endpoint_id", "")
+            ]
+            # Actief (heeft verbinding) = ⚠ security risico
+            outlet_ids_with_conn = {
+                c.get("from_id") for c in self._data.get("connections", [])
+                if c.get("from_type") == "wall_outlet"
+            } | {
+                c.get("to_id") for c in self._data.get("connections", [])
+                if c.get("to_type") == "wall_outlet"
+            }
+            n_active_unused = sum(
+                1 for wo in all_unused if wo.get("id", "") in outlet_ids_with_conn
+            )
+            unused_label = (
+                t("tree_unused_outlets")
+                if t("tree_unused_outlets") != "[tree_unused_outlets]"
+                else "Ongebruikte wandpunten"
+            )
+            unused_item_text = (
+                f"🔌  {unused_label}  ({len(all_unused)})"
+                if all_unused else f"🔌  {unused_label}"
+            )
+            unused_outlets_item = QTreeWidgetItem([unused_item_text])
+            unused_outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                "type":    _TYPE_UNUSED_OUTLETS,
+                "id":      site["id"],
+                "site_id": site["id"],
+            })
+            tooltip_warning = f"  ⚠ {n_active_unused} actief zonder device" if n_active_unused else ""
+            unused_outlets_item.setToolTip(_COL,
+                f"{len(all_unused)} wandpunten zonder eindapparaat{tooltip_warning}")
+            site_item.addChild(unused_outlets_item)
+
             self._tree.addTopLevelItem(site_item)
 
             if site["id"] in expanded:
@@ -844,7 +1004,7 @@ class MainWindow(QMainWindow):
     def _on_ep_overview_open_floorplan(self, site_id: str, loc_key: str, target_val: str):
         """
         Open grondplan vanuit eindapparaten-overzicht en selecteer het
-        bijhorende punt automatisch via select_by_target_val (v1.25.0).
+        bijhorende punt automatisch via select_by_target_val (v1.27.0).
         """
         from app.gui.floorplan_view import FloorplanView
         fp = floorplan_service.get_floorplan_for_location(site_id, loc_key)
@@ -865,6 +1025,94 @@ class MainWindow(QMainWindow):
         """Na bewerken eindapparaat vanuit overzicht: opslaan + tree refresh."""
         self._save_and_backup()
         self._populate_tree()
+
+    # --- Ongebruikte wandpunten (1.63.0) -----------------------------------
+
+    def _show_unused_outlets_view(self, site: dict):
+        """Toon UnusedOutletOverviewWidget voor ongebruikte wandpunten van de site."""
+        self._wire_detail.clear()
+        while self._mid_layout.count():
+            item = self._mid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        view = UnusedOutletOverviewWidget(site, self._data, parent=self._mid_frame)
+        view.outlet_changed.connect(self._on_unused_outlet_changed)
+        view.navigate_to_rack.connect(self._on_unused_outlet_open_rack)
+        view.navigate_to_floorplan.connect(self._on_unused_outlet_open_floorplan)
+        self._mid_layout.addWidget(view)
+        self._current_view = view
+
+    def _on_unused_outlet_changed(self):
+        """Na bewerken wandpunt vanuit ongebruikte-overzicht: opslaan + tree refresh."""
+        self._save_and_backup()
+        self._populate_tree()
+
+    def _on_unused_outlet_open_rack(self, rack_id: str, switch_port_id: str):
+        """
+        1.64.0 — Navigeer naar rack vanuit ongebruikte wandpunten overzicht.
+        Als switch_port_id meegegeven: volledige trace uitvoeren en alle
+        betrokken poorten in het rack highlighten (zelfde patroon als
+        _on_ep_overview_open_rack_with_ep).
+        """
+        for site in self._data.get("sites", []):
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    if rack["id"] == rack_id:
+                        self._show_rack_view(rack, room, site)
+                        self._select_tree_item_by_id(rack_id, "rack")
+
+                        if switch_port_id:
+                            # Trace volgen vanuit de switch-poort
+                            rack_device_ids = {
+                                slot.get("device_id", "")
+                                for slot in rack.get("slots", [])
+                            }
+                            rack_port_ids = {
+                                p["id"] for p in self._data.get("ports", [])
+                                if p.get("device_id") in rack_device_ids
+                            }
+                            try:
+                                steps = tracing.trace_from_port(
+                                    self._data, switch_port_id
+                                )
+                                highlight_pids = [
+                                    s["obj_id"] for s in steps
+                                    if s.get("obj_type") == "port"
+                                    and s["obj_id"] in rack_port_ids
+                                ]
+                            except Exception:
+                                highlight_pids = (
+                                    [switch_port_id]
+                                    if switch_port_id in rack_port_ids
+                                    else []
+                                )
+                            if highlight_pids:
+                                view = self._current_view
+                                pids = highlight_pids
+                                from PySide6.QtCore import QTimer
+                                QTimer.singleShot(
+                                    50, lambda p=pids: view.highlight_trace(p)
+                                )
+                        return
+
+    def _on_unused_outlet_open_floorplan(self, site_id: str, loc_key: str, target_val: str):
+        """
+        Open grondplan vanuit ongebruikte wandpunten overzicht.
+        target_val = outlet_id → directe mapping in floorplan.
+        """
+        from app.gui.floorplan_view import FloorplanView
+        fp = floorplan_service.get_floorplan_for_location(site_id, loc_key)
+        if not fp or not floorplan_service.svg_exists(fp):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, t("title_floorplan_view"),
+                                    t("msg_floorplan_not_found"))
+            return
+        self._show_floorplan_view(fp)
+        if target_val and isinstance(self._current_view, FloorplanView):
+            view = self._current_view
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, lambda: view.select_by_target_val(target_val))
 
     def _on_ep_overview_open_rack(self, rack_id: str):
         """Navigeer naar rack + selecteer in boom + highlight gekoppelde poorten."""
@@ -966,6 +1214,17 @@ class MainWindow(QMainWindow):
                     f"🖥  Eindapparaten  —  {site['name']}"
                 )
                 self._show_site_endpoints_view(site)
+
+        elif item_type == _TYPE_UNUSED_OUTLETS:
+            site = self._find_site(data["site_id"])
+            if site:
+                unused_label = (
+                    t("tree_unused_outlets")
+                    if t("tree_unused_outlets") != "[tree_unused_outlets]"
+                    else "Ongebruikte wandpunten"
+                )
+                self.set_status(f"🔌  {unused_label}  —  {site['name']}")
+                self._show_unused_outlets_view(site)
 
         elif item_type == _TYPE_DIRECT_EPS:
             site = self._find_site(data["site_id"])
@@ -3310,7 +3569,6 @@ class MainWindow(QMainWindow):
 
     def _on_floorplan_view(self):
         """G2 — Grondplan bekijken, gefilterd op huidige site indien bekend."""
-        from PySide6.QtWidgets import QInputDialog
 
         # Bepaal site_id + outlet_location_key uit huidige boomselectie
         site_id     = None
@@ -3343,18 +3601,19 @@ class MainWindow(QMainWindow):
             if site_fp:
                 candidates = site_fp
 
-        # Filter op locatie indien bekend
+        # Filter op locatie indien bekend → direct openen
         if loc_key:
             loc_fp = [fp for fp in candidates if fp.get("outlet_location_key") == loc_key]
             if loc_fp:
                 self._show_floorplan_view(loc_fp[0])
                 return
 
-        # Meerdere kandidaten — laat gebruiker kiezen
+        # Eén kandidaat → direct openen
         if len(candidates) == 1:
             self._show_floorplan_view(candidates[0])
             return
 
+        # Meerdere kandidaten — toon FloorplanPickerDialog met zoekfunctie
         lang = settings_storage.load_settings().get("language", "nl")
         locs = settings_storage.load_outlet_locations()
         loc_labels = {
@@ -3372,12 +3631,13 @@ class MainWindow(QMainWindow):
                                   fp.get("outlet_location_key", "-"))
             items.append(f"{sname}  —  {lbl}")
 
-        choice, ok = QInputDialog.getItem(
-            self, t("title_floorplan_view"), t("menu_floorplan_view") + ":",
-            items, 0, False
+        dlg = FloorplanPickerDialog(
+            items,
+            title=t("dlg_floorplan_picker_title"),
+            parent=self
         )
-        if ok and choice in items:
-            self._show_floorplan_view(candidates[items.index(choice)])
+        if dlg.exec() == QDialog.Accepted and dlg.selected_item() in items:
+            self._show_floorplan_view(candidates[items.index(dlg.selected_item())])
 
     def _on_floorplan_view_for_location(self, site_id: str, loc_key: str):
         """G3 — Grondplan bekijken voor specifieke site + wandpunt locatie."""
@@ -3636,11 +3896,39 @@ class MainWindow(QMainWindow):
         if not dlg.exec():
             return
 
-        datum     = datetime.date.today().strftime("%Y%m%d")
-        suggested = f"rack_export_{datum}.md"
+        datum = datetime.date.today().strftime("%Y%m%d")
+
+        # Bestandsnaam: scope + detailniveau zodat bestanden duidelijk onderscheidbaar zijn
+        _level_suffix = {
+            "short":     "kort",
+            "technical": "technisch",
+            "full":      "volledig",
+        }.get(dlg.options.get("detail_level", "technical"), "technisch")
+
+        _is_tracing = dlg.options.get("tracing_only", False)
+        _prefix = "racktracing" if _is_tracing else "rack_export"
+
+        if dlg.scope == "rack":
+            _rack_label = "rack"
+            for _s in self._data.get("sites", []):
+                for _r in _s.get("rooms", []):
+                    for _rk in _r.get("racks", []):
+                        if _rk["id"] == dlg.rack_id:
+                            import re as _re
+                            _rack_label = _re.sub(r"[^a-zA-Z0-9]", "_", _rk.get("name", "rack")).strip("_")
+            suggested_name = f"{_prefix}_{_rack_label}_{_level_suffix}_{datum}.md"
+        elif dlg.scope == "site":
+            _site_label = "site"
+            for _s in self._data.get("sites", []):
+                if _s["id"] == dlg.site_id:
+                    import re as _re
+                    _site_label = _re.sub(r"[^a-zA-Z0-9]", "_", _s.get("name", "site")).strip("_")
+            suggested_name = f"{_prefix}_{_site_label}_{_level_suffix}_{datum}.md"
+        else:
+            suggested_name = f"{_prefix}_alle_sites_{_level_suffix}_{datum}.md"
+
         start_dir = get_last_folder("export_rack_md") or self._export_folder()
-        if start_dir:
-            suggested = os.path.join(start_dir, suggested)
+        suggested = os.path.join(start_dir, suggested_name) if start_dir else suggested_name
 
         filepath, _ = QFileDialog.getSaveFileName(
             self, t("menu_export_rack_md"), suggested,
@@ -3655,12 +3943,17 @@ class MainWindow(QMainWindow):
             scope=dlg.scope,
             site_id=dlg.site_id,
             rack_id=dlg.rack_id,
+            options=dlg.options,
         )
         if ok:
             set_last_folder("export_rack_md", os.path.dirname(filepath))
             log_info(f"Rack MD export: {filepath}")
             self.set_status(f"✓  {t('msg_rack_md_exported')}: {filepath}")
-            os.startfile(filepath)
+            try:
+                os.startfile(filepath)
+            except OSError:
+                # Geen app geassocieerd met .md — open de map
+                os.startfile(os.path.dirname(filepath))
         else:
             log_warning(f"Rack MD export mislukt: {err}")
             self.set_status(f"⚠  {t('msg_rack_md_export_failed')}: {err}")
