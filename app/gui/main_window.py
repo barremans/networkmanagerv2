@@ -2,9 +2,74 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.68.0
+# Version: 1.77.0
 # Author:  Barremans
-# Changes: 1.68.0 — Wandpunten overzicht toolbar-knop hidden: ruimtefilter
+# Changes: 1.77.0 — Import/Export bedrijfslogica:
+#                   _on_export: bedrijfskeuze bij meerdere bedrijven
+#                     → export_company_to_dir() bij specifiek bedrijf
+#                     → suggested_dirname(company_name) in mapnaam
+#                   _on_import merge: auto-detectie v1 vs v2
+#                     → v1: dialoog 'toevoegen aan welk bedrijf?'
+#                     → target_company_id doorgeven aan import_merge()
+#                     → statusbalk melding bij v1→v2 migratie
+#          1.76.0 — Fix: picker krijgt ALLE grondplannen (valid_fp),
+#                   geen pre-filtering meer op bedrijf/site vóór picker.
+#                   Bedrijfsfilter in picker werkt live op volledige lijst.
+#                   preselect_company hersteld voor UX: juist bedrijf
+#                   voorgeselecteerd op basis van boomselectie.
+#                   Directe match alleen nog bij expliciete loc_key+site_id.
+#          1.75.0 — Fix picker: 1-candidate shortcut alleen bij expliciete
+#                   locatiefilter (loc_key). Zonder locatiefilter altijd
+#                   picker tonen. preselect_company verwijderd — picker
+#                   opent zonder voorfilter zodat alle candidates zichtbaar
+#                   zijn. Gebruiker filtert zelf via dropdown.
+#          1.74.0 — Fix: company_id toegevoegd aan alle boom-items
+#                   (site, room, rack, outlets, wo, site_outlets,
+#                   site_endpoints, unused_outlets). Zonder dit was
+#                   sel.get('company_id') altijd None waardoor de
+#                   bedrijfsfilter in _on_floorplan_view niet werkte.
+#          1.73.0 — G1: Picker toont ook grondplannen zonder SVG (⚠ prefix)
+#                   svg_exists() filter verwijderd uit valid_fp — enkel
+#                   outlet_location_key vereist. SVG ontbrekend = zichtbaar
+#                   maar gemarkeerd, zodat herkoppeling mogelijk blijft.
+#          1.72.0 — G1: FloorplanPickerDialog v1.67.0 — bedrijfsfilter-dropdown
+#                   met preselection, zoektekst doorzoekt volledig label,
+#                   bedrijfsfilter vergelijkt eerste segment exact.
+#                   _on_floorplan_view: all_company_names + preselect_company
+#                   _on_floorplan_new: context (company/site/loc) uit boomselectie
+#                   get_company_by_id toegevoegd aan top-level import
+#          1.71.12 — F3: bedrijfsselectie bij Word rapport (QInputDialog bij
+#                    meerdere bedrijven), company_id doorgegeven aan
+#                    render_report_docx; bedrijfsnaam in bestandsnaam
+#          1.71.11 — company_id doorgeven aan ConnectOutletToPortDialog (ontbrak)
+#          1.71.10 — outlet_disconnect_requested: handler + signal koppeling (ontbrak)
+#          1.71.9 — company_id doorgeven aan ConnectOutletToPortDialog
+#          1.71.8 — F: company_id doorgeven aan ConnectSmartDialog (koppelen binnen zelfde bedrijf)
+#          1.71.7 — BugA: rack expand na nieuw device; BugB: highlight_trace na move_connection
+#          1.71.6 — B9: highlight_trace toegevoegd na koppelen via trechter (_on_connect_smart)
+#          1.71.5 — addTopLevelItem + setExpanded correct binnen company-loop (12sp)
+#          1.71.4 — Na nieuw bedrijf boom scrollen naar top
+#          1.71.3 — Alle companies altijd uitgeklapt, expanded state correct hersteld
+#          1.71.2 — Alle companies altijd uitgeklapt in boom (niet enkel eerste)
+#          1.71.1 — _on_edit() methode toegevoegd (ontbrak in 1.71.0)
+#          1.71.0 — F1/F2: companies[] structuur in boom en contextmenu
+#                   · _TYPE_COMPANY constante toegevoegd
+#                   · CompanyDialog geïmporteerd
+#                   · _populate_tree(): company-niveau boven sites
+#                   · _find_site/room/rack(): via get_all_sites() helper
+#                   · _on_tree_context_menu(): company branch + lege boom
+#                   · _new_site(): site toevoegen aan actieve company
+#                   · _on_edit(): company case toegevoegd
+#                   · _on_delete(): company case + site delete via company
+#                   · _new_company(), _edit_company(), _delete_company()
+#          1.70.0 — Sneltoetsen: Ctrl+I/R/S/G/H op hoofdmenu, Ctrl+Shift+R
+#                   op Word rapport, Ctrl+N nieuw wandpunt, Ctrl+E nieuw
+#                   eindapparaat. Ctrl+Shift+P (PDF) gecommentarieerd.
+#                   _on_new_endpoint_global() toegevoegd.
+#          1.69.1 — Bugfix: _on_outlet_duplicate_requested _ddl_location
+#          1.69.0 — F1: Exporteer Afbeelding verwijderd uit Im/Export menu
+#                   en toolbar (code bewaard)
+#          1.68.0 — Wandpunten overzicht toolbar-knop hidden: ruimtefilter
 #                   beschikbaar in wall_outlet_view site-modus (v1.25.0)
 #          1.67.0 — Toolbar opgeschoond: Nieuw/Bewerken/Verwijderen/Dupliceren/
 #                   Verbinding hidden (volledig gedekt door contextmenu).
@@ -175,10 +240,15 @@ from PySide6.QtWidgets import (
     QPushButton, QDialog
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush
+from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QShortcut
 
 from app.helpers import settings_storage
-from app.helpers.settings_storage import get_last_folder, set_last_folder
+from app.helpers.settings_storage import get_all_sites
+from app.helpers.settings_storage import (
+    get_last_folder, set_last_folder,
+    get_all_sites, get_all_companies, get_company_for_site, get_company_by_id,
+    save_company, delete_company,
+)
 from app.helpers.i18n import t
 from app.gui.rack_view import RackView, _rack_occupancy, _occupancy_color
 from app.gui.wall_outlet_view import WallOutletView
@@ -196,6 +266,7 @@ from app.gui.dialogs.connect_port_to_port_dialog import ConnectPortToPortDialog
 from app.gui.dialogs.connect_smart_dialog import ConnectSmartDialog, _TAB_OUTLET, _TAB_PORT
 from app.gui.dialogs.connect_outlet_to_port_dialog import ConnectOutletToPortDialog
 from app.gui.dialogs.site_dialog import SiteDialog
+from app.gui.dialogs.company_dialog import CompanyDialog
 from app.gui.dialogs.room_dialog import RoomDialog
 from app.gui.dialogs.rack_dialog import RackDialog
 from app.gui.dialogs.device_dialog import DeviceDialog
@@ -240,6 +311,7 @@ except Exception:
     _APP_VERSION = "—"
 
 _COL              = 0
+_TYPE_COMPANY     = "company"
 _TYPE_SITE        = "site"
 _TYPE_ROOM        = "room"
 _TYPE_RACK        = "rack"
@@ -259,90 +331,139 @@ _TYPE_UNUSED_OUTLETS  = "unused_outlets"   # wandpunten zonder eindapparaat (1.6
 
 class FloorplanPickerDialog(QDialog):
     """
-    Dialoog om een grondplan te kiezen uit een lijst met zoekfunctie.
+    Dialoog om een grondplan te kiezen uit een lijst.
+    Versie 1.67.0 — bedrijfsfilter-dropdown + vrije zoektekst.
 
     Parameters
     ----------
-    items   : list[str]   — weergavelabels  ("Site A  —  Laagbouw")
-    title   : str         — venstertitel
-    parent  : QWidget     — oudervenster
+    items            : list[str]        — labels ("Bedrijf — Site — Locatie — Naam")
+    title            : str              — venstertitel
+    company_names    : list[str] | None — alle beschikbare bedrijfsnamen (gesorteerd)
+    preselect_company: str              — bedrijfsnaam die voorgeselecteerd wordt
+    parent           : QWidget
     """
 
-    def __init__(self, items: list, title: str = "", parent=None):
+    def __init__(self, items: list, title: str = "", parent=None,
+                 company_names: list | None = None,
+                 preselect_company: str = ""):
         from PySide6.QtWidgets import (
-            QDialog, QVBoxLayout, QHBoxLayout,
+            QDialog, QVBoxLayout, QComboBox,
             QLineEdit, QListWidget, QDialogButtonBox, QLabel
         )
         super().__init__(parent)
         self.setWindowTitle(title or t("dlg_floorplan_picker_title"))
-        self.setMinimumWidth(420)
-        self.setMinimumHeight(340)
+        self.setMinimumWidth(640)
+        self.setMinimumHeight(420)
 
-        self._items = items
+        self._items    = items
         self._selected: str | None = None
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        # Zoekbalk
+        # ── Bedrijfsfilter-dropdown ───────────────────────────────────
+        # Altijd aanmaken; alleen tonen als er >1 bedrijf beschikbaar is
+        self._cmb_company = QComboBox()
+        self._cmb_company.addItem(f"— {t('label_company')} —", "")
+        _companies = list(company_names or [])
+        for cname in _companies:
+            self._cmb_company.addItem(cname, cname)
+
+        if len(_companies) > 1:
+            layout.addWidget(self._cmb_company)
+            self._cmb_company.currentIndexChanged.connect(self._apply_filter)
+            # Preselecteer bedrijf indien meegegeven
+            if preselect_company:
+                idx = self._cmb_company.findData(preselect_company)
+                if idx >= 0:
+                    self._cmb_company.blockSignals(True)
+                    self._cmb_company.setCurrentIndex(idx)
+                    self._cmb_company.blockSignals(False)
+        else:
+            self._cmb_company.setVisible(False)
+
+        # ── Zoekbalk ─────────────────────────────────────────────────
         self._search = QLineEdit()
         self._search.setPlaceholderText(t("search_placeholder_floorplan"))
         self._search.setClearButtonEnabled(True)
         layout.addWidget(self._search)
 
-        # Lijst
+        # ── Lijst ────────────────────────────────────────────────────
         self._list = QListWidget()
-        self._list.addItems(items)
+        for label in items:
+            from PySide6.QtWidgets import QListWidgetItem
+            self._list.addItem(QListWidgetItem(label))
         layout.addWidget(self._list)
 
-        # Label "geen resultaten"
+        # "Geen resultaten" label
         self._lbl_empty = QLabel(t("lbl_no_floorplan_match"))
         self._lbl_empty.setAlignment(Qt.AlignCenter)
         self._lbl_empty.setVisible(False)
         layout.addWidget(self._lbl_empty)
 
-        # Knoppen
+        # ── Knoppen ──────────────────────────────────────────────────
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
         layout.addWidget(self._buttons)
 
-        # Verbindingen
-        self._search.textChanged.connect(self._filter)
+        self._search.textChanged.connect(self._apply_filter)
         self._list.itemDoubleClicked.connect(self._on_double_click)
         self._buttons.accepted.connect(self._on_ok)
         self._buttons.rejected.connect(self.reject)
 
-        # Standaard selectie = eerste item
-        if self._list.count():
-            self._list.setCurrentRow(0)
+        # Pas filter toe (respecteer preselectie) en selecteer eerste zichtbaar item
+        self._apply_filter()
 
     # ------------------------------------------------------------------
 
-    def _filter(self, text: str):
-        """Verberg items die niet overeenkomen met de zoektekst."""
-        needle = text.strip().lower()
-        visible = 0
+    def _apply_filter(self, *_):
+        """
+        Filter de lijst op bedrijfsdropdown EN vrije zoektekst.
+        Zoektekst doorzoekt het volledige label (bedrijf, site, locatie, naam).
+        Bedrijfsfilter matcht op het eerste deel van het label vóór '  —  '.
+        """
+        needle         = self._search.text().strip().lower()
+        company_filter = self._cmb_company.currentData() or ""
+
+        first_visible = None
+        visible       = 0
+        current_item  = self._list.currentItem()
+
         for i in range(self._list.count()):
-            item = self._list.item(i)
-            match = (not needle) or (needle in item.text().lower())
-            item.setHidden(not match)
-            if match:
+            item  = self._list.item(i)
+            label = item.text()
+
+            # Bedrijfsfilter: vergelijk eerste segment van label
+            if company_filter:
+                first_segment = label.split("  —  ")[0].strip()
+                company_match = (first_segment == company_filter)
+            else:
+                company_match = True
+
+            # Tekstzoekopdracht: doorzoek volledig label
+            text_match = (not needle) or (needle in label.lower())
+
+            hidden = not (company_match and text_match)
+            item.setHidden(hidden)
+            if not hidden:
                 visible += 1
+                if first_visible is None:
+                    first_visible = i
 
         self._lbl_empty.setVisible(visible == 0)
 
-        # Zet selectie op eerste zichtbaar item
-        if visible:
-            for i in range(self._list.count()):
-                item = self._list.item(i)
-                if not item.isHidden():
-                    self._list.setCurrentItem(item)
-                    break
+        # Herselecteer eerste zichtbare als huidige verborgen is
+        if first_visible is not None:
+            if not current_item or current_item.isHidden():
+                self._list.setCurrentRow(first_visible)
+        elif visible == 0:
+            self._list.clearSelection()
 
     def _on_double_click(self, item):
-        self._selected = item.text()
-        self.accept()
+        if not item.isHidden():
+            self._selected = item.text()
+            self.accept()
 
     def _on_ok(self):
         current = self._list.currentItem()
@@ -381,6 +502,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_central()
         self._build_statusbar()
+        self._build_menu_shortcuts()   # v1.70.0 — QShortcut voor hoofdmenu's
         self._apply_read_only_mode()  # F5 — pas UI aan op basis van modus
         # self._attach_new_menu()  # v1.67.0 — Nieuw-knop hidden, dropdown niet nodig
         self._populate_tree()
@@ -422,13 +544,15 @@ class MainWindow(QMainWindow):
 
         self._menu_inex.addSeparator()
 
-        act_export_image = self._menu_inex.addAction(t("menu_export_image"))
-        act_export_image.triggered.connect(self._on_export_image)
+        # F1 — Exporteer Afbeelding verwijderd uit menu (v1.69.0)
+        # act_export_image = self._menu_inex.addAction(t("menu_export_image"))
+        # act_export_image.triggered.connect(self._on_export_image)
 
         # ── Rapporteren menu ─────────────────────────────────────────
         self._menu_report = mb.addMenu(t("menubar_report"))
 
         act_word_report = self._menu_report.addAction(t("menu_export_report"))
+        act_word_report.setShortcut("Ctrl+Shift+R")  # v1.70.0
         act_word_report.triggered.connect(self._on_export_report)
 
         act_md_export = self._menu_report.addAction(t("menu_export_rack_md"))
@@ -565,22 +689,65 @@ class MainWindow(QMainWindow):
         self._act_export.setEnabled(True)
         self._act_export.triggered.connect(self._on_export)
 
-        self._act_export_image = QAction(t("menu_export_image"), self)
-        self._act_export_image.setShortcut("Ctrl+Shift+E")
-        self._act_export_image.setEnabled(True)
-        self._act_export_image.triggered.connect(self._on_export_image)
+        # F1 — Exporteer Afbeelding verwijderd (v1.69.0). Code bewaard voor restore.
+        # self._act_export_image = QAction(t("menu_export_image"), self)
+        # self._act_export_image.setShortcut("Ctrl+Shift+E")
+        # self._act_export_image.setEnabled(True)
+        # self._act_export_image.triggered.connect(self._on_export_image)
 
-        self._act_export_pdf = QAction(t("menu_export_pdf"), self)
-        self._act_export_pdf.setShortcut("Ctrl+Shift+P")
-        self._act_export_pdf.setEnabled(True)
-        self._act_export_pdf.triggered.connect(self._on_export_pdf)
+        # v1.70.0 — PDF bestaat niet meer, shortcut gecommentarieerd
+        # self._act_export_pdf = QAction(t("menu_export_pdf"), self)
+        # self._act_export_pdf.setShortcut("Ctrl+Shift+P")
+        # self._act_export_pdf.setEnabled(True)
+        # self._act_export_pdf.triggered.connect(self._on_export_pdf)
 
-        self._act_export_report = QAction(t("menu_export_report"), self)
-        self._act_export_report.setShortcut("Ctrl+Shift+R")
-        self._act_export_report.setEnabled(True)
-        self._act_export_report.triggered.connect(self._on_export_report)
+        # Ctrl+Shift+R zit nu als shortcut op act_word_report in het menu (v1.70.0)
+        # Losse QAction niet meer nodig, maar bewaard voor referentie
+        # self._act_export_report = QAction(t("menu_export_report"), self)
+        # self._act_export_report.setShortcut("Ctrl+Shift+R")
+        # self._act_export_report.setEnabled(True)
+        # self._act_export_report.triggered.connect(self._on_export_report)
+
+        # v1.70.0 — Globale sneltoetsen: nieuw wandpunt + nieuw eindapparaat
+        self._act_new_outlet = QAction("Nieuw wandpunt", self)
+        self._act_new_outlet.setShortcut("Ctrl+N")
+        self._act_new_outlet.triggered.connect(lambda: self._new_wall_outlet(""))
+        self.addAction(self._act_new_outlet)
+
+        self._act_new_endpoint = QAction("Nieuw eindapparaat", self)
+        self._act_new_endpoint.setShortcut("Ctrl+E")
+        self._act_new_endpoint.triggered.connect(self._on_new_endpoint_global)
+        self.addAction(self._act_new_endpoint)
 
         self.addToolBar(tb)
+
+
+    # ------------------------------------------------------------------
+    # Menu sneltoetsen — v1.70.0
+    # ------------------------------------------------------------------
+
+    def _build_menu_shortcuts(self):
+        """
+        QShortcut per hoofdmenu — opent het menu op de positie van de
+        menubalk actie. menuAction().setShortcut() werkt niet in PySide6.
+        """
+        def _open_menu(menu):
+            action = menu.menuAction()
+            mb     = self.menuBar()
+            rect   = mb.actionGeometry(action)
+            pos    = mb.mapToGlobal(rect.bottomLeft())
+            menu.popup(pos)
+
+        QShortcut(QKeySequence("Ctrl+I"), self).activated.connect(
+            lambda: _open_menu(self._menu_inex))
+        QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(
+            lambda: _open_menu(self._menu_report))
+        QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(
+            lambda: _open_menu(self._menu_settings_mb))
+        QShortcut(QKeySequence("Ctrl+G"), self).activated.connect(
+            lambda: _open_menu(self._menu_floorplan))
+        QShortcut(QKeySequence("Ctrl+H"), self).activated.connect(
+            lambda: _open_menu(self._menu_help))
 
     # ------------------------------------------------------------------
     # Centrale layout — 3 zones
@@ -756,221 +923,263 @@ class MainWindow(QMainWindow):
         """Herbouw de volledige boom. Bewaart uitgelapte state van bestaande items."""
         expanded = set()
         for i in range(self._tree.topLevelItemCount()):
-            site_item = self._tree.topLevelItem(i)
-            site_data = site_item.data(_COL, Qt.ItemDataRole.UserRole)
-            if site_item.isExpanded() and site_data:
-                expanded.add(site_data.get("id", ""))
-            for j in range(site_item.childCount()):
-                room_item = site_item.child(j)
-                room_data = room_item.data(_COL, Qt.ItemDataRole.UserRole)
-                if room_item.isExpanded() and room_data:
-                    expanded.add(room_data.get("id", ""))
+            top_item = self._tree.topLevelItem(i)
+            top_data = top_item.data(_COL, Qt.ItemDataRole.UserRole)
+            if top_item.isExpanded() and top_data:
+                expanded.add(top_data.get("id", ""))
+            for j in range(top_item.childCount()):
+                site_item = top_item.child(j)
+                site_data = site_item.data(_COL, Qt.ItemDataRole.UserRole)
+                if site_item.isExpanded() and site_data:
+                    expanded.add(site_data.get("id", ""))
+                for k in range(site_item.childCount()):
+                    room_item = site_item.child(k)
+                    room_data = room_item.data(_COL, Qt.ItemDataRole.UserRole)
+                    if room_item.isExpanded() and room_data:
+                        expanded.add(room_data.get("id", ""))
 
         self._tree.clear()
-        sites = self._data.get("sites", [])
+        companies = get_all_companies(self._data)
 
-        for idx, site in enumerate(sites):
-            site_item = QTreeWidgetItem([f"📍  {site['name'].upper()}"])
-            site_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                "type": _TYPE_SITE,
-                "id":   site["id"],
+        for cidx, company in enumerate(companies):
+            company_item = QTreeWidgetItem([f"🏢  {company['name'].upper()}"])
+            company_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                "type": _TYPE_COMPANY,
+                "id":   company["id"],
             })
-            site_item.setToolTip(_COL, site.get("location", ""))
+            parts = [p for p in (
+                company.get("address", ""),
+                company.get("vat", ""),
+                company.get("phone", ""),
+                company.get("email", ""),
+                company.get("website", ""),
+            ) if p]
+            company_item.setToolTip(_COL, "  ·  ".join(parts) if parts else "")
 
-            for room in site.get("rooms", []):
-                room_item = QTreeWidgetItem([f"🚪  {room['name'].upper()}"])
-                room_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                    "type":    _TYPE_ROOM,
-                    "id":      room["id"],
-                    "site_id": site["id"],
+            for idx, site in enumerate(company.get("sites", [])):
+                site_item = QTreeWidgetItem([f"📍  {site['name'].upper()}"])
+                site_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                    "type":       _TYPE_SITE,
+                    "id":         site["id"],
+                    "company_id": company["id"],
                 })
-                room_item.setToolTip(_COL, self._room_tooltip(room, site))
+                site_item.setToolTip(_COL, site.get("location", ""))
 
-                for rack in room.get("racks", []):
-                    used, total = _rack_occupancy(rack)
-                    pct   = (used / total * 100) if total else 0
-                    color = _occupancy_color(used, total)
-                    rack_item = QTreeWidgetItem([f"🗄  {rack['name'].upper()}"])
-                    rack_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                        "type":    _TYPE_RACK,
-                        "id":      rack["id"],
-                        "room_id": room["id"],
-                        "site_id": site["id"],
+                for room in site.get("rooms", []):
+                    room_item = QTreeWidgetItem([f"🚪  {room['name'].upper()}"])
+                    room_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                        "type":       _TYPE_ROOM,
+                        "id":         room["id"],
+                        "site_id":    site["id"],
+                        "company_id": company["id"],
                     })
-                    rack_item.setToolTip(_COL,
-                        f"{rack['total_units']}U  ·  {used}/{total}U bezet ({pct:.0f}%)  ·  "
-                        f"{self._room_status_label(room, site)}")
-                    rack_item.setForeground(_COL, QBrush(QColor(color)))
+                    room_item.setToolTip(_COL, self._room_tooltip(room, site))
 
-                    # 1.43.2 — Direct verbonden endpoints per rack
-                    rack_device_ids = {
-                        slot.get("device_id")
-                        for slot in rack.get("slots", [])
-                        if slot.get("device_id")   # None uitsluiten
-                    }
-                    ep_map_local   = {e["id"]: e for e in self._data.get("endpoints", [])}
-                    port_map_local = {p["id"]: p for p in self._data.get("ports", [])}
-                    dev_map_local  = {d["id"]: d for d in self._data.get("devices", [])}
-                    rack_direct = []
-                    for conn in self._data.get("connections", []):
-                        if conn.get("to_type") == "endpoint":
-                            port_id = conn["from_id"]
-                            ep_id   = conn["to_id"]
-                        elif conn.get("from_type") == "endpoint":
-                            port_id = conn["to_id"]
-                            ep_id   = conn["from_id"]
-                        else:
-                            continue
-                        port = port_map_local.get(port_id)
-                        if port and port.get("device_id") in rack_device_ids:
-                            ep = ep_map_local.get(ep_id)
-                            if ep:
-                                rack_direct.append(
-                                    (ep, port, dev_map_local.get(port["device_id"]))
-                                )
-                    if rack_direct:
-                        direct_item = QTreeWidgetItem([
-                            f"🖥  {rack['name'].upper()}  —  {t('wall_outlet_group_direct')}  ({len(rack_direct)})"
-                        ])
-                        direct_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                            "type":      _TYPE_DIRECT_EPS,
-                            "site_id":   site["id"],
-                            "rack_id":   rack["id"],
-                            "rack_name": rack["name"],
+                    for rack in room.get("racks", []):
+                        used, total = _rack_occupancy(rack)
+                        pct   = (used / total * 100) if total else 0
+                        color = _occupancy_color(used, total)
+                        rack_item = QTreeWidgetItem([f"🗄  {rack['name'].upper()}"])
+                        rack_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                            "type":       _TYPE_RACK,
+                            "id":         rack["id"],
+                            "room_id":    room["id"],
+                            "site_id":    site["id"],
+                            "company_id": company["id"],
                         })
-                        for ep, port, dev in rack_direct:
-                            ep_item = QTreeWidgetItem(
-                                [f"   🖥  {ep.get('name', ep['id']).upper()}"]
-                            )
-                            ep_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                                "type":    _TYPE_DIRECT_EPS,
-                                "ep_id":   ep["id"],
-                                "site_id": site["id"],
+                        rack_item.setToolTip(_COL,
+                            f"{rack['total_units']}U  ·  {used}/{total}U bezet ({pct:.0f}%)  ·  "
+                            f"{self._room_status_label(room, site)}")
+                        rack_item.setForeground(_COL, QBrush(QColor(color)))
+
+                        # 1.43.2 — Direct verbonden endpoints per rack
+                        rack_device_ids = {
+                            slot.get("device_id")
+                            for slot in rack.get("slots", [])
+                            if slot.get("device_id")   # None uitsluiten
+                        }
+                        ep_map_local   = {e["id"]: e for e in self._data.get("endpoints", [])}
+                        port_map_local = {p["id"]: p for p in self._data.get("ports", [])}
+                        dev_map_local  = {d["id"]: d for d in self._data.get("devices", [])}
+                        rack_direct = []
+                        for conn in self._data.get("connections", []):
+                            if conn.get("to_type") == "endpoint":
+                                port_id = conn["from_id"]
+                                ep_id   = conn["to_id"]
+                            elif conn.get("from_type") == "endpoint":
+                                port_id = conn["to_id"]
+                                ep_id   = conn["from_id"]
+                            else:
+                                continue
+                            port = port_map_local.get(port_id)
+                            if port and port.get("device_id") in rack_device_ids:
+                                ep = ep_map_local.get(ep_id)
+                                if ep:
+                                    rack_direct.append(
+                                        (ep, port, dev_map_local.get(port["device_id"]))
+                                    )
+                        if rack_direct:
+                            direct_item = QTreeWidgetItem([
+                                f"🖥  {rack['name'].upper()}  —  {t('wall_outlet_group_direct')}  ({len(rack_direct)})"
+                            ])
+                            direct_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                                "type":      _TYPE_DIRECT_EPS,
+                                "site_id":   site["id"],
+                                "rack_id":   rack["id"],
+                                "rack_name": rack["name"],
                             })
-                            port_label = (
-                                f"{dev.get('name','?')} — {port.get('name','?')}"
-                                if dev else port.get("name", "?")
-                            )
-                            ep_item.setToolTip(_COL, port_label)
-                            direct_item.addChild(ep_item)
-                        room_item.addChild(direct_item)
+                            for ep, port, dev in rack_direct:
+                                ep_item = QTreeWidgetItem(
+                                    [f"   🖥  {ep.get('name', ep['id']).upper()}"]
+                                )
+                                ep_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                                    "type":    _TYPE_DIRECT_EPS,
+                                    "ep_id":   ep["id"],
+                                    "site_id": site["id"],
+                                })
+                                port_label = (
+                                    f"{dev.get('name','?')} — {port.get('name','?')}"
+                                    if dev else port.get("name", "?")
+                                )
+                                ep_item.setToolTip(_COL, port_label)
+                                direct_item.addChild(ep_item)
+                            room_item.addChild(direct_item)
 
-                    room_item.addChild(rack_item)
+                        room_item.addChild(rack_item)
 
-                outlets      = room.get("wall_outlets", [])
-                outlets_item = QTreeWidgetItem([
-                    f"🌐  {t('tree_wall_outlets')}  ({len(outlets)})" if outlets
-                    else f"🌐  {t('tree_wall_outlets')}"
-                ])
-                outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                    "type":                _TYPE_OUTLETS,
-                    "room_id":             room["id"],
-                    "site_id":             site["id"],
-                    "outlet_location_key": room.get("outlet_location_key", ""),
-                })
-                for wo in outlets:
-                    wo_item = QTreeWidgetItem([f"   {wo.get('name', wo['id']).upper()}"])
-                    wo_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                        "type":    _TYPE_OUTLET,
-                        "id":      wo["id"],
-                        "room_id": room["id"],
-                        "site_id": site["id"],
+                    outlets      = room.get("wall_outlets", [])
+                    outlets_item = QTreeWidgetItem([
+                        f"🌐  {t('tree_wall_outlets')}  ({len(outlets)})" if outlets
+                        else f"🌐  {t('tree_wall_outlets')}"
+                    ])
+                    outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                        "type":                _TYPE_OUTLETS,
+                        "room_id":             room["id"],
+                        "site_id":             site["id"],
+                        "company_id":          company["id"],
+                        "outlet_location_key": room.get("outlet_location_key", ""),
                     })
-                    loc_key   = wo.get("location_description", "")
-                    loc_label = settings_storage.get_outlet_location_label(
-                        loc_key, self._settings.get("language", "nl")
-                    ) if loc_key else ""
-                    wo_item.setToolTip(_COL, loc_label)
-                    outlets_item.addChild(wo_item)
-                room_item.addChild(outlets_item)
-                site_item.addChild(room_item)
+                    for wo in outlets:
+                        wo_item = QTreeWidgetItem([f"   {wo.get('name', wo['id']).upper()}"])
+                        wo_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                            "type":       _TYPE_OUTLET,
+                            "id":         wo["id"],
+                            "room_id":    room["id"],
+                            "site_id":    site["id"],
+                            "company_id": company["id"],
+                        })
+                        loc_key   = wo.get("location_description", "")
+                        loc_label = settings_storage.get_outlet_location_label(
+                            loc_key, self._settings.get("language", "nl")
+                        ) if loc_key else ""
+                        wo_item.setToolTip(_COL, loc_label)
+                        outlets_item.addChild(wo_item)
+                    room_item.addChild(outlets_item)
+                    site_item.addChild(room_item)
 
-            all_site_outlets = [
-                wo for room in site.get("rooms", [])
-                for wo in room.get("wall_outlets", [])
-            ]
-            site_outlets_item = QTreeWidgetItem([
-                f"🌐  {t('tree_site_outlets')}  ({len(all_site_outlets)})"
-                if all_site_outlets
-                else f"🌐  {t('tree_site_outlets')}"
-            ])
-            site_outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                "type":    _TYPE_SITE_OUTLETS,
-                "id":      site["id"],
-                "site_id": site["id"],
-            })
-            site_outlets_item.setToolTip(_COL,
-                f"{len(all_site_outlets)} wandpunten in {len(site.get('rooms', []))} ruimtes")
-            site_item.addChild(site_outlets_item)
+                all_site_outlets = [
+                    wo for room in site.get("rooms", [])
+                    for wo in room.get("wall_outlets", [])
+                ]
+                site_outlets_item = QTreeWidgetItem([
+                    f"🌐  {t('tree_site_outlets')}  ({len(all_site_outlets)})"
+                    if all_site_outlets
+                    else f"🌐  {t('tree_site_outlets')}"
+                ])
+                site_outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                    "type":       _TYPE_SITE_OUTLETS,
+                    "id":         site["id"],
+                    "site_id":    site["id"],
+                    "company_id": company["id"],
+                })
+                site_outlets_item.setToolTip(_COL,
+                    f"{len(all_site_outlets)} wandpunten in {len(site.get('rooms', []))} ruimtes")
+                site_item.addChild(site_outlets_item)
 
-            # Alle eindapparaten van de site
-            all_site_eps = [
-                ep for ep in self._data.get("endpoints", [])
-                if self._ep_belongs_to_site(ep["id"], site)
-            ]
-            site_eps_item = QTreeWidgetItem([
-                f"🖥  {t('tree_endpoints')}  ({len(all_site_eps)})"
-                if t("tree_endpoints") != "tree_endpoints"
-                else f"🖥  Eindapparaten  ({len(all_site_eps)})"
-            ])
-            site_eps_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                "type":    _TYPE_SITE_ENDPOINTS,
-                "id":      site["id"],
-                "site_id": site["id"],
-            })
-            site_eps_item.setToolTip(_COL,
-                f"{len(all_site_eps)} eindapparaten")
-            site_item.addChild(site_eps_item)
+                # Alle eindapparaten van de site
+                all_site_eps = [
+                    ep for ep in self._data.get("endpoints", [])
+                    if self._ep_belongs_to_site(ep["id"], site)
+                ]
+                site_eps_item = QTreeWidgetItem([
+                    f"🖥  {t('tree_endpoints')}  ({len(all_site_eps)})"
+                    if t("tree_endpoints") != "tree_endpoints"
+                    else f"🖥  Eindapparaten  ({len(all_site_eps)})"
+                ])
+                site_eps_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                    "type":       _TYPE_SITE_ENDPOINTS,
+                    "id":         site["id"],
+                    "site_id":    site["id"],
+                    "company_id": company["id"],
+                })
+                site_eps_item.setToolTip(_COL,
+                    f"{len(all_site_eps)} eindapparaten")
+                site_item.addChild(site_eps_item)
 
-            # Ongebruikte wandpunten van de site (1.63.0)
-            all_unused = [
-                wo
-                for room in site.get("rooms", [])
-                for wo in room.get("wall_outlets", [])
-                if not wo.get("endpoint_id", "")
-            ]
-            # Actief (heeft verbinding) = ⚠ security risico
-            outlet_ids_with_conn = {
-                c.get("from_id") for c in self._data.get("connections", [])
-                if c.get("from_type") == "wall_outlet"
-            } | {
-                c.get("to_id") for c in self._data.get("connections", [])
-                if c.get("to_type") == "wall_outlet"
-            }
-            n_active_unused = sum(
-                1 for wo in all_unused if wo.get("id", "") in outlet_ids_with_conn
-            )
-            unused_label = (
-                t("tree_unused_outlets")
-                if t("tree_unused_outlets") != "[tree_unused_outlets]"
-                else "Ongebruikte wandpunten"
-            )
-            unused_item_text = (
-                f"🔌  {unused_label}  ({len(all_unused)})"
-                if all_unused else f"🔌  {unused_label}"
-            )
-            unused_outlets_item = QTreeWidgetItem([unused_item_text])
-            unused_outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
-                "type":    _TYPE_UNUSED_OUTLETS,
-                "id":      site["id"],
-                "site_id": site["id"],
-            })
-            tooltip_warning = f"  ⚠ {n_active_unused} actief zonder device" if n_active_unused else ""
-            unused_outlets_item.setToolTip(_COL,
-                f"{len(all_unused)} wandpunten zonder eindapparaat{tooltip_warning}")
-            site_item.addChild(unused_outlets_item)
+                # Ongebruikte wandpunten van de site (1.63.0)
+                all_unused = [
+                    wo
+                    for room in site.get("rooms", [])
+                    for wo in room.get("wall_outlets", [])
+                    if not wo.get("endpoint_id", "")
+                ]
+                # Actief (heeft verbinding) = ⚠ security risico
+                outlet_ids_with_conn = {
+                    c.get("from_id") for c in self._data.get("connections", [])
+                    if c.get("from_type") == "wall_outlet"
+                } | {
+                    c.get("to_id") for c in self._data.get("connections", [])
+                    if c.get("to_type") == "wall_outlet"
+                }
+                n_active_unused = sum(
+                    1 for wo in all_unused if wo.get("id", "") in outlet_ids_with_conn
+                )
+                unused_label = (
+                    t("tree_unused_outlets")
+                    if t("tree_unused_outlets") != "[tree_unused_outlets]"
+                    else "Ongebruikte wandpunten"
+                )
+                unused_item_text = (
+                    f"🔌  {unused_label}  ({len(all_unused)})"
+                    if all_unused else f"🔌  {unused_label}"
+                )
+                unused_outlets_item = QTreeWidgetItem([unused_item_text])
+                unused_outlets_item.setData(_COL, Qt.ItemDataRole.UserRole, {
+                    "type":       _TYPE_UNUSED_OUTLETS,
+                    "id":         site["id"],
+                    "site_id":    site["id"],
+                    "company_id": company["id"],
+                })
+                tooltip_warning = f"  ⚠ {n_active_unused} actief zonder device" if n_active_unused else ""
+                unused_outlets_item.setToolTip(_COL,
+                    f"{len(all_unused)} wandpunten zonder eindapparaat{tooltip_warning}")
+                site_item.addChild(unused_outlets_item)
 
-            self._tree.addTopLevelItem(site_item)
+                company_item.addChild(site_item)
 
-            if site["id"] in expanded:
-                site_item.setExpanded(True)
-                for j in range(site_item.childCount()):
-                    child = site_item.child(j)
-                    child_data = child.data(_COL, Qt.ItemDataRole.UserRole)
-                    if child_data and child_data.get("id", "") in expanded:
-                        child.setExpanded(True)
-            elif idx == 0:
-                site_item.setExpanded(True)
+                if site["id"] in expanded:
+                    site_item.setExpanded(True)
+                    for j in range(site_item.childCount()):
+                        child = site_item.child(j)
+                        child_data = child.data(_COL, Qt.ItemDataRole.UserRole)
+                        if child_data and child_data.get("id", "") in expanded:
+                            child.setExpanded(True)
+
+        # company_item volledig opgebouwd — toevoegen aan boom (buiten site-loop)
+            self._tree.addTopLevelItem(company_item)
+
+            # Alle companies altijd uitklappen
+            company_item.setExpanded(True)
+            # Herstel expanded state van sites, of klap eerste site open bij eerste company
+            sites_expanded = False
+            for j in range(company_item.childCount()):
+                site_item = company_item.child(j)
+                site_data = site_item.data(_COL, Qt.ItemDataRole.UserRole)
+                if site_data and site_data.get("id", "") in expanded:
+                    site_item.setExpanded(True)
+                    sites_expanded = True
+            if not sites_expanded and cidx == 0 and company_item.childCount() > 0:
+                company_item.child(0).setExpanded(True)
 
     # ------------------------------------------------------------------
     # Klik handler
@@ -1074,7 +1283,7 @@ class MainWindow(QMainWindow):
         betrokken poorten in het rack highlighten (zelfde patroon als
         _on_ep_overview_open_rack_with_ep).
         """
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     if rack["id"] == rack_id:
@@ -1135,7 +1344,7 @@ class MainWindow(QMainWindow):
 
     def _on_ep_overview_open_rack(self, rack_id: str):
         """Navigeer naar rack + selecteer in boom + highlight gekoppelde poorten."""
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     if rack["id"] == rack_id:
@@ -1148,7 +1357,7 @@ class MainWindow(QMainWindow):
         Navigeer naar rack, selecteer in boom én highlight de poort(en)
         die verbonden zijn met het eindapparaat ep_id.
         """
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     if rack["id"] == rack_id:
@@ -1176,14 +1385,14 @@ class MainWindow(QMainWindow):
                             if ft == "wall_outlet" and tid in rack_port_ids:
                                 wo_id = fid
                                 # check of dit wandpunt ep_id heeft
-                                for s2 in self._data.get("sites", []):
+                                for s2 in get_all_sites(self._data):
                                     for r2 in s2.get("rooms", []):
                                         for wo in r2.get("wall_outlets", []):
                                             if wo["id"] == wo_id and wo.get("endpoint_id") == ep_id:
                                                 highlight_pids.append(tid)
                             if tt == "wall_outlet" and fid in rack_port_ids:
                                 wo_id = tid
-                                for s2 in self._data.get("sites", []):
+                                for s2 in get_all_sites(self._data):
                                     for r2 in s2.get("rooms", []):
                                         for wo in r2.get("wall_outlets", []):
                                             if wo["id"] == wo_id and wo.get("endpoint_id") == ep_id:
@@ -1201,7 +1410,18 @@ class MainWindow(QMainWindow):
             return
         item_type = data.get("type")
 
-        if item_type == _TYPE_RACK:
+        if item_type == _TYPE_COMPANY:
+            # Klik op bedrijf — toon info in statusbalk, geen centrale view
+            from app.helpers.settings_storage import get_company_by_id
+            company = get_company_by_id(self._data, data["id"])
+            if company:
+                n_sites = len(company.get("sites", []))
+                self.set_status(
+                    f"🏢  {company['name']}  ·  {n_sites} site(s)"
+                )
+            return
+
+        elif item_type == _TYPE_RACK:
             rack = self._find_rack(data["id"])
             room = self._find_room(data["room_id"])
             site = self._find_site(data["site_id"])
@@ -1320,9 +1540,9 @@ class MainWindow(QMainWindow):
 
         item = self._tree.itemAt(pos)
         if not item:
-            if not read_only:                               # F5 — geen nieuw item in read-only
+            if not read_only:
                 menu = QMenu(self)
-                menu.addAction(f"📍  {t('label_site')}", self._new_site)
+                menu.addAction(f"🏢  {t('menu_new_company')}", self._new_company)
                 menu.exec(self._tree.viewport().mapToGlobal(pos))
             return
 
@@ -1333,7 +1553,17 @@ class MainWindow(QMainWindow):
         self._tree.setCurrentItem(item)
         menu = QMenu(self)
 
-        if item_type == _TYPE_SITE:
+        if item_type == _TYPE_COMPANY:
+            if not read_only:
+                menu.addAction(t("menu_edit_company"),   lambda: self._edit_company(data))
+                menu.addSeparator()
+                menu.addAction(f"📍  {t('label_site')}", lambda: self._new_site(data["id"]))
+                menu.addSeparator()
+                menu.addAction(t("menu_new_company"),    self._new_company)
+                menu.addSeparator()
+                menu.addAction(t("menu_delete_company"), lambda: self._delete_company(data))
+
+        elif item_type == _TYPE_SITE:
             if not read_only:                              # F5
                 menu.addAction(t("ctx_edit"),       lambda: self._on_edit())
                 menu.addSeparator()
@@ -1431,7 +1661,7 @@ class MainWindow(QMainWindow):
         if settings_storage.get_read_only_mode():          # F5
             return
         # Zoek het wandpunt en de bijhorende ruimte op in de data
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for wo in room.get("wall_outlets", []):
                     if wo["id"] == outlet_id:
@@ -1445,7 +1675,7 @@ class MainWindow(QMainWindow):
         """1.50.0 — Rechtsklik 'Verwijderen' vanuit WallOutletView kaartje."""
         if settings_storage.get_read_only_mode():          # F5
             return
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for wo in room.get("wall_outlets", []):
                     if wo["id"] == outlet_id:
@@ -1454,6 +1684,72 @@ class MainWindow(QMainWindow):
                             "room_id": room["id"],
                         })
                         return
+
+    def _on_outlet_disconnect_requested(self, outlet_id: str):
+        """1.71.10 — Rechtsklik 'Verbinding verwijderen' vanuit WallOutletView.
+        Bij meerdere verbindingen (dubbele koppeling): keuze welke te verwijderen.
+        """
+        from PySide6.QtWidgets import QMessageBox
+        if settings_storage.get_read_only_mode():
+            return
+        port_conns = [
+            c for c in self._data.get("connections", [])
+            if (c.get("from_id") == outlet_id and c.get("from_type") == "wall_outlet")
+            or (c.get("to_id")   == outlet_id and c.get("to_type")   == "wall_outlet")
+        ]
+        if not port_conns:
+            return
+
+        if len(port_conns) > 1:
+            from PySide6.QtWidgets import QInputDialog
+            port_map = {p["id"]: p for p in self._data.get("ports", [])}
+            dev_map  = {d["id"]: d for d in self._data.get("devices", [])}
+            choices = []
+            for c in port_conns:
+                pid = c["to_id"] if c.get("from_type") == "wall_outlet" else c["from_id"]
+                p   = port_map.get(pid, {})
+                dev = dev_map.get(p.get("device_id", ""), {})
+                lbl = (
+                    f"{dev.get('name','?')} — "
+                    f"{p.get('name','?')} ({p.get('side','?')})"
+                )
+                choices.append((c["id"], lbl))
+            choice_labels = [lbl for _, lbl in choices]
+            sel, ok = QInputDialog.getItem(
+                self, t("ctx_disconnect_port"),
+                "Kies de verbinding om te verwijderen:",
+                choice_labels, 0, False
+            )
+            if not ok:
+                return
+            conn_id = choices[choice_labels.index(sel)][0]
+        else:
+            conn_id = port_conns[0]["id"]
+
+        reply = QMessageBox.warning(
+            self, t("ctx_disconnect_port"),
+            t("wire_delete_confirm"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        conn = next((c for c in self._data.get("connections", [])
+                     if c["id"] == conn_id), None)
+        log_change(
+            action=ACTION_DELETE, entity=ENTITY_CONNECTION, entity_id=conn_id,
+            label=(
+                conn.get("label") or
+                f"{conn.get('from_id','')} → {conn.get('to_id','')}"
+            ) if conn else conn_id,
+        )
+        self._data["connections"] = [
+            c for c in self._data.get("connections", []) if c["id"] != conn_id
+        ]
+        self._save_and_backup()
+        if isinstance(self._current_view, WallOutletView):
+            self._current_view.refresh(self._data)
+        self.set_status(f"✓  {t('msg_connection_deleted')}")
 
     def _on_outlet_duplicate_requested(self, outlet_id: str):
         """
@@ -1465,7 +1761,7 @@ class MainWindow(QMainWindow):
         # Zoek bronwandpunt + ruimte op
         src_outlet = None
         src_room_id = ""
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for wo in room.get("wall_outlets", []):
                     if wo["id"] == outlet_id:
@@ -1494,15 +1790,19 @@ class MainWindow(QMainWindow):
             existing_outlets=room.get("wall_outlets", []) if room else [],
             data=self._data,
         )
-        # Vul locatie + vlan + sort_id in na aanmaken dialoog
-        if dlg._ddl_location and prefill["location_description"]:
-            idx = dlg._ddl_location.findData(prefill["location_description"])
-            if idx >= 0:
-                dlg._ddl_location.setCurrentIndex(idx)
+        # Vul locatie + vlan + sort_id in na aanmaken dialoog (v1.11.0: lijst i.p.v. DDL)
+        loc_key = prefill["location_description"]
+        if loc_key:
+            from PySide6.QtCore import Qt as _Qt
+            for i in range(dlg._list_location.count()):
+                if dlg._list_location.item(i).data(_Qt.ItemDataRole.UserRole) == loc_key:
+                    dlg._list_location.setCurrentRow(i)
+                    break
         if prefill.get("vlan") is not None:
-            for i in range(dlg._ddl_vlan.count()):
-                if dlg._ddl_vlan.itemData(i) == int(prefill["vlan"]):
-                    dlg._ddl_vlan.setCurrentIndex(i)
+            from PySide6.QtCore import Qt as _Qt
+            for i in range(dlg._list_vlan.count()):
+                if dlg._list_vlan.item(i).data(_Qt.ItemDataRole.UserRole) == int(prefill["vlan"]):
+                    dlg._list_vlan.setCurrentRow(i)
                     break
         dlg._sort_id.setValue(int(prefill["sort_id"] or 0))
 
@@ -1533,7 +1833,7 @@ class MainWindow(QMainWindow):
         """
         if settings_storage.get_read_only_mode():
             return
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for wo in room.get("wall_outlets", []):
                     if wo["id"] == outlet_id:
@@ -1569,7 +1869,7 @@ class MainWindow(QMainWindow):
 
         # Zoek wandpunt op
         outlet = None
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for wo in room.get("wall_outlets", []):
                     if wo["id"] == outlet_id:
@@ -1581,10 +1881,23 @@ class MainWindow(QMainWindow):
 
         outlet_label = outlet.get("name", outlet_id)
 
+        # 1.71.11 — company_id bepalen vanuit het wandpunt (via site)
+        _outlet_company_id = ""
+        for _company in self._data.get("companies", []):
+            for _site in _company.get("sites", []):
+                for _room in _site.get("rooms", []):
+                    if any(wo["id"] == outlet_id
+                           for wo in _room.get("wall_outlets", [])):
+                        _outlet_company_id = _company["id"]
+                        break
+                if _outlet_company_id: break
+            if _outlet_company_id: break
+
         dlg = ConnectOutletToPortDialog(
             data=self._data,
             outlet_id=outlet_id,
             outlet_label=outlet_label,
+            company_id=_outlet_company_id,
             parent=self,
         )
         if not dlg.exec() or not dlg.get_result():
@@ -1664,7 +1977,7 @@ class MainWindow(QMainWindow):
             e for e in self._data.get("endpoints", []) if e["id"] != ep_id
         ]
         # Verwijder endpoint_id referentie in wandpunten
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for wo in room.get("wall_outlets", []):
                     if wo.get("endpoint_id") == ep_id:
@@ -1719,7 +2032,7 @@ class MainWindow(QMainWindow):
         if settings_storage.get_read_only_mode():          # F5
             return
         rack_data = None
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     for slot in rack.get("slots", []):
@@ -1742,7 +2055,7 @@ class MainWindow(QMainWindow):
             # Zoek het rack en slot op voor dit device
             edit_rack = None
             edit_slot = None
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         for slot in rack.get("slots", []):
@@ -1831,7 +2144,7 @@ class MainWindow(QMainWindow):
         elif action == "duplicate":
             # Zoek het rack op voor dit device
             dup_rack = None
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         if any(s.get("device_id") == device_id for s in rack.get("slots", [])):
@@ -1947,6 +2260,7 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
+        outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)  # 1.71.10
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         outlet_view.endpoint_double_clicked.connect(self._on_endpoint_detail)  # 1.59.0
@@ -1987,6 +2301,7 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
+        outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)  # 1.71.10
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         outlet_view.endpoint_double_clicked.connect(self._on_endpoint_detail)  # 1.59.0
@@ -1996,7 +2311,7 @@ class MainWindow(QMainWindow):
     def _on_outlet_clicked(self, outlet_id: str):
         """Wandpunt aangeklikt — bereken trace en toon in wire_detail."""
         room_outlets = [
-            wo for s in self._data.get("sites", [])
+            wo for s in get_all_sites(self._data)
             for r in s.get("rooms", [])
             for wo in r.get("wall_outlets", [])
         ]
@@ -2306,7 +2621,7 @@ class MainWindow(QMainWindow):
     def _on_navigate_to_rack(self, rack_id: str, port_ids: list):
         """E5 — Cross-rack navigatie vanuit wire_detail."""
         from PySide6.QtCore import QTimer
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     if rack["id"] == rack_id:
@@ -2446,11 +2761,30 @@ class MainWindow(QMainWindow):
         Vervangt ConnectToOutletDialog + ConnectPortToPortDialog als
         primaire koppelactie vanuit het poort-contextmenu.
         """
+        # F — company_id bepalen vanuit de bronpoort zodat dialoog kan filteren
+        _company_id = ""
+        _src_port = next((p for p in self._data.get("ports", []) if p["id"] == port_id), None)
+        if _src_port:
+            _src_dev_id = _src_port.get("device_id", "")
+            for _company in self._data.get("companies", []):
+                for _site in _company.get("sites", []):
+                    for _room in _site.get("rooms", []):
+                        for _rack in _room.get("racks", []):
+                            for _slot in _rack.get("slots", []):
+                                if _slot.get("device_id") == _src_dev_id:
+                                    _company_id = _company["id"]
+                                    break
+                            if _company_id: break
+                        if _company_id: break
+                    if _company_id: break
+                if _company_id: break
+
         dlg = ConnectSmartDialog(
             data=self._data,
             port_id=port_id,
             port_label=port_label,
             initial_tab=_TAB_OUTLET,
+            company_id=_company_id,
             parent=self,
         )
         if not dlg.exec() or not dlg.get_result():
@@ -2466,7 +2800,7 @@ class MainWindow(QMainWindow):
         # Status + logging per type
         if to_type == "wall_outlet":
             target = next(
-                (wo for s in self._data.get("sites", [])
+                (wo for s in get_all_sites(self._data)
                  for r in s.get("rooms", [])
                  for wo in r.get("wall_outlets", [])
                  if wo["id"] == to_id),
@@ -2508,6 +2842,21 @@ class MainWindow(QMainWindow):
             self._current_view.refresh(self._data)
         steps = tracing.trace_from_port(self._data, port_id)
         self._wire_detail.set_trace(steps, port_label, data=self._data)
+
+        # B9 — highlight_trace na koppelen via trechter (ontbrak)
+        # Zelfde patroon als _on_port_clicked: QTimer.singleShot(0) zodat
+        # refresh() volledig verwerkt is voor highlight_trace de stijl overschrijft
+        if isinstance(self._current_view, RackView):
+            trace_port_ids = [s["obj_id"] for s in steps if s["obj_type"] == "port"]
+            current_rack_id = self._current_view._rack.get("id", "")
+            local_port_ids = self._get_port_ids_in_rack(trace_port_ids, current_rack_id)
+            if local_port_ids:
+                from PySide6.QtCore import QTimer
+                view = self._current_view
+                def _do_highlight(pids=list(local_port_ids)):
+                    view.highlight_trace(pids)
+                QTimer.singleShot(0, _do_highlight)
+
         self.set_status(f"✓  {port_label}  ►  {icon}  {target_label}")
 
     # ------------------------------------------------------------------
@@ -2732,7 +3081,7 @@ class MainWindow(QMainWindow):
         current_rack_id = ""
 
         if port:
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         for slot in rack.get("slots", []):
@@ -2878,6 +3227,19 @@ class MainWindow(QMainWindow):
 
         steps = tracing.trace_from_port(self._data, new_port_id)
         self._wire_detail.set_trace(steps, new_label, data=self._data)
+
+        # BugB — highlight_trace na verbinding verplaatsen (ontbrak, zelfde patroon als B9)
+        if isinstance(self._current_view, RackView):
+            trace_port_ids = [s["obj_id"] for s in steps if s["obj_type"] == "port"]
+            current_rack_id = self._current_view._rack.get("id", "")
+            local_port_ids = self._get_port_ids_in_rack(trace_port_ids, current_rack_id)
+            if local_port_ids:
+                from PySide6.QtCore import QTimer
+                view = self._current_view
+                def _do_highlight(pids=list(local_port_ids)):
+                    view.highlight_trace(pids)
+                QTimer.singleShot(0, _do_highlight)
+
         self.set_status(f"⇆  {old_label}  →  {new_label}")
 
     # ------------------------------------------------------------------
@@ -2887,7 +3249,7 @@ class MainWindow(QMainWindow):
     def _get_port_ids_in_rack(self, port_ids: list, rack_id: str) -> list:
         """B2 — Geeft alleen de port IDs terug die in het opgegeven rack zitten."""
         rack_port_ids = set()
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     if rack["id"] == rack_id:
@@ -2902,7 +3264,7 @@ class MainWindow(QMainWindow):
         """B2 — Geeft de rack-namen terug voor de opgegeven port IDs (zonder duplicaten)."""
         seen = set()
         names = []
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     for slot in rack.get("slots", []):
@@ -2915,20 +3277,20 @@ class MainWindow(QMainWindow):
         return names
 
     def _find_site(self, site_id: str) -> dict | None:
-        for s in self._data.get("sites", []):
+        for s in get_all_sites(self._data):
             if s["id"] == site_id:
                 return s
         return None
 
     def _find_room(self, room_id: str) -> dict | None:
-        for s in self._data.get("sites", []):
+        for s in get_all_sites(self._data):
             for r in s.get("rooms", []):
                 if r["id"] == room_id:
                     return r
         return None
 
     def _find_rack(self, rack_id: str) -> dict | None:
-        for s in self._data.get("sites", []):
+        for s in get_all_sites(self._data):
             for r in s.get("rooms", []):
                 for rack in r.get("racks", []):
                     if rack["id"] == rack_id:
@@ -3056,15 +3418,70 @@ class MainWindow(QMainWindow):
     def _on_new_site_explicit(self):
         self._new_site()
 
-    def _new_site(self):
+    def _new_site(self, company_id: str = ""):
+        """Nieuw site aanmaken. Voegt toe aan company_id, of eerste company als leeg."""
         dlg = SiteDialog(parent=self)
         if dlg.exec() and dlg.get_result():
             obj = dlg.get_result()
             obj["id"] = self._gen_id("site")
-            self._data.setdefault("sites", []).append(obj)
+            # Zoek de juiste company
+            companies = get_all_companies(self._data)
+            target = None
+            if company_id:
+                target = next((c for c in companies if c["id"] == company_id), None)
+            if target is None and companies:
+                target = companies[0]
+            if target is not None:
+                target.setdefault("sites", []).append(obj)
+                self._save_and_backup()
+                self._populate_tree()
+                self.set_status(f"✓  {t('label_site')} '{obj['name']}' aangemaakt.")
+
+    def _new_company(self):
+        """Nieuw bedrijf aanmaken (F1/F2)."""
+        dlg = CompanyDialog(parent=self)
+        if dlg.exec() and dlg.get_result():
+            obj = dlg.get_result()
+            obj["id"]    = self._gen_id("company")
+            obj["sites"] = []
+            self._data.setdefault("companies", []).append(obj)
             self._save_and_backup()
             self._populate_tree()
-            self.set_status(f"✓  {t('label_site')} '{obj['name']}' aangemaakt.")
+            self.set_status(f"✓  {t('label_company')} '{obj['name']}' {t('msg_company_created')}")
+
+    def _edit_company(self, data: dict):
+        """Bestaand bedrijf bewerken (F1/F2)."""
+        from app.helpers.settings_storage import get_company_by_id
+        company = get_company_by_id(self._data, data["id"])
+        if not company:
+            return
+        dlg = CompanyDialog(parent=self, company=company)
+        if dlg.exec() and dlg.get_result():
+            company.update(dlg.get_result())
+            self._save_and_backup()
+            self._populate_tree()
+            self.set_status(f"✓  {t('label_company')} '{company['name']}' {t('msg_company_updated')}")
+
+    def _delete_company(self, data: dict):
+        """Bedrijf verwijderen (F1/F2). Weigert als het het laatste bedrijf is."""
+        from PySide6.QtWidgets import QMessageBox
+        from app.helpers.settings_storage import get_company_by_id
+        companies = self._data.get("companies", [])
+        if len(companies) <= 1:
+            QMessageBox.warning(self, t("menu_delete_company"), t("err_company_last"))
+            return
+        company = get_company_by_id(self._data, data["id"])
+        company_name = company["name"] if company else data["id"]
+        reply = QMessageBox.question(
+            self, t("menu_delete_company"), t("msg_confirm_delete"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        delete_company(self._data, data["id"])
+        self._save_and_backup()
+        self._populate_tree()
+        self.set_status(f"✓  {t('label_company')} '{company_name}' {t('msg_company_deleted')}")
 
     def _new_room(self, site_id: str):
         dlg = RoomDialog(parent=self, site_id=site_id)
@@ -3091,6 +3508,8 @@ class MainWindow(QMainWindow):
                 self.set_status(f"✓  {t('label_rack')} '{obj['name']}' aangemaakt.")
 
     def _new_wall_outlet(self, room_id: str = ""):
+        if settings_storage.get_read_only_mode():
+            return
         endpoints   = self._data.get("endpoints", [])
         room        = self._find_room(room_id) if room_id else None
         existing    = room.get("wall_outlets", []) if room else []
@@ -3113,13 +3532,74 @@ class MainWindow(QMainWindow):
                 self.set_status(f"✓  {t('label_wall_outlet')} '{obj['name']}' aangemaakt.")
 
     def _on_edit(self):
+        """Bewerken van het geselecteerde item in de boom (company, site, ruimte, rack)."""
         data = self._selected_tree_data()
         if not data:
             self.set_status(t("err_no_selection"))
             return
         item_type = data.get("type")
 
-        if item_type == _TYPE_SITE:
+        if item_type == _TYPE_COMPANY:
+            self._edit_company(data)
+
+        elif item_type == _TYPE_SITE:
+            site = self._find_site(data["id"])
+            if not site:
+                return
+            dlg = SiteDialog(parent=self, site=site)
+            if dlg.exec() and dlg.get_result():
+                site.update(dlg.get_result())
+                self._save_and_backup()
+                self._populate_tree()
+                self._select_tree_item_by_id(data["id"])
+                self.set_status(f"✓  {t('label_site')} '{site['name']}' bijgewerkt.")
+
+        elif item_type == _TYPE_ROOM:
+            room = self._find_room(data["id"])
+            if not room:
+                return
+            dlg = RoomDialog(parent=self, room=room, site_id=data["site_id"])
+            if dlg.exec() and dlg.get_result():
+                room.update(dlg.get_result())
+                self._save_and_backup()
+                self._populate_tree()
+                self._select_tree_item_by_id(data["id"])
+                self.set_status(f"✓  {t('label_room')} '{room['name']}' bijgewerkt.")
+
+        elif item_type == _TYPE_RACK:
+            from PySide6.QtWidgets import QMenu
+            menu = QMenu(self)
+            menu.addAction(t("edit_rack_self"),
+                           lambda: self._edit_rack_direct(data))
+            menu.addAction(t("edit_device_in_rack"),
+                           self._on_edit_device)
+            menu.exec(self.cursor().pos())
+
+        else:
+            self.set_status(t("err_select_for_edit"))
+
+    def _on_new_endpoint_global(self):
+        """v1.70.0 — Ctrl+E: nieuw eindapparaat aanmaken, ongeacht actieve view."""
+        if settings_storage.get_read_only_mode():
+            return
+        dlg = EndpointDialog(parent=self)
+        if dlg.exec() and dlg.get_result():
+            new_ep = dlg.get_result()
+            new_ep["id"] = self._gen_id("ep")
+            self._data.setdefault("endpoints", []).append(new_ep)
+            self._save_and_backup()
+            self._populate_tree()
+            self.set_status(f"✓  {t('label_endpoint')} '{new_ep['name']}' aangemaakt.")
+        data = self._selected_tree_data()
+        if not data:
+            self.set_status(t("err_no_selection"))
+            return
+        item_type = data.get("type")
+
+        if item_type == _TYPE_COMPANY:
+            self._edit_company(data)
+
+        elif item_type == _TYPE_SITE:
             site = self._find_site(data["id"])
             if not site:
                 return
@@ -3224,10 +3704,16 @@ class MainWindow(QMainWindow):
 
         item_type = data.get("type")
 
+        if item_type == _TYPE_COMPANY:
+            self._delete_company(data)
+            return
+
         if item_type == _TYPE_SITE:
-            self._data["sites"] = [
-                s for s in self._data.get("sites", []) if s["id"] != data["id"]
-            ]
+            company = get_company_for_site(self._data, data["id"])
+            if company:
+                company["sites"] = [
+                    s for s in company.get("sites", []) if s["id"] != data["id"]
+                ]
             self._save_and_backup()
             self._populate_tree()
             self.set_status(f"✓  {t('label_site')} verwijderd.")
@@ -3452,6 +3938,8 @@ class MainWindow(QMainWindow):
             if isinstance(self._current_view, RackView):
                 self._current_view.refresh(self._data)
             self._populate_tree()
+            # BugA — rack-item terugzoeken en expanderen na toevoegen device
+            self._select_tree_item_by_id(rack_id, "rack")
 
             self.set_status(f"✓  {t('label_device')} '{device['name']}' toegevoegd aan {rack['name']}.")
 
@@ -3590,7 +4078,7 @@ class MainWindow(QMainWindow):
         if not device:
             return
         rack = room = site = slot_found = None
-        for s in self._data.get("sites", []):
+        for s in get_all_sites(self._data):
             for r in s.get("rooms", []):
                 for ra in r.get("racks", []):
                     for sl in ra.get("slots", []):
@@ -3641,8 +4129,33 @@ class MainWindow(QMainWindow):
         if settings_storage.get_read_only_mode():
             self.set_status(t("access_mode_readonly_tooltip"))
             return
+
+        # Context uit boomselectie meegeven voor preselection
+        company_id = None
+        site_id    = None
+        loc_key    = None
+        sel = self._selected_tree_data()
+        if sel:
+            dtype = sel.get("type", "")
+            if dtype == _TYPE_COMPANY:
+                company_id = sel.get("id")
+            elif dtype == _TYPE_SITE:
+                site_id    = sel.get("id")
+                company_id = sel.get("company_id")
+            else:
+                site_id    = sel.get("site_id")
+                company_id = sel.get("company_id")
+                if dtype == _TYPE_OUTLETS:
+                    loc_key = sel.get("outlet_location_key", "")
+
         from app.gui.dialogs.floorplan_dialog import FloorplanDialog
-        dlg = FloorplanDialog(parent=self, data=self._data)
+        dlg = FloorplanDialog(
+            parent=self,
+            data=self._data,
+            preselected_company_id=company_id,
+            preselected_site_id=site_id,
+            preselected_location_key=loc_key,
+        )
         if dlg.exec():
             result = dlg.get_result()
             if result:
@@ -3650,24 +4163,38 @@ class MainWindow(QMainWindow):
                 self.set_status(f"✓  {t('msg_floorplan_created')}")
 
     def _on_floorplan_view(self):
-        """G2 — Grondplan bekijken, gefilterd op huidige site indien bekend."""
+        """G1 — Grondplan bekijken, gefilterd op bedrijf → site → locatie."""
 
-        # Bepaal site_id + outlet_location_key uit huidige boomselectie
+        # ── Stap 1: context uit boomselectie ────────────────────────────────
+        company_id  = None
         site_id     = None
         loc_key     = None
-        data = self._selected_tree_data()
-        if data:
-            dtype = data.get("type", "")
-            site_id = data.get("site_id") or (data.get("id") if dtype == _TYPE_SITE else None)
-            if dtype == _TYPE_OUTLETS:
-                loc_key = data.get("outlet_location_key", "")
+        sel = self._selected_tree_data()
+        if sel:
+            dtype = sel.get("type", "")
+            if dtype == _TYPE_COMPANY:
+                company_id = sel.get("id")
+            elif dtype == _TYPE_SITE:
+                site_id    = sel.get("id")
+                company_id = sel.get("company_id")
+            else:
+                site_id    = sel.get("site_id")
+                company_id = sel.get("company_id")
+                if dtype == _TYPE_OUTLETS:
+                    loc_key = sel.get("outlet_location_key", "")
 
-        # Laad geldige grondplannen
+        # company_id afleiden uit site_id als het nog ontbreekt
+        if site_id and not company_id:
+            c = get_company_for_site(self._data, site_id)
+            if c:
+                company_id = c.get("id")
+
+        # ── Stap 2: grondplannen laden — ook zonder SVG tonen (⚠ markering) ──
         all_fp = floorplan_service.load_floorplans().get("floorplans", [])
+        # Alleen filteren op outlet_location_key aanwezig; SVG ontbrekend = ⚠ maar toch tonen
         valid_fp = [
             fp for fp in all_fp
             if fp.get("outlet_location_key", "").strip()
-            and floorplan_service.svg_exists(fp)
         ]
 
         if not valid_fp:
@@ -3676,26 +4203,16 @@ class MainWindow(QMainWindow):
                                     t("msg_floorplan_not_found"))
             return
 
-        # Filter op site indien bekend
-        candidates = valid_fp
-        if site_id:
-            site_fp = [fp for fp in valid_fp if fp.get("site_id") == site_id]
-            if site_fp:
-                candidates = site_fp
-
-        # Filter op locatie indien bekend → direct openen
-        if loc_key:
-            loc_fp = [fp for fp in candidates if fp.get("outlet_location_key") == loc_key]
+        # ── Stap 3: directe match op locatie → meteen openen ───────────────
+        if loc_key and site_id:
+            loc_fp = [fp for fp in valid_fp
+                      if fp.get("outlet_location_key") == loc_key
+                      and fp.get("site_id") == site_id]
             if loc_fp:
                 self._show_floorplan_view(loc_fp[0])
                 return
 
-        # Eén kandidaat → direct openen
-        if len(candidates) == 1:
-            self._show_floorplan_view(candidates[0])
-            return
-
-        # Meerdere kandidaten — toon FloorplanPickerDialog met zoekfunctie
+        # ── Stap 4: picker met ALLE grondplannen — live filtering in picker ──
         lang = settings_storage.load_settings().get("language", "nl")
         locs = settings_storage.load_outlet_locations()
         loc_labels = {
@@ -3703,23 +4220,51 @@ class MainWindow(QMainWindow):
             for loc in locs
         }
 
+        site_map = {s["id"]: s for s in get_all_sites(self._data)}
+        site_to_company: dict[str, str] = {}
+        for c in get_all_companies(self._data):
+            for s in c.get("sites", []):
+                site_to_company[s["id"]] = c.get("name", "")
+
+        # Alle grondplannen als items — picker filtert live op bedrijf/zoektekst
+        all_candidates = valid_fp
         items = []
-        for fp in candidates:
-            sname = next(
-                (s["name"] for s in self._data.get("sites", [])
-                 if s["id"] == fp.get("site_id")), "-"
-            )
-            lbl = loc_labels.get(fp.get("outlet_location_key", ""),
-                                  fp.get("outlet_location_key", "-"))
-            items.append(f"{sname}  —  {lbl}")
+        for fp in all_candidates:
+            sid     = fp.get("site_id", "")
+            sname   = site_map.get(sid, {}).get("name", "-")
+            cname   = site_to_company.get(sid, "")
+            lbl     = loc_labels.get(fp.get("outlet_location_key", ""),
+                                     fp.get("outlet_location_key", "-"))
+            fp_name = fp.get("name", "").strip()
+            parts = []
+            if cname:
+                parts.append(cname)
+            parts.append(sname)
+            parts.append(lbl)
+            if fp_name:
+                parts.append(fp_name)
+            items.append("  —  ".join(parts))
+
+        all_company_names = sorted(set(
+            c.get("name", "") for c in get_all_companies(self._data) if c.get("name")
+        ))
+
+        # Bepaal welk bedrijf voorgeselecteerd wordt op basis van boomselectie
+        preselect_company = ""
+        if company_id:
+            c = get_company_by_id(self._data, company_id)
+            if c:
+                preselect_company = c.get("name", "")
 
         dlg = FloorplanPickerDialog(
             items,
             title=t("dlg_floorplan_picker_title"),
-            parent=self
+            parent=self,
+            company_names=all_company_names,
+            preselect_company=preselect_company,
         )
         if dlg.exec() == QDialog.Accepted and dlg.selected_item() in items:
-            self._show_floorplan_view(candidates[items.index(dlg.selected_item())])
+            self._show_floorplan_view(all_candidates[items.index(dlg.selected_item())])
 
     def _on_floorplan_view_for_location(self, site_id: str, loc_key: str):
         """G3 — Grondplan bekijken voor specifieke site + wandpunt locatie."""
@@ -3770,7 +4315,7 @@ class MainWindow(QMainWindow):
         self._current_view = view
 
         site_name = next(
-            (s["name"] for s in self._data.get("sites", [])
+            (s["name"] for s in get_all_sites(self._data)
              if s["id"] == floorplan.get("site_id")), "-"
         )
         self.set_status(f"🗺  {t('title_floorplan_view')}  —  {site_name}")
@@ -3858,7 +4403,26 @@ class MainWindow(QMainWindow):
 
     def _on_export(self):
         import os
-        from PySide6.QtWidgets import QFileDialog
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+        # Bedrijfskeuze (alleen bij meerdere bedrijven)
+        company_id   = ""
+        company_name = ""
+        companies    = get_all_companies(self._data)
+        if len(companies) > 1:
+            all_label   = t("report_company_all")
+            labels      = [all_label] + [c.get("name", "?") for c in companies]
+            choice, ok_dlg = QInputDialog.getItem(
+                self, t("menu_export"), t("report_company_prompt"),
+                labels, 0, False
+            )
+            if not ok_dlg:
+                return
+            if choice != all_label:
+                sel = next((c for c in companies if c.get("name", "?") == choice), None)
+                if sel:
+                    company_id   = sel["id"]
+                    company_name = sel.get("name", "")
 
         last = get_last_folder("export_json") or self._export_folder()
         dest = QFileDialog.getExistingDirectory(
@@ -3867,10 +4431,14 @@ class MainWindow(QMainWindow):
         if not dest:
             return
 
-        suggested  = import_export_service.suggested_dirname()
+        suggested  = import_export_service.suggested_dirname(company_name)
         export_dir = os.path.join(dest, suggested)
 
-        ok, err = import_export_service.export_to_dir(export_dir)
+        if company_id:
+            ok, err = import_export_service.export_company_to_dir(export_dir, company_id)
+        else:
+            ok, err = import_export_service.export_to_dir(export_dir)
+
         if ok:
             set_last_folder("export_json", dest)
             log_info(f"Export naar map: {export_dir}")
@@ -3941,13 +4509,34 @@ class MainWindow(QMainWindow):
             self.set_status(f"⚠  {t('msg_pdf_export_failed')}: {err}")
 
     def _on_export_report(self):
-        import datetime
-        from PySide6.QtWidgets import QFileDialog
+        import datetime, os
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+
+        # F3 — bedrijfsselectie (enkel tonen bij meerdere bedrijven)
+        company_id   = ""
+        company_slug = ""
+        companies    = get_all_companies(self._data)
+        if len(companies) > 1:
+            all_label = t("report_company_all")
+            labels    = [all_label] + [c.get("name", "?") for c in companies]
+            choice, ok = QInputDialog.getItem(
+                self, t("menu_export_report"), t("report_company_prompt"),
+                labels, 0, False
+            )
+            if not ok:
+                return
+            if choice != all_label:
+                sel = next((c for c in companies if c.get("name", "?") == choice), None)
+                if sel:
+                    company_id   = sel["id"]
+                    company_slug = "".join(
+                        ch if ch.isalnum() else "_" for ch in sel.get("name", "")
+                    ).strip("_").lower()
 
         datum     = datetime.date.today().strftime("%Y%m%d")
-        suggested = f"networkmap_rapport_{datum}.docx"
+        suggested = (f"networkmap_rapport_{company_slug}_{datum}.docx"
+                     if company_slug else f"networkmap_rapport_{datum}.docx")
 
-        import os
         start_dir = get_last_folder("export_report") or self._export_folder()
         if start_dir:
             suggested = os.path.join(start_dir, suggested)
@@ -3958,7 +4547,7 @@ class MainWindow(QMainWindow):
         if not filepath:
             return
 
-        ok, err = report_generator.render_report_docx(self._data, filepath)
+        ok, err = report_generator.render_report_docx(self._data, filepath, company_id)
         if ok:
             set_last_folder("export_report", os.path.dirname(filepath))
             log_info(f"Rapport geëxporteerd: {filepath}")
@@ -3992,7 +4581,7 @@ class MainWindow(QMainWindow):
 
         if dlg.scope == "rack":
             _rack_label = "rack"
-            for _s in self._data.get("sites", []):
+            for _s in get_all_sites(self._data):
                 for _r in _s.get("rooms", []):
                     for _rk in _r.get("racks", []):
                         if _rk["id"] == dlg.rack_id:
@@ -4001,7 +4590,7 @@ class MainWindow(QMainWindow):
             suggested_name = f"{_prefix}_{_rack_label}_{_level_suffix}_{datum}.md"
         elif dlg.scope == "site":
             _site_label = "site"
-            for _s in self._data.get("sites", []):
+            for _s in get_all_sites(self._data):
                 if _s["id"] == dlg.site_id:
                     import re as _re
                     _site_label = _re.sub(r"[^a-zA-Z0-9]", "_", _s.get("name", "site")).strip("_")
@@ -4144,8 +4733,33 @@ class MainWindow(QMainWindow):
                     return
                 set_last_folder("import_json", os.path.dirname(filepath))
 
+                # Peek: v1 of v2?
+                import json as _json
+                with open(filepath, encoding="utf-8") as _f:
+                    _peek = _json.load(_f)
+                is_v1_import = "companies" not in _peek
+
+                # Bij v1 import: keuze aan welk bedrijf toevoegen
+                target_company_id = ""
+                if is_v1_import:
+                    _companies = get_all_companies(self._data)
+                    _new_label = "→ Nieuw bedrijf aanmaken"
+                    _labels    = [_new_label] + [c.get("name", "?") for c in _companies]
+                    _choice, _ok_dlg = QInputDialog.getItem(
+                        self, t("menu_import"),
+                        "v1 data gedetecteerd — toevoegen aan welk bedrijf?",
+                        _labels, 0, False
+                    )
+                    if not _ok_dlg:
+                        return
+                    if _choice != _new_label:
+                        _sel = next((c for c in _companies if c.get("name","?") == _choice), None)
+                        if _sel:
+                            target_company_id = _sel["id"]
+
                 data, err, stats = import_export_service.import_merge(
-                    filepath, self._data
+                    filepath, self._data,
+                    target_company_id=target_company_id,
                 )
                 if data is None:
                     log_warning(f"Import merge mislukt: {err}")
@@ -4158,11 +4772,12 @@ class MainWindow(QMainWindow):
                         log_info(f"[data_integrity] {regel}")
                 self._save_and_backup()
                 self._populate_tree()
+                _migrated_note = "  (v1→v2 gemigreerd)" if stats.get("migrated") else ""
                 log_info(f"Import merge: {filepath} — {stats}")
                 self.set_status(
                     t("msg_import_merge_done").format(
                         added=stats["added"], skipped=stats["skipped"]
-                    )
+                    ) + _migrated_note
                 )
         except Exception as e:
             log_error("Import fout", e)
@@ -4219,6 +4834,7 @@ class MainWindow(QMainWindow):
         view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
         view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
+        view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)  # 1.71.10
         self._mid_layout.addWidget(view)
         self._current_view = view
 
@@ -4227,7 +4843,7 @@ class MainWindow(QMainWindow):
 
     def _on_locator_outlet_selected(self, outlet_id: str, steps: list):
         outlet = next(
-            (wo for site in self._data.get("sites", [])
+            (wo for site in get_all_sites(self._data)
              for room in site.get("rooms", [])
              for wo in room.get("wall_outlets", [])
              if wo["id"] == outlet_id),
@@ -4257,7 +4873,7 @@ class MainWindow(QMainWindow):
         """
 
         if result_type == "rack":
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         if rack["id"] == result_id:
@@ -4280,7 +4896,7 @@ class MainWindow(QMainWindow):
                     return
 
         elif result_type == "room":
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     if room["id"] == result_id:
                         self._select_tree_item_by_id(result_id)
@@ -4302,7 +4918,7 @@ class MainWindow(QMainWindow):
 
             # Zoek rack-locatie
             found_in_rack = False
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         for slot in rack.get("slots", []):
@@ -4349,7 +4965,7 @@ class MainWindow(QMainWindow):
                 )
 
         elif result_type == "wall_outlet":
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for wo in room.get("wall_outlets", []):
                         if wo["id"] == result_id:
@@ -4374,7 +4990,7 @@ class MainWindow(QMainWindow):
             ep_name = ep.get("name", result_id) if ep else result_id
 
             # Zoek via wandpunt
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for wo in room.get("wall_outlets", []):
                         if wo.get("endpoint_id") == result_id:
@@ -4492,7 +5108,7 @@ class MainWindow(QMainWindow):
         import time, random
         base = f"{prefix}_{int(time.time() * 1000) % 1_000_000}_{random.randint(100, 999)}"
         all_ids = set()
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             all_ids.add(site["id"])
             for room in site.get("rooms", []):
                 all_ids.add(room["id"])
@@ -4532,9 +5148,9 @@ class MainWindow(QMainWindow):
         # self._act_connect.setText(t("menu_connect"))
         self._act_import.setText(t("menu_import"))
         self._act_export.setText(t("menu_export"))
-        self._act_export_image.setText(t("menu_export_image"))
-        self._act_export_pdf.setText(t("menu_export_pdf"))
-        self._act_export_report.setText(t("menu_export_report"))
+        # self._act_export_image.setText(t("menu_export_image"))  # F1 hidden
+        # self._act_export_pdf.setText(t("menu_export_pdf"))      # v1.70.0 hidden
+        # self._act_export_report.setText(t("menu_export_report")) # v1.70.0 in menu
         self._act_settings.setText(t("menu_settings"))
         self._populate_tree()
 
@@ -4652,7 +5268,7 @@ class MainWindow(QMainWindow):
                 with open(network_file, "r", encoding="utf-8") as _f:
                     _net_data = _json.load(_f)
                 if isinstance(_net_data, dict) and (
-                    _net_data.get("sites") or _net_data.get("devices")
+                    _net_data.get("companies") or _net_data.get("sites") or _net_data.get("devices")
                 ):
                     _safe_pull = True
                 else:

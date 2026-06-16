@@ -4,9 +4,13 @@
 # Role:    G-OPEN-8 — Grondplan export als Word-document (.docx)
 #          Pure Python via python-docx — geen Node.js of externe runtime nodig.
 #          Vereiste: pip install python-docx
-# Version: 2.15.0
+# Version: 2.16.0
 # Author:  Barremans
-# Changes: 2.15.0 — Lege pagina's ALL-export opgelost:
+# Changes: 2.16.0 — Fix: from __future__ import annotations verplaatst
+#                   naar regel 1 (SyntaxError bij import opgelost).
+#                   Bedrijfsnaam toegevoegd aan paginaheader en ALL-header
+#                   via get_company_for_site().
+#          2.15.0 — Lege pagina's ALL-export opgelost:
 #                   page_break_after=True bij PNG vervangen door False;
 #                   één expliciete _add_page_break na PNG/sectietitel.
 #                   Dubbele break (sectietitel-break + PNG-break) vermeden.
@@ -52,6 +56,8 @@
 # =============================================================================
 
 from __future__ import annotations
+
+from app.helpers.settings_storage import get_all_sites, get_company_for_site
 
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -243,7 +249,7 @@ def _build_document(floorplan: dict, site: dict, data: dict,
     sec0.top_margin    = Cm(1.2)
     sec0.bottom_margin = Cm(1.0)
 
-    _add_header(doc, floorplan, site)
+    _add_header(doc, floorplan, site, data)
     _add_page_numbers(sec0)
 
     if png_path and Path(png_path).exists():
@@ -407,15 +413,18 @@ def _add_floorplan_image(doc, png_path: str, page_break_after: bool = False):
 # Paginaheader
 # ---------------------------------------------------------------------------
 
-def _add_header(doc, floorplan: dict, site: dict):
+def _add_header(doc, floorplan: dict, site: dict, data: dict | None = None):
     import datetime
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
     header  = doc.sections[0].header
-    fp_name = floorplan.get("name", "") or floorplan.get("outlet_location_key", "")
-    site_nm = site.get("name", "")
-    datum   = datetime.date.today().strftime("%d/%m/%Y")
+    fp_name  = floorplan.get("name", "") or floorplan.get("outlet_location_key", "")
+    site_nm  = site.get("name", "")
+    # Bedrijfsnaam ophalen indien data beschikbaar
+    company  = get_company_for_site(data, site.get("id", "")) if data else None
+    co_name  = company.get("name", "") if company else ""
+    datum    = datetime.date.today().strftime("%d/%m/%Y")
 
     # Vergroot header-marge zodat 20pt titel past
     doc.sections[0].header_distance = Pt(28)
@@ -435,8 +444,13 @@ def _add_header(doc, floorplan: dict, site: dict):
     r1.font.size      = Pt(20)
     r1.font.color.rgb = _C_ZWART
 
-    if site_nm:
-        r2 = p.add_run(f"   |   {site_nm}")
+    if co_name or site_nm:
+        parts = []
+        if co_name:
+            parts.append(co_name)
+        if site_nm:
+            parts.append(site_nm)
+        r2 = p.add_run("   |   " + "  —  ".join(parts))
         r2.font.size      = Pt(13)
         r2.font.color.rgb = _C_SUBTXT
 
@@ -995,7 +1009,7 @@ def _build_all_document(floorplans: list, site: dict, data: dict,
     sec0.top_margin    = Cm(1.2)
     sec0.bottom_margin = Cm(1.0)
 
-    _add_all_header(doc, site)
+    _add_all_header(doc, site, data)
     _add_page_numbers(sec0)
 
     # Inhoudsopgave
@@ -1077,7 +1091,7 @@ def _build_all_document(floorplans: list, site: dict, data: dict,
     return doc
 
 
-def _add_all_header(doc, site: dict):
+def _add_all_header(doc, site: dict, data: dict | None = None):
     """Header voor het ALL-document."""
     import datetime
     from docx.oxml.ns import qn
@@ -1085,6 +1099,9 @@ def _add_all_header(doc, site: dict):
 
     header    = doc.sections[0].header
     site_name = site.get("name", "")
+    company   = get_company_for_site(data, site.get("id", "")) if data else None
+    co_name   = company.get("name", "") if company else ""
+    header_label = "  —  ".join(p for p in [co_name, site_name] if p)
     datum     = datetime.date.today().strftime("%d/%m/%Y")
 
     for p in header.paragraphs:
@@ -1093,7 +1110,7 @@ def _add_all_header(doc, site: dict):
     p = header.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-    r1 = p.add_run(f"Alle grondplannen  |  {site_name}" if site_name
+    r1 = p.add_run(f"Alle grondplannen  |  {header_label}" if header_label
                    else "Alle grondplannen")
     r1.bold           = True
     r1.font.size      = Pt(12)
@@ -1312,7 +1329,7 @@ def _add_fp_section_title(doc, fp_name: str, site_name: str,
 
 def _build_outlet_map(data: dict) -> dict:
     outlet_map = {}
-    for s in data.get("sites", []):
+    for s in get_all_sites(data):
         for r in s.get("rooms", []):
             for wo in r.get("wall_outlets", []):
                 outlet_map[wo["id"]] = wo
@@ -1417,7 +1434,7 @@ def _port_d(port):
 
 def _find_rack(device_id, data):
     if not device_id: return ""
-    for s in data.get("sites",[]):
+    for s in get_all_sites(data):
         for r in s.get("rooms",[]):
             for ra in r.get("racks",[]):
                 for sl in ra.get("slots",[]):

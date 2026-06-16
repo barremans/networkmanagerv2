@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/wire_detail_view.py
 # Role:    Trace visualisatie in het detail frame onderaan
-# Version: 1.6.0
+# Version: 1.6.1
 # Author:  Barremans
 # Changes: 1.4.0 — edit_connection signal + bewerk-knop + refresh_info()
 #          1.5.0 — VLAN label tonen per stap: "Port 1 (FRONT) (VLAN 110)"
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 
 from app.helpers.i18n import t
+from app.helpers.settings_storage import get_all_sites
 
 # Kabeltype → i18n sleutel + QSS objectName
 _CABLE_META = {
@@ -56,7 +57,7 @@ def _vlan_for_step(step: dict, data: dict | None) -> int | None:
                 return int(v) if v else None
 
     elif obj_type == "wall_outlet":
-        for s in data.get("sites", []):
+        for s in get_all_sites(data):
             for r in s.get("rooms", []):
                 for wo in r.get("wall_outlets", []):
                     if wo["id"] == obj_id:
@@ -178,7 +179,7 @@ class WireDetailView(QWidget):
         # B5 — bouw een port_id → (rack_id, rack_name) lookup voor cross-rack labels
         _port_rack: dict[str, tuple[str, str]] = {}
         if data:
-            for _s in data.get("sites", []):
+            for _s in get_all_sites(data):
                 for _r in _s.get("rooms", []):
                     for _rk in _r.get("racks", []):
                         for _sl in _rk.get("slots", []):
@@ -266,7 +267,7 @@ class WireDetailView(QWidget):
 
     def _build_rack_nav(self, steps: list[dict], data: dict):
         port_to_rack = {}
-        for site in data.get("sites", []):
+        for site in get_all_sites(data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     for slot in rack.get("slots", []):

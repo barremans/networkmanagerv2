@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/vlan_service.py
 # Role:    VLAN definities laden/opslaan + trace-propagatie
-# Version: 1.1.0
+# Version: 1.1.1
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #          1.1.0 — _config_path() vervangen door settings_storage.get_vlan_config_path()
@@ -12,6 +12,7 @@
 import json
 import os
 from app.services import tracing
+from app.helpers.settings_storage import get_all_sites
 
 
 def _config_path() -> str:
@@ -117,7 +118,7 @@ def get_trace_vlans(data: dict, port_ids: list, outlet_ids: list) -> set[int]:
     for p in data.get("ports", []):
         if p["id"] in port_ids and p.get("vlan"):
             vlans.add(int(p["vlan"]))
-    for s in data.get("sites", []):
+    for s in get_all_sites(data):
         for r in s.get("rooms", []):
             for wo in r.get("wall_outlets", []):
                 if wo["id"] in outlet_ids and wo.get("vlan"):
@@ -152,7 +153,7 @@ def propagate_vlan(data: dict, port_ids: list, outlet_ids: list,
                     "current_vlan": int(existing),
                 })
 
-    for s in data.get("sites", []):
+    for s in get_all_sites(data):
         for r in s.get("rooms", []):
             for wo in r.get("wall_outlets", []):
                 if wo["id"] in outlet_ids:
@@ -187,7 +188,7 @@ def apply_vlan(data: dict, port_ids: list, outlet_ids: list,
             else:
                 p["vlan"] = vlan_id
 
-    for s in data.get("sites", []):
+    for s in get_all_sites(data):
         for r in s.get("rooms", []):
             for wo in r.get("wall_outlets", []):
                 if wo["id"] in outlet_set:

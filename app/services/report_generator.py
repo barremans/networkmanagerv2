@@ -2,9 +2,19 @@
 # Networkmap_Creator
 # File:    app/services/report_generator.py
 # Role:    Word rapport generator (python-docx)
-# Version: 2.6.1
+# Version: 2.8.1
 # Author:  Barremans
-# Changes: 2.6.1 — Dubbele-IP: ook .<digits>-suffix herkend als stack (SWITCH 9.1–9.3)
+# Changes: 2.8.1 -- Fix: site-samenvatting telt verbindingen nu op beide zijden
+#                  (gelijk aan detail/cover); cover-actiepunten en actieplan
+#                  delen nu _compute_action_items() zodat tellingen altijd
+#                  gelijk zijn; nieuwe sectie _add_orphans_section() voor
+#                  niet-geplaatste devices/eindapparaten (enkel all-rapport)
+#          2.8.0 -- F3: rapport per bedrijf. render_report_docx(company_id="")
+#                  filtert data op één bedrijf via _scope_data_to_company();
+#                  bedrijfsblok op cover (naam/adres/BTW/tel/mail/website);
+#                  org_name uit bedrijfsnaam bij bedrijfsselectie
+#          2.7.0 -- F1: get_all_sites() voor v2 JSON
+#          2.6.1 — Dubbele-IP: ook .<digits>-suffix herkend als stack (SWITCH 9.1–9.3)
 #                  _stack_group() als aparte functie, IP-adressen als naam uitgesloten
 #          2.6.0 — Cover: compacter (titels kleiner, spacers gereduceerd, font 9pt)
 #                  Actiepunten als rij in stats-tabel (geen losse paragrafen meer)
@@ -41,6 +51,9 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from app.helpers.settings_storage import (
+    get_all_sites, get_all_companies, get_company_by_id,
+)
 
 # ---------------------------------------------------------------------------
 # Kleurenpalet (floorplan-stijl)
@@ -437,7 +450,7 @@ def _build_index(data: dict) -> dict:
         "wo":   {},
         "loc":  {},   # device_id → {site, room, rack, slot}
     }
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for wo in room.get("wall_outlets", []):
                 idx["wo"][wo["id"]] = wo
@@ -465,7 +478,7 @@ def _build_ep_site_map(data: dict, idx: dict) -> dict:
     """ep_id → site_name"""
     ep_site: dict = {}
     port_idx = idx["port"]
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         site_dev_ids = {
             slot.get("device_id")
             for room in site.get("rooms", [])
@@ -511,7 +524,7 @@ def _build_wo_risk_maps(data: dict, idx: dict) -> tuple[dict, dict]:
 
     risk_by_site: dict    = {}
     unwired_by_site: dict = {}
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         sn = site["name"]
         for room in site.get("rooms", []):
             rn = room["name"]
@@ -718,7 +731,32 @@ def _build_titlepage(doc, data: dict, version: str) -> None:
     rst = pst.add_run(f"Validatiestatus: {_val_status}")
     rst.bold = True; rst.font.size = Pt(10); rst.font.color.rgb = _val_color
 
-    sites   = data.get("sites", [])
+    # F3 — bedrijfsblok (enkel bij scope van één bedrijf)
+    _company = data.get("_company")
+    if _company:
+        _cname = _company.get("name", "")
+        if _cname:
+            pcn = doc.add_paragraph(); pcn.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            pcn.paragraph_format.space_before = Pt(2); pcn.paragraph_format.space_after = Pt(0)
+            rcn = pcn.add_run(_cname); rcn.bold = True
+            rcn.font.size = Pt(14); rcn.font.color.rgb = _C_ACCENT
+        _caddr = _company.get("address", "")
+        if _caddr:
+            pca = doc.add_paragraph(); pca.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            pca.paragraph_format.space_before = Pt(0); pca.paragraph_format.space_after = Pt(0)
+            rca = pca.add_run(_caddr); rca.font.size = Pt(9); rca.font.color.rgb = _C_SUBTXT
+        _bits = []
+        if _company.get("vat"):     _bits.append(f"BTW {_company['vat']}")
+        if _company.get("phone"):   _bits.append(_company["phone"])
+        if _company.get("email"):   _bits.append(_company["email"])
+        if _company.get("website"): _bits.append(_company["website"])
+        if _bits:
+            pcc = doc.add_paragraph(); pcc.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            pcc.paragraph_format.space_before = Pt(0); pcc.paragraph_format.space_after = Pt(4)
+            rcc = pcc.add_run("   •   ".join(_bits))
+            rcc.font.size = Pt(9); rcc.font.color.rgb = _C_SUBTXT
+
+    sites   = get_all_sites(data)
     n_vlans = data.get("_vlan_count_corrected", 0)
     _ap_counts = data.get("_action_counts", {})
 
@@ -1329,7 +1367,7 @@ def _add_site_summary(doc, data: dict, idx: dict, risk_by_site: dict) -> None:
         _shade(cell, _rgb_hex(_C_ACCENT)); _no_borders(cell); _margins(cell, top=50, bottom=50, left=80, right=60)
         _cell_p(cell, col, bold=True, size=9, color=_C_WIT)
 
-    for ri, site in enumerate(data.get("sites", [])):
+    for ri, site in enumerate(get_all_sites(data)):
         sn = site["name"]
         site_dev_ids = {
             slot.get("device_id")
@@ -1345,7 +1383,9 @@ def _add_site_summary(doc, data: dict, idx: dict, risk_by_site: dict) -> None:
         wo_count = sum(len(room.get("wall_outlets", [])) for room in site.get("rooms", []))
         conns    = sum(1 for c in data.get("connections", [])
                       if _is_site_port(c.get("from_id"), c.get("from_type"), idx, site_dev_ids) or
-                         c.get("from_id") in site_wo_ids)
+                         c.get("from_id") in site_wo_ids or
+                         _is_site_port(c.get("to_id"), c.get("to_type"), idx, site_dev_ids) or
+                         c.get("to_id") in site_wo_ids)
         risk     = len(risk_by_site.get(sn, []))
         row      = tbl.add_row(); _cant_split(row)
         bg       = _rgb_hex(_C_GRIJS) if ri % 2 == 0 else "FFFFFF"
@@ -1634,7 +1674,7 @@ def _add_risk_outlets_section(doc, data: dict, idx: dict, risk_by_site: dict) ->
     W     = [Cm(2.5), Cm(4.5), Cm(4.0), Cm(3.0), Cm(6.0), Cm(7.7)]
     NCOLS = len(COLS)
 
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         sn   = site["name"]
         rows = risk_by_site.get(sn, [])
         if not rows:
@@ -1695,7 +1735,7 @@ def _add_unwired_outlets_section(doc, data: dict, idx: dict, unwired_by_site: di
     W     = [Cm(2.5), Cm(5.0), Cm(4.0), Cm(6.5), Cm(9.7)]
     NCOLS = len(COLS)
 
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         sn   = site["name"]
         rows = unwired_by_site.get(sn, [])
         if not rows:
@@ -1762,7 +1802,7 @@ def _add_endpoints_section(doc, data: dict, idx: dict, ep_site_map: dict) -> Non
         sn = ep_site_map.get(ep["id"], "Onbekend")
         eps_by_site.setdefault(sn, []).append(ep)
 
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         sn   = site["name"]
         rows = eps_by_site.get(sn, [])
         if not rows:
@@ -1833,7 +1873,7 @@ def _add_device_info_section(doc, data: dict, idx: dict, dup_ips: set) -> None:
     W     = [Cm(4.5), Cm(3.0), Cm(3.5), Cm(4.5), Cm(4.5), Cm(7.7)]
     NCOLS = len(COLS)
 
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         site_dev_ids = {
             slot.get("device_id")
             for room in site.get("rooms", [])
@@ -1885,17 +1925,12 @@ def _add_device_info_section(doc, data: dict, idx: dict, dup_ips: set) -> None:
         _col_widths(tbl, W); _spacer(doc, 0.4)
 
 
-def _add_action_plan(doc, data: dict, idx: dict,
-                     risk_by_site: dict, unwired_by_site: dict, dup_ips: set) -> None:
-    """Auto-gegenereerd actieplan op basis van data-kwaliteitschecks."""
-    _add_page_break(doc)
-    cell = _full_cell(doc, _rgb_hex(_C_ACCENT))
-    _clear_p(cell); p = cell.add_paragraph()
-    p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
-    r = p.add_run("📋  Actieplan — open punten")
-    r.bold = True; r.font.size = Pt(16); r.font.color.rgb = _C_WIT
-    _spacer(doc, 0.4)
-
+def _compute_action_items(data: dict, idx: dict,
+                          risk_by_site: dict, unwired_by_site: dict,
+                          dup_ips: set) -> list:
+    """Bouwt de actieplan-lijst (zonder renderen). Eén bron voor zowel de
+    cover-telling als de actieplan-tabel, zodat beide altijd gelijk zijn.
+    Elk item: (nr, bevinding, toelichting, prioriteit, actie, status)."""
     acties = []
     nr = 1
 
@@ -1988,6 +2023,21 @@ def _add_action_plan(doc, data: dict, idx: dict,
                            "Middel", "IP, poort en dubbele entries aanvullen/corrigeren", "Open"))
             nr += 1
 
+    return acties
+
+
+def _add_action_plan(doc, data: dict, idx: dict,
+                     risk_by_site: dict, unwired_by_site: dict, dup_ips: set) -> None:
+    """Auto-gegenereerd actieplan op basis van data-kwaliteitschecks."""
+    _add_page_break(doc)
+    cell = _full_cell(doc, _rgb_hex(_C_ACCENT))
+    _clear_p(cell); p = cell.add_paragraph()
+    p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
+    r = p.add_run("📋  Actieplan — open punten")
+    r.bold = True; r.font.size = Pt(16); r.font.color.rgb = _C_WIT
+    _spacer(doc, 0.4)
+
+    acties = _compute_action_items(data, idx, risk_by_site, unwired_by_site, dup_ips)
     # Issue-aantallen opslaan voor cover
     data["_action_counts"] = {
         "total":  len(acties),
@@ -2025,6 +2075,112 @@ def _add_action_plan(doc, data: dict, idx: dict,
             _shade(cell, bg); _no_borders(cell); _margins(cell, top=35, bottom=35, left=80, right=60)
             _cell_p(cell, val, bold=(i == 1), size=9, color=col)
     _col_widths(tbl, W); _spacer(doc, 0.4)
+
+
+def _add_orphans_section(doc, data: dict, idx: dict) -> None:
+    """Niet-geplaatste objecten: devices zonder rack-slot en eindapparaten zonder
+    site-/poortkoppeling. Rendert enkel als zulke objecten bestaan — in een
+    bedrijfsgefilterd rapport is dit normaal leeg."""
+    placed = {
+        slot.get("device_id")
+        for site in get_all_sites(data)
+        for room in site.get("rooms", [])
+        for rack in room.get("racks", [])
+        for slot in rack.get("slots", [])
+        if slot.get("device_id")
+    }
+    orphan_devs = [dv for dv in data.get("devices", []) if dv["id"] not in placed]
+    ep_map      = _build_ep_site_map(data, idx)
+    orphan_eps  = [ep for ep in data.get("endpoints", []) if ep["id"] not in ep_map]
+    if not orphan_devs and not orphan_eps:
+        return
+
+    _add_page_break(doc)
+    cell = _full_cell(doc, _rgb_hex(_C_ACCENT))
+    _clear_p(cell); p = cell.add_paragraph()
+    p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
+    r1 = p.add_run("\U0001F9E9  Niet-geplaatste objecten")
+    r1.bold = True; r1.font.size = Pt(16); r1.font.color.rgb = _C_WIT
+    r2 = p.add_run(f"   \u2014   {len(orphan_devs)} devices  \u00b7  {len(orphan_eps)} eindapparaten")
+    r2.font.size = Pt(10); r2.font.color.rgb = RGBColor(0xCC, 0xDD, 0xEE)
+    _spacer(doc, 0.3)
+
+    note = doc.add_paragraph()
+    rn = note.add_run(
+        "  \u2139\ufe0f  Deze objecten staan in de databron maar zijn niet aan een rack-slot "
+        "of verbinding gekoppeld. Ze tellen mee in de totalen op het titelblad, maar verschijnen "
+        "niet in de site-/rackdetails en evenmin in een bedrijfsgefilterd rapport."
+    )
+    rn.font.size = Pt(9); rn.italic = True; rn.font.color.rgb = _C_SUBTXT
+    _spacer(doc, 0.2)
+
+    if orphan_devs:
+        COLS = ["Device", "Type", "Merk / Model", "IP", "MAC (genorm.)", "Serial"]
+        W    = [Cm(5.0), Cm(3.5), Cm(5.5), Cm(3.5), Cm(4.5), Cm(5.7)]
+        NCOLS = len(COLS)
+        tbl = doc.add_table(rows=0, cols=NCOLS); tbl.style = "Table Grid"
+        sec_row = tbl.add_row(); _tbl_header(sec_row)
+        sec_row.cells[0].merge(sec_row.cells[NCOLS - 1]); cell = sec_row.cells[0]
+        _shade(cell, _rgb_hex(_C_GRIJSDK)); _no_borders(cell); _margins(cell, top=40, bottom=40, left=200, right=200)
+        _clear_p(cell); p = cell.add_paragraph()
+        p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
+        r = p.add_run(f"\U0001F5C4  Devices zonder rack-plaatsing  \u00b7  {len(orphan_devs)}")
+        r.bold = True; r.font.size = Pt(9); r.font.color.rgb = _C_ACCENT
+        hdr_row = tbl.add_row(); _tbl_header(hdr_row)
+        for i, (col, w) in enumerate(zip(COLS, W)):
+            cell = hdr_row.cells[i]; cell.width = w
+            _shade(cell, _rgb_hex(_C_ACCENT)); _no_borders(cell); _margins(cell, top=50, bottom=50, left=120, right=80)
+            _cell_p(cell, col, bold=True, size=9, color=_C_WIT)
+        for ri, dv in enumerate(sorted(orphan_devs, key=lambda d: d.get("name", ""))):
+            tl  = _TYPE_MAP.get(dv.get("type", ""), dv.get("type", "") or "\u2014")
+            bm  = " ".join(filter(None, [dv.get("brand", ""), dv.get("model", "")])) or "\u2014"
+            ip  = _normalize_ip(dv.get("ip", ""))
+            mac = _normalize_mac(dv.get("mac", ""))
+            ser = dv.get("serial", "") or "\u2014"
+            row = tbl.add_row(); _cant_split(row)
+            bg  = _rgb_hex(_C_GRIJS) if ri % 2 == 0 else "FFFFFF"
+            for i, (val, w, col) in enumerate(zip(
+                    [dv.get("name", "\u2014"), tl, bm, ip, mac, ser], W,
+                    [_C_ZWART, _C_SUBTXT, _C_SUBTXT,
+                     _C_ACCENT if ip != "\u2014" else _C_SUBTXT, _C_SUBTXT, _C_SUBTXT])):
+                cell = row.cells[i]; cell.width = w
+                _shade(cell, bg); _no_borders(cell); _margins(cell, top=35, bottom=35, left=120, right=80)
+                _cell_p(cell, val, bold=(i == 0), size=9, color=col)
+        _col_widths(tbl, W); _spacer(doc, 0.3)
+
+    if orphan_eps:
+        COLS = ["Eindapparaat", "Type", "Merk / Model", "IP", "MAC (genorm.)", "Notitie"]
+        W    = [Cm(5.0), Cm(3.5), Cm(5.5), Cm(3.5), Cm(4.5), Cm(5.7)]
+        NCOLS = len(COLS)
+        tbl = doc.add_table(rows=0, cols=NCOLS); tbl.style = "Table Grid"
+        sec_row = tbl.add_row(); _tbl_header(sec_row)
+        sec_row.cells[0].merge(sec_row.cells[NCOLS - 1]); cell = sec_row.cells[0]
+        _shade(cell, _rgb_hex(_C_GRIJSDK)); _no_borders(cell); _margins(cell, top=40, bottom=40, left=200, right=200)
+        _clear_p(cell); p = cell.add_paragraph()
+        p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
+        r = p.add_run(f"\U0001F5A5  Eindapparaten zonder koppeling  \u00b7  {len(orphan_eps)}")
+        r.bold = True; r.font.size = Pt(9); r.font.color.rgb = _C_ACCENT
+        hdr_row = tbl.add_row(); _tbl_header(hdr_row)
+        for i, (col, w) in enumerate(zip(COLS, W)):
+            cell = hdr_row.cells[i]; cell.width = w
+            _shade(cell, _rgb_hex(_C_ACCENT)); _no_borders(cell); _margins(cell, top=50, bottom=50, left=120, right=80)
+            _cell_p(cell, col, bold=True, size=9, color=_C_WIT)
+        for ri, ep in enumerate(sorted(orphan_eps, key=lambda e: e.get("name", ""))):
+            tl   = _EP_TYPE_MAP.get(ep.get("type", ""), ep.get("type", "") or "\u2014")
+            bm   = " ".join(filter(None, [ep.get("brand", ""), ep.get("model", "")])) or "\u2014"
+            ip   = _normalize_ip(ep.get("ip", ""))
+            mac  = _normalize_mac(ep.get("mac", ""))
+            note = ep.get("notes", "") or "\u2014"
+            row  = tbl.add_row(); _cant_split(row)
+            bg   = _rgb_hex(_C_GRIJS) if ri % 2 == 0 else "FFFFFF"
+            for i, (val, w, col) in enumerate(zip(
+                    [ep.get("name", "\u2014"), tl, bm, ip, mac, note], W,
+                    [_C_ZWART, _C_SUBTXT, _C_SUBTXT,
+                     _C_ACCENT if ip != "\u2014" else _C_SUBTXT, _C_SUBTXT, _C_SUBTXT])):
+                cell = row.cells[i]; cell.width = w
+                _shade(cell, bg); _no_borders(cell); _margins(cell, top=35, bottom=35, left=120, right=80)
+                _cell_p(cell, val, bold=(i == 0), size=9, color=col)
+        _col_widths(tbl, W); _spacer(doc, 0.3)
 
 
 def _add_revision_history(doc, version: str) -> None:
@@ -2067,10 +2223,78 @@ def _add_revision_history(doc, version: str) -> None:
 # HOOFD RENDER FUNCTIE
 # ===========================================================================
 
-def render_report_docx(data: dict, filepath: str) -> tuple[bool, str]:
+def _scope_data_to_company(data: dict, company: dict) -> dict:
     """
-    Genereer volledig Word rapport v2.0.0.
-    Behoudt originele signatuur voor compatibiliteit met de app.
+    F3 — Geeft een gefilterde kopie van data met enkel objecten van één bedrijf.
+
+    companies[] wordt beperkt tot dit ene bedrijf; devices, ports, endpoints en
+    connections worden gefilterd op membership binnen de sites van dat bedrijf.
+    De oorspronkelijke data dict blijft ongewijzigd (shallow copy + nieuwe lijsten).
+    """
+    dev_ids: set = set()
+    outlet_ids: set = set()
+    for site in company.get("sites", []):
+        for room in site.get("rooms", []):
+            for rack in room.get("racks", []):
+                for slot in rack.get("slots", []):
+                    did = slot.get("device_id")
+                    if did:
+                        dev_ids.add(did)
+            for wo in room.get("wall_outlets", []):
+                if wo.get("id"):
+                    outlet_ids.add(wo["id"])
+
+    ports    = [p for p in data.get("ports", []) if p.get("device_id") in dev_ids]
+    port_ids = {p["id"] for p in ports}
+    devices  = [d for d in data.get("devices", []) if d.get("id") in dev_ids]
+
+    ep_ids: set = set()
+    for site in company.get("sites", []):
+        for room in site.get("rooms", []):
+            for wo in room.get("wall_outlets", []):
+                eid = wo.get("endpoint_id")
+                if eid:
+                    ep_ids.add(eid)
+
+    def _phys_in(end_type, end_id) -> bool:
+        if end_type == "port":
+            return end_id in port_ids
+        if end_type == "wall_outlet":
+            return end_id in outlet_ids
+        return False
+
+    conns: list = []
+    for c in data.get("connections", []):
+        ft, fi = c.get("from_type"), c.get("from_id")
+        tt, ti = c.get("to_type"),   c.get("to_id")
+        if _phys_in(ft, fi) or _phys_in(tt, ti):
+            conns.append(c)
+            if ft == "endpoint" and fi:
+                ep_ids.add(fi)
+            if tt == "endpoint" and ti:
+                ep_ids.add(ti)
+
+    endpoints = [e for e in data.get("endpoints", []) if e.get("id") in ep_ids]
+
+    scoped = dict(data)
+    scoped["companies"]   = [company]
+    scoped["devices"]     = devices
+    scoped["ports"]       = ports
+    scoped["endpoints"]   = endpoints
+    scoped["connections"] = conns
+    return scoped
+
+
+def render_report_docx(data: dict, filepath: str, company_id: str = "") -> tuple[bool, str]:
+    """
+    Genereer volledig Word rapport.
+
+    company_id == ""  -> render alle bedrijven (oorspronkelijk gedrag). Bestaat er
+                         exact één bedrijf, dan wordt dat op de cover getoond.
+    company_id != ""  -> filter data op dat bedrijf; cover toont bedrijfsgegevens.
+
+    Behoudt achterwaartse compatibiliteit: bestaande aanroepen zonder company_id
+    blijven werken.
     Returns: (success: bool, error_message: str)
     """
     try:
@@ -2078,6 +2302,18 @@ def render_report_docx(data: dict, filepath: str) -> tuple[bool, str]:
         version = _ver.__version__
     except Exception:
         version = "2.0.0"
+
+    # F3 — bedrijfsselectie / -filter
+    company = None
+    if company_id:
+        company = get_company_by_id(data, company_id)
+        if company is None:
+            return False, f"Bedrijf niet gevonden: {company_id}"
+        data = _scope_data_to_company(data, company)
+    else:
+        _comps = get_all_companies(data)
+        if len(_comps) == 1:
+            company = _comps[0]
 
     try:
         doc = Document()
@@ -2091,10 +2327,16 @@ def render_report_docx(data: dict, filepath: str) -> tuple[bool, str]:
         sec.right_margin  = Cm(1.5)
 
         idx   = _build_index(data)
-        sites = data.get("sites", [])
+        sites = get_all_sites(data)
 
-        # Organisatienaam voor header (alle sites)
-        org_name = " · ".join(s["name"] for s in sites) if len(sites) > 1 else (sites[0]["name"] if sites else "Netwerk")
+        # Organisatienaam voor header
+        if company is not None:
+            org_name = company.get("name") or (sites[0]["name"] if sites else "Netwerk")
+        else:
+            org_name = " · ".join(s["name"] for s in sites) if len(sites) > 1 else (sites[0]["name"] if sites else "Netwerk")
+
+        # F3 — bedrijfsgegevens voor cover (None = meerdere bedrijven samen)
+        data["_company"] = company
 
         # Pre-compute
         ep_site_map                        = _build_ep_site_map(data, idx)
@@ -2174,38 +2416,14 @@ def render_report_docx(data: dict, filepath: str) -> tuple[bool, str]:
         _add_header(doc, org_name, version)
         _add_footer(doc, version)
 
-        # Pre-compute actieplan-aantallen voor cover
-        # (zelfde logica als _add_action_plan maar zonder renderen)
-        _pre_acties_n = 0
-        _pre_high = 0; _pre_med = 0; _pre_low = 0
-        _pre_risk = sum(len(v) for v in risk_by_site.values())
-        if _pre_risk: _pre_high += 1; _pre_acties_n += 1
-        if sum(len(v) for v in unwired_by_site.values()): _pre_med += 1; _pre_acties_n += 1
-        if dup_ips: _pre_high += 1; _pre_acties_n += 1
-        _pre_ep_map = _build_ep_site_map(data, idx)
-        if [e for e in data.get("endpoints", []) if e["id"] not in _pre_ep_map]:
-            _pre_low += 1; _pre_acties_n += 1
-        _pre_pvlan = sum(1 for p in data.get("ports", []) if not p.get("vlan") and p.get("side") == "front")
-        if _pre_pvlan > 50: _pre_med += 1; _pre_acties_n += 1
-        _pre_bmacs = [d for d in data.get("devices", []) if d.get("mac") and ":" not in d.get("mac","") and "-" not in d.get("mac","")]
-        if _pre_bmacs: _pre_low += 1; _pre_acties_n += 1
-        _pre_nobm  = [d for d in data.get("devices", []) if d.get("type") == "switch" and not d.get("brand") and not d.get("model")]
-        if _pre_nobm: _pre_low += 1; _pre_acties_n += 1
-        # SFP/UTP
-        _pre_sw_ids = {d["id"] for d in data.get("devices", []) if d.get("type") == "switch"}
-        _pre_sfp = any(
-            "SFP" in (idx.get("port",{}).get(c.get("from_id",""),{}).get("name","") +
-                      idx.get("port",{}).get(c.get("to_id",""),{}).get("name","")).upper() and
-            any(kw in (c.get("cable_type","") or "").upper() for kw in ("UTP","CAT"))
-            for c in data.get("connections", []))
-        if _pre_sfp: _pre_med += 1; _pre_acties_n += 1
-        # AP-kwaliteit
-        _pre_aps = [e for e in data.get("endpoints", []) if e.get("type") == "access_point"]
-        _pre_ap_issues = (any(not e.get("ip") for e in _pre_aps) or
-                          any(e.get("id") not in _pre_ep_map for e in _pre_aps))
-        if _pre_aps and _pre_ap_issues: _pre_med += 1; _pre_acties_n += 1
-        data["_action_counts"] = {"total": _pre_acties_n, "high": _pre_high,
-                                  "medium": _pre_med, "low": _pre_low}
+        # Actieplan-aantallen voor cover — exact dezelfde bron als _add_action_plan
+        _ap_items = _compute_action_items(data, idx, risk_by_site, unwired_by_site, dup_ips)
+        data["_action_counts"] = {
+            "total":  len(_ap_items),
+            "high":   sum(1 for a in _ap_items if a[3] == "Hoog"),
+            "medium": sum(1 for a in _ap_items if a[3] == "Middel"),
+            "low":    sum(1 for a in _ap_items if a[3] == "Laag"),
+        }
 
         # 1. Titelblad
         _build_titlepage(doc, data, version)
@@ -2262,7 +2480,10 @@ def render_report_docx(data: dict, filepath: str) -> tuple[bool, str]:
         # 11. Device info uitgebreid
         _add_device_info_section(doc, data, idx, dup_ips)
 
-        # 12. Revisiehistoriek
+        # 12. Niet-geplaatste objecten (orphans) — enkel als die bestaan
+        _add_orphans_section(doc, data, idx)
+
+        # 13. Revisiehistoriek
         _add_revision_history(doc, version)
 
         doc.save(filepath)

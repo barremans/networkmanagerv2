@@ -2,9 +2,14 @@
 # Networkmap_Creator
 # File:    app/services/floorplan_service.py
 # Role:    Floorplan beheer — SVG opslag, JSON metadata
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
-# Changes: 1.6.0 — Direct endpoint: set_mapping accepteert "ep:ep_xxx" waarden
+# Changes: 1.7.0 — Meerdere grondplannen kunnen dezelfde SVG-bronfile
+#                  gebruiken. create_floorplan kopieert met unieke prefix
+#                  {fp_id}_{uuid4_hex8}_ zodat elke kopie uniek is.
+#                  delete_floorplan en replace_svg verwijderen de SVG-kopie
+#                  alleen als geen ander grondplan dezelfde svg_file gebruikt.
+#          1.6.0 — Direct endpoint: set_mapping accepteert "ep:ep_xxx" waarden
 #                  get_mapped_object() helper: returnt (type, id) tuple
 #                  replace_svg() verwijdert ook verlopen endpoint-mappings
 #          1.5.0 — G-OPEN-5/6: replace_svg() toegevoegd
@@ -114,8 +119,9 @@ def create_floorplan(
 
     fid = f"fp_{uuid.uuid4().hex[:8]}"
 
-    svg_src  = Path(svg_source)
-    dest_dir = _get_floorplans_dir()
+    svg_src   = Path(svg_source)
+    dest_dir  = _get_floorplans_dir()
+    # Unieke prefix per kopie zodat dezelfde bronfile meerdere malen gebruikt kan worden
     dest_name = f"{fid}_{svg_src.name}"
     dest_path = dest_dir / dest_name
 
@@ -183,14 +189,15 @@ def replace_svg(floorplan_id: str, new_svg_source: str) -> tuple[bool, str, list
     except Exception as e:
         return False, str(e), []
 
-    # Verwijder oud SVG bestand (alleen als naam verschilt)
+    # Verwijder oude SVG-kopie alleen als naam verschilt EN niemand anders ze gebruikt
     if old_name and old_name != new_name:
-        old_path = dest_dir / old_name
-        if old_path.exists():
-            try:
-                old_path.unlink()
-            except OSError:
-                pass
+        if not _svg_in_use_by_other(data, floorplan_id, old_name):
+            old_path = dest_dir / old_name
+            if old_path.exists():
+                try:
+                    old_path.unlink()
+                except OSError:
+                    pass
 
     # Update svg_file in JSON
     floorplan["svg_file"] = new_name
@@ -211,6 +218,17 @@ def replace_svg(floorplan_id: str, new_svg_source: str) -> tuple[bool, str, list
     return True, "", removed
 
 
+def _svg_in_use_by_other(data: dict, floorplan_id: str, svg_file: str) -> bool:
+    """
+    Controleer of svg_file nog gebruikt wordt door een ANDER grondplan.
+    Voorkomt dat gedeelde SVG-kopieën verwijderd worden.
+    """
+    return any(
+        fp.get("svg_file") == svg_file and fp.get("id") != floorplan_id
+        for fp in data.get("floorplans", [])
+    )
+
+
 def delete_floorplan(floorplan_id: str):
     """
     Verwijder floorplan + gekoppelde SVG file indien aanwezig.
@@ -221,7 +239,8 @@ def delete_floorplan(floorplan_id: str):
     for floorplan in data["floorplans"]:
         if floorplan.get("id") == floorplan_id:
             svg_name = floorplan.get("svg_file", "")
-            if svg_name:
+            # Alleen verwijderen als geen ander grondplan dezelfde SVG-kopie gebruikt
+            if svg_name and not _svg_in_use_by_other(data, floorplan_id, svg_name):
                 svg_path = _get_floorplans_dir() / svg_name
                 if svg_path.exists():
                     try:

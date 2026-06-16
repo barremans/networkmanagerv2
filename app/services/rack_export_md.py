@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/services/rack_export_md.py
 # Role:    Praktische rack-export naar Markdown — interventiedocumentatie
-# Version: 2.7.0
+# Version: 2.8.0
 # Author:  Barremans
-# Changes: 2.7.0 — Rackstatus: att_points is not None fix (lege lijst gaf NIET DEFINITIEF)
+# Changes: 2.8.0 -- F1: get_all_sites() voor v2 JSON
+#          2.7.0 — Rackstatus: att_points is not None fix (lege lijst gaf NIET DEFINITIEF)
 #                  Switchlink-telling: zelfde filter als uplink-tabel (beide richtingen)
 #                  Summary labels: "Switchlinks (zie tabel §5)" met extern/intern/via-PP
 #          2.6.0 — Globale validatiestatus: berekend uit alle rack-aandachtspunten (consistent met header)
@@ -60,6 +61,7 @@ from __future__ import annotations
 import re
 import datetime
 from collections import defaultdict
+from app.helpers.settings_storage import get_all_sites
 
 
 # =============================================================================
@@ -238,7 +240,7 @@ def _build_index(data: dict) -> dict:
         "wo_room": {},   # wo_id → (site, room)
         "loc":     {},   # dev_id → {site, room, rack, slot, total_u}
     }
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for wo in room.get("wall_outlets", []):
                 idx["wo"][wo["id"]]      = wo
@@ -1493,14 +1495,14 @@ def _build_rackfiche(data: dict, idx: dict,
         _global_status = _raw_status
     else:
         _all_high = sum(
-            1 for s in data.get("sites", [])
+            1 for s in get_all_sites(data)
             for r in s.get("rooms", [])
             for rk in r.get("racks", [])
             for a in _rack_attention_points(data, idx, rk, s, r, dup_ips)
             if a["ernst"] == "Hoog"
         )
         _all_issues = sum(
-            1 for s in data.get("sites", [])
+            1 for s in get_all_sites(data)
             for r in s.get("rooms", [])
             for rk in r.get("racks", [])
             for _ in _rack_attention_points(data, idx, rk, s, r, dup_ips)
@@ -1571,7 +1573,7 @@ def _global_header(data: dict, subtitle: str, version: str,
     Als None, worden globale tellingen gebruikt (all-scope).
     """
     datum     = datetime.date.today().strftime("%d/%m/%Y")
-    sites     = scoped_sites if scoped_sites is not None else data.get("sites", [])
+    sites     = scoped_sites if scoped_sites is not None else get_all_sites(data)
     # Apparaten en verbindingen filteren op de devices in scope
     scope_dev_ids: set = {
         slot.get("device_id")
@@ -1642,7 +1644,7 @@ def _global_header(data: dict, subtitle: str, version: str,
 
 def _global_index(data: dict, idx: dict, dup_ips: set) -> list[str]:
     lines = ["## Index", ""]
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         lines.append(f"### {site.get('name', '?')}")
         lines.append("")
         rows = []
@@ -1692,7 +1694,7 @@ def _global_index(data: dict, idx: dict, dup_ips: set) -> list[str]:
 def _global_attention_summary(data: dict, idx: dict, dup_ips: set) -> list[str]:
     """Alle aandachtspunten over alle racks, gesorteerd op ernst."""
     all_points = []
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
                 rack_name = f"{site.get('name','?')} › {room.get('name','?')} › {rack.get('name','?')}"
@@ -1931,7 +1933,7 @@ def render_tracing_all(data: dict) -> str:
 
     n_racks = sum(
         len(r.get("racks", []))
-        for s in data.get("sites", [])
+        for s in get_all_sites(data)
         for r in s.get("rooms", [])
     )
 
@@ -1947,7 +1949,7 @@ def render_tracing_all(data: dict) -> str:
         "---",
         "",
     ]
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
                 lines += _render_tracing_fiche(
@@ -1961,7 +1963,7 @@ def render_tracing_site(data: dict, site_id: str) -> str:
     idx     = _build_index(data)
     version = _get_version()
     datum   = datetime.date.today().strftime("%d/%m/%Y")
-    site    = next((s for s in data.get("sites", []) if s["id"] == site_id), None)
+    site    = next((s for s in get_all_sites(data) if s["id"] == site_id), None)
     if not site:
         return f"# Site niet gevonden: {site_id}\n"
 
@@ -1983,7 +1985,7 @@ def render_tracing_rack(data: dict, rack_id: str) -> str:
     """Tracing-only export: één rack."""
     idx     = _build_index(data)
     version = _get_version()
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
                 if rack["id"] == rack_id:
@@ -2007,7 +2009,7 @@ def render_all(data: dict, options: dict | None = None) -> str:
     lines.append("## Rackfiches")
     lines.append("")
 
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         lines.append(f"# 📍 {site.get('name', '?')}")
         lines.append("")
         for room in site.get("rooms", []):
@@ -2025,7 +2027,7 @@ def render_site(data: dict, site_id: str, options: dict | None = None) -> str:
     version = _get_version()
     dup_ips = _build_duplicate_ip_set(data)
 
-    site = next((s for s in data.get("sites", []) if s["id"] == site_id), None)
+    site = next((s for s in get_all_sites(data) if s["id"] == site_id), None)
     if not site:
         return f"# Site niet gevonden: {site_id}\n"
 
@@ -2052,7 +2054,7 @@ def render_rack_only(data: dict, rack_id: str, options: dict | None = None) -> s
     idx     = _build_index(data)
     version = _get_version()
 
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
                 if rack["id"] == rack_id:

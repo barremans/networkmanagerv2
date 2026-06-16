@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.32.0
+# Version: 1.35.0
 # Author:  Barremans
-# Changes: 1.32.0 — Zoekbalk wandpunt locaties: search_placeholder_outlet_location,
+# Changes: 1.35.0 — F3: report_company_prompt, report_company_all (NL + EN)
+#          1.34.0 — CompanyDialog sleutels toegevoegd (F1/F2): bedrijfsnaam,
+#                  adres, BTW, telefoon, e-mail, website, menu-acties
+#          1.33.0 — help_shortcut_new_outlet, help_shortcut_new_endpoint (NL+EN)
+#          1.32.0 — Zoekbalk wandpunt locaties: search_placeholder_outlet_location,
 #                   lbl_no_outlet_location_match (NL + EN)
 #          1.31.0 — FloorplanPickerDialog: dlg_floorplan_picker_title,
 #                   search_placeholder_floorplan, lbl_no_floorplan_match (NL + EN)
@@ -104,6 +108,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_col_shortcut":        "Sneltoets",
         "help_col_action":          "Actie",
         "help_shortcut_esc":        "Verbindingsmodus annuleren",
+        "help_shortcut_new_outlet":   "Nieuw wandpunt aanmaken",
+        "help_shortcut_new_endpoint": "Nieuw eindapparaat aanmaken",
         "help_version_label":       "Versie",
         "help_author_label":        "Auteur",
         "help_built_with":          "Gebouwd met",
@@ -713,6 +719,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "lbl_no_floorplan_match":       "Geen grondplannen gevonden.",
         "search_placeholder_outlet_location": "Zoek locatie...",
         "lbl_no_outlet_location_match": "Geen locaties gevonden.",
+
+        # CompanyDialog — v1.34.0 (F1/F2)
+        "dlg_company_new_title":    "Nieuw bedrijf",
+        "dlg_company_edit_title":   "Bedrijf bewerken",
+        "dlg_company_grp_info":     "Bedrijfsgegevens",
+        "dlg_company_grp_contact":  "Contactgegevens",
+        "dlg_company_lbl_name":     "Naam",
+        "dlg_company_lbl_address":  "Adres",
+        "dlg_company_lbl_vat":      "BTW-nummer",
+        "dlg_company_lbl_phone":    "Telefoon",
+        "dlg_company_lbl_email":    "E-mail",
+        "dlg_company_lbl_website":  "Website",
+        "dlg_company_ph_name":      "bv. CGK Group",
+        "dlg_company_ph_address":   "bv. Westlaan 7, 8560 Gullegem",
+        "dlg_company_ph_vat":       "bv. BE0123456789",
+        "dlg_company_ph_phone":     "bv. +32 56 00 00 00",
+        "dlg_company_ph_email":     "bv. info@cgk-group.com",
+        "dlg_company_ph_website":   "bv. https://www.cgk-group.com",
+        "label_company":            "Bedrijf",
+        "menu_new_company":         "Nieuw bedrijf",
+        "menu_edit_company":        "Bedrijf bewerken",
+        "menu_delete_company":      "Bedrijf verwijderen",
+        "err_company_last":         "Het laatste bedrijf kan niet verwijderd worden.",
+        "msg_company_created":      "aangemaakt.",
+        "msg_company_updated":      "bijgewerkt.",
+        "msg_company_deleted":      "verwijderd.",
+        "report_company_prompt":    "Genereer rapport voor:",
+        "report_company_all":       "Alle bedrijven",
     },
 
     # -------------------------------------------------------------------------
@@ -758,6 +792,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "help_col_shortcut":        "Shortcut",
         "help_col_action":          "Action",
         "help_shortcut_esc":        "Cancel connection mode",
+        "help_shortcut_new_outlet":   "Create new wall outlet",
+        "help_shortcut_new_endpoint": "Create new endpoint",
         "help_version_label":       "Version",
         "help_author_label":        "Author",
         "help_built_with":          "Built with",
@@ -1367,6 +1403,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "lbl_no_floorplan_match":       "No floorplans found.",
         "search_placeholder_outlet_location": "Search location...",
         "lbl_no_outlet_location_match": "No locations found.",
+
+        # CompanyDialog — v1.34.0 (F1/F2)
+        "dlg_company_new_title":    "New company",
+        "dlg_company_edit_title":   "Edit company",
+        "dlg_company_grp_info":     "Company details",
+        "dlg_company_grp_contact":  "Contact details",
+        "dlg_company_lbl_name":     "Name",
+        "dlg_company_lbl_address":  "Address",
+        "dlg_company_lbl_vat":      "VAT number",
+        "dlg_company_lbl_phone":    "Phone",
+        "dlg_company_lbl_email":    "E-mail",
+        "dlg_company_lbl_website":  "Website",
+        "dlg_company_ph_name":      "e.g. CGK Group",
+        "dlg_company_ph_address":   "e.g. Westlaan 7, 8560 Gullegem",
+        "dlg_company_ph_vat":       "e.g. BE0123456789",
+        "dlg_company_ph_phone":     "e.g. +32 56 00 00 00",
+        "dlg_company_ph_email":     "e.g. info@cgk-group.com",
+        "dlg_company_ph_website":   "e.g. https://www.cgk-group.com",
+        "label_company":            "Company",
+        "menu_new_company":         "New company",
+        "menu_edit_company":        "Edit company",
+        "menu_delete_company":      "Delete company",
+        "err_company_last":         "The last company cannot be deleted.",
+        "msg_company_created":      "created.",
+        "msg_company_updated":      "updated.",
+        "msg_company_deleted":      "deleted.",
+        "report_company_prompt":    "Generate report for:",
+        "report_company_all":       "All companies",
     },
 }
 

@@ -2,11 +2,12 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.27.1
+# Version: 1.27.3
 # Author:  Barremans
-# Changes: 1.27.1 — Direct verbonden sectie verborgen bij actieve ruimte- of
-#                   locatiefilter in site-modus (niet relevant voor gefilterde WP)
-#          1.27.0 — Site-modus: tweede knop voor wandpunt locatiefilter
+# Changes: 1.27.3 -- F1: get_all_sites() voor v2 JSON
+#          1.27.2 — Bugfix: dubbel 🌐 icoon op locatiefilter knop —
+#                   settings_tab_outlet_locations bevat al emoji, strip voor gebruik
+#          1.27.1 — Direct verbonden sectie verborgen bij actieve filter
 #                   _LocationPickerDialog, _btn_location, _location_filter,
 #                   _on_location_picker_clicked()
 #                   _collect_site_outlets() filtert ook op _location_filter
@@ -95,7 +96,8 @@ from PySide6.QtGui import QCursor
 import re
 
 from app.helpers.i18n import t, get_language
-from app.helpers.settings_storage import get_outlet_location_label, load_outlet_locations
+from app.helpers.settings_storage import get_outlet_location_label
+from app.helpers.settings_storage import get_all_sites, load_outlet_locations, get_all_sites
 from app.services import tracing
 
 # 1.18.0 — minimale kaartbreedte voor col_count berekening
@@ -505,12 +507,15 @@ class WallOutletView(QWidget):
                 title_layout.addSpacing(4)
 
                 # 1.27.0 — Wandpunt locatiefilter knop
-                loc_btn_label = t("settings_tab_outlet_locations").strip()
+                # settings_tab_outlet_locations bevat al een 🌐 emoji — niet herhalen
+                _raw_loc_label = t("settings_tab_outlet_locations").strip()
+                _loc_btn_label = _raw_loc_label.lstrip("🌐 ").strip() \
+                    if _raw_loc_label.startswith("🌐") else _raw_loc_label
                 if self._location_filter:
-                    loc_btn_label = get_outlet_location_label(
+                    _loc_btn_label = get_outlet_location_label(
                         self._location_filter, get_language()
                     ) or self._location_filter
-                self._btn_location = QPushButton(f"🌐  {loc_btn_label}")
+                self._btn_location = QPushButton(f"🌐  {_loc_btn_label}")
                 self._btn_location.setFixedHeight(26)
                 self._btn_location.setMinimumWidth(160)
                 self._btn_location.clicked.connect(self._on_location_picker_clicked)
@@ -702,9 +707,9 @@ class WallOutletView(QWidget):
         # Locatiefilter resetten: bij nieuwe ruimte kan de locatie niet meer geldig zijn
         self._location_filter = ""
         if self._btn_location:
-            self._btn_location.setText(
-                f"🌐  {t('settings_tab_outlet_locations').strip()}"
-            )
+            _raw = t("settings_tab_outlet_locations").strip()
+            _lbl = _raw.lstrip("🌐 ").strip() if _raw.startswith("🌐") else _raw
+            self._btn_location.setText(f"🌐  {_lbl}")
         if self._search_bar and self._search_text:
             self._search_bar.blockSignals(True)
             self._search_bar.clear()
@@ -735,8 +740,11 @@ class WallOutletView(QWidget):
 
         self._location_filter = dlg.selected_key()
         if self._btn_location:
-            lbl = dlg.selected_label() if self._location_filter \
-                  else t("settings_tab_outlet_locations").strip()
+            if self._location_filter:
+                lbl = dlg.selected_label()
+            else:
+                _raw = t("settings_tab_outlet_locations").strip()
+                lbl  = _raw.lstrip("🌐 ").strip() if _raw.startswith("🌐") else _raw
             self._btn_location.setText(f"🌐  {lbl}")
 
         if self._search_bar and self._search_text:
@@ -750,7 +758,7 @@ class WallOutletView(QWidget):
     def _collect_site_outlets_unfiltered_location(self) -> list[tuple[dict, dict]]:
         """Outlets gefilterd op ruimte, NIET op locatie — voor de locatiepicker."""
         result = []
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             if site["id"] == self._site["id"]:
                 for room in site.get("rooms", []):
                     if self._room_filter and room.get("id") != self._room_filter:
@@ -1060,7 +1068,7 @@ class WallOutletView(QWidget):
         1.25.0 — filtert op _room_filter indien ingesteld.
         1.27.0 — filtert ook op _location_filter indien ingesteld."""
         result = []
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             if site["id"] == self._site["id"]:
                 for room in site.get("rooms", []):
                     if self._room_filter and room.get("id") != self._room_filter:
@@ -1207,7 +1215,7 @@ class WallOutletView(QWidget):
         elif self._mode == "direct" and self._rack_id:
             # v1.10.0 — Filter op specifieke rack
             allowed_device_ids = set()
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         if rack["id"] == self._rack_id:
@@ -1738,7 +1746,7 @@ class _EndpointDetailDialog(QDialog):
             rack_room_lbl = ""
             if self._dev:
                 dev_id = self._dev.get("id", "")
-                for _site in self._data.get("sites", []):
+                for _site in get_all_sites(self._data):
                     for _room in _site.get("rooms", []):
                         for _rack in _room.get("racks", []):
                             for _slot in _rack.get("slots", []):

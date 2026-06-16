@@ -37,7 +37,11 @@
 
 | ID | Omschrijving | Status |
 |---|---|---|
-
+| G1| "Bekijk grondplan, enkel 1 site geen meerder sites, ook bedrijven keuze niet aanwezig - uitbreiden van zoekfuntie en filtering | Open |
+| G2 | beheer grondmappen geeft errorTraceback (most recent call last):
+  File "C:\PY\networkmanager\app\gui\main_window.py", line 4133, in _on_floorplan_manage
+    from app.gui.dialogs.floorplan_manage_dialog import FloorplanManageDialog
+ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.floorplan_manage_dialog' (C:\PY\networkmanager\app\gui\dialogs\floorplan_manage_dialog.py) | Open |
 
 ---
 

@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_mapping_dialog.py
 # Role:    Dialoog — SVG punt koppelen aan wandpunt, eindapparaat of poort
-# Version: 1.7.0
+# Version: 1.7.1
 # Author:  Barremans
-# Changes: 1.7.0 — Auto-focus op zoekveld bij openen en bij wisselen van tab:
+# Changes: 1.7.1 -- F1: get_all_sites() voor v2 JSON
+#          1.7.0 — Auto-focus op zoekveld bij openen en bij wisselen van tab:
 #                   showEvent + _focus_search + currentChanged gekoppeld
 #          1.6.0 — _populate_port_devices: filter op device-definitie
 #                   _port_sort_key: front poorten eerst (was back eerst)
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
 from app.helpers import settings_storage
 from app.helpers.i18n import t, get_language
 from app.helpers.settings_storage import get_outlet_location_label
+from app.helpers.settings_storage import get_all_sites
 from app.services import floorplan_service
 
 _USER_ROLE = 256   # Qt.UserRole
@@ -195,7 +197,7 @@ class FloorplanMappingDialog(QDialog):
         site_id = self._floorplan.get("site_id")
         lang = get_language()
         if site_id:
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 if site.get("id") != site_id:
                     continue
                 for room in site.get("rooms", []):
@@ -251,7 +253,7 @@ class FloorplanMappingDialog(QDialog):
         site_id = self._floorplan.get("site_id")
         if site_id:
             device_map = {d["id"]: d for d in self._data.get("devices", [])}
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 if site.get("id") != site_id:
                     continue
                 for room in site.get("rooms", []):

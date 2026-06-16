@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_test_window.py
 # Role:    Losse testhost voor floorplan dialog en viewer
-# Version: 1.6.0
+# Version: 1.6.1
 # Author:  Barremans
-# Changes: 1.6.0 — Beheer knop toegevoegd → FloorplanManageDialog
+# Changes: 1.6.1 -- F1: get_all_sites() voor v2 JSON
+#          1.6.0 — Beheer knop toegevoegd → FloorplanManageDialog
 #                   Verwijder knop verwijderd (zit nu in beheerdialoog)
 #          1.5.0 — Filter ongeldige grondplannen, knop "Bekijk" weg
 #          1.3.0 — Dubbel venster bug, outlet_location_key, DDL
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.helpers import settings_storage
+from app.helpers.settings_storage import get_all_sites
 from app.helpers.i18n import get_language, set_language, t
 from app.gui.dialogs.floorplan_dialog import FloorplanDialog
 from app.gui.dialogs.floorplan_manage_dialog import FloorplanManageDialog
@@ -259,7 +261,7 @@ class FloorplanTestWindow(QMainWindow):
     def _find_site_name(self, site_id: str | None) -> str:
         if not site_id:
             return "-"
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             if site.get("id") == site_id:
                 return site.get("name", site_id)
         return site_id

@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/services/data_integrity.py
 # Role:    Data validatie en automatische reparatie — GEEN Qt imports
-# Version: 1.0.0
+# Version: 1.0.1
 # Author:  Barremans
 # =============================================================================
 #
@@ -21,6 +21,7 @@
 # =============================================================================
 
 from collections import Counter
+from app.helpers.settings_storage import get_all_sites
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ from collections import Counter
 def _all_existing_ids(data: dict) -> set:
     """Verzamel alle bestaande IDs in de data — voor uniciteitscheck."""
     ids = set()
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         ids.add(site.get("id", ""))
         for room in site.get("rooms", []):
             ids.add(room.get("id", ""))

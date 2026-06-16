@@ -14,12 +14,12 @@ if not os.path.exists(TARGET):
 with open(TARGET, encoding="utf-8") as f:
     src = f.read()
 
-if "# Version: 1.1.0" in src:
+if "# Version: 1.1.1" in src:
     print("Patch al toegepast (v1.1.0 aanwezig). Geen wijzigingen.")
     sys.exit(0)
 
 # ── 1. Versie ────────────────────────────────────────────────────────────────
-src = src.replace("# Version: 1.0.0", "# Version: 1.1.0", 1)
+src = src.replace("# Version: 1.0.0", "# Version: 1.1.1", 1)
 
 # ── 2. Aanroep in _build_docx vóór doc.save ──────────────────────────────────
 OLD_SAVE = "    # ── Opslaan ──────────────────────────────────────────────────────────────\n    doc.save(filepath)"

@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_to_outlet_dialog.py
 # Role:    Poort ↔ Wandpunt verbinding aanmaken
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #          1.1.0 — Ruimtestap verwijderd, alle wandpunten van site direct zichtbaar
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from app.helpers.i18n import t
 from app.helpers.settings_storage import get_outlet_location_label
+from app.helpers.settings_storage import get_all_sites, get_all_sites
 from app.helpers.i18n import get_language
 
 _CABLE_TYPES = [
@@ -83,7 +84,7 @@ class ConnectToOutletDialog(QDialog):
 
         # Vul sites
         self._ddl_site.addItem(f"— {t('label_site')} —", "")
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             # Alleen sites tonen die wandpunten hebben
             all_outlets = [wo for r in site.get("rooms", [])
                            for wo in r.get("wall_outlets", [])]
@@ -142,7 +143,7 @@ class ConnectToOutletDialog(QDialog):
 
         if not site_id:
             return
-        site = next((s for s in self._data["sites"] if s["id"] == site_id), None)
+        site = next((s for s in get_all_sites(self._data) if s["id"] == site_id), None)
         if not site:
             return
 

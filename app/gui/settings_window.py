@@ -3,7 +3,14 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.12.0
+# Version: 1.14.0
+# Changes: 1.14.0 — Bedrijfslogica backup/restore:
+#                   _on_backup_now: bedrijfskeuze bij meerdere bedrijven
+#                     → create_backup_company() bij specifiek bedrijf
+#                   _on_restore_now: v1 detectie → QInputDialog voor
+#                     bedrijfsnaam → _migrate_v1_to_v2() → volledige
+#                     vervanging (restore = replace, niet merge)
+#          1.13.0 — Auto-migratie v1→v2 na restore
 # Author:  Barremans
 # Changes: 1.12.0 — Zoekbalk toegevoegd aan wandpunt locaties tab (_loc_search,
 #                   _on_loc_search_changed, _refresh_loc_list gefilterd)
@@ -22,6 +29,7 @@ from PySide6.QtCore import Qt, Signal
 
 from app.helpers.i18n import t
 from app.helpers import settings_storage, i18n
+from app.helpers.settings_storage import get_all_companies
 from app.services import backup_service
 
 
@@ -760,6 +768,7 @@ class SettingsWindow(QDialog):
                                 f"⚠  Pad niet bereikbaar:\n{info}")
 
     def _on_backup_now(self):
+        from PySide6.QtWidgets import QInputDialog
         path = self._txt_path.text().strip()
         if not path:
             QMessageBox.warning(self, t("settings_backup_group"),
@@ -771,14 +780,50 @@ class SettingsWindow(QDialog):
             "keep_history": self._chk_history.isChecked(),
             "max_backups":  self._spn_max.value(),
         }
+
+        # Bedrijfskeuze bij meerdere bedrijven
+        network_data = settings_storage.load_network_data()
+        companies    = get_all_companies(network_data)
+        company_id   = ""
+        company_name = ""
+
+        if len(companies) > 1:
+            all_label = t("report_company_all")
+            labels    = [all_label] + [c.get("name", "?") for c in companies]
+            choice, ok_dlg = QInputDialog.getItem(
+                self, t("settings_backup_group"),
+                t("report_company_prompt"),
+                labels, 0, False
+            )
+            if not ok_dlg:
+                return
+            if choice != all_label:
+                sel = next((c for c in companies if c.get("name","?") == choice), None)
+                if sel:
+                    company_id   = sel["id"]
+                    company_name = sel.get("name", "")
+
         source = settings_storage.get_network_data_path()
-        ok, err = backup_service.create_backup(
-            source, config,
-            settings_path=settings_storage.get_settings_path(),
-            floorplans_path=settings_storage.get_floorplans_path(),
-            floorplans_dir=settings_storage.get_floorplans_dir(),
-            vlan_path=self._get_vlan_path(),
-        )
+
+        if company_id:
+            ok, err = backup_service.create_backup_company(
+                company_id=company_id,
+                company_name=company_name,
+                config=config,
+                network_data=network_data,
+                floorplans_path=settings_storage.get_floorplans_path(),
+                floorplans_dir=settings_storage.get_floorplans_dir(),
+                vlan_path=self._get_vlan_path(),
+            )
+        else:
+            ok, err = backup_service.create_backup(
+                source, config,
+                settings_path=settings_storage.get_settings_path(),
+                floorplans_path=settings_storage.get_floorplans_path(),
+                floorplans_dir=settings_storage.get_floorplans_dir(),
+                vlan_path=self._get_vlan_path(),
+            )
+
         if ok:
             QMessageBox.information(self, t("settings_backup_group"),
                                     f"✓  {t('msg_backup_ok')}\n{path}")
@@ -874,6 +919,36 @@ class SettingsWindow(QDialog):
             QMessageBox.critical(self, t("settings_restore_failed"),
                                  f"⚠  {t('settings_restore_failed')}:\n\n{err}")
             return
+
+        # v1 detectie na restore: migreer naar v2 met bedrijfskeuze
+        # Restore = volledige vervanging, niet mergen
+        if "network_data" in targets:
+            try:
+                import json as _json
+                from app.services.import_export_service import _is_v2, _migrate_v1_to_v2
+                from PySide6.QtWidgets import QInputDialog
+                _nd_path = settings_storage.get_network_data_path()
+                with open(_nd_path, encoding="utf-8") as _f:
+                    _nd = _json.load(_f)
+                if not _is_v2(_nd):
+                    # v1 backup hersteld — bedrijfsnaam vragen
+                    _default_name = "Hersteld bedrijf"
+                    _company_name, _ok_dlg = QInputDialog.getText(
+                        self, t("settings_restore_group"),
+                        "v1 backup hersteld zonder bedrijfsstructuur. Geef een naam voor het aan te maken bedrijf:",
+                        text=_default_name
+                    )
+                    if not _ok_dlg:
+                        _company_name = _default_name
+                    # Migreer v1 → v2 en sla op als vervanging
+                    _nd_v2 = _migrate_v1_to_v2(
+                        _nd,
+                        company_name=_company_name.strip() or _default_name
+                    )
+                    with open(_nd_path, "w", encoding="utf-8") as _f:
+                        _json.dump(_nd_v2, _f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass  # fout → bestand blijft zoals hersteld, app start op
 
         QMessageBox.information(
             self, t("settings_restore_ok_title"),

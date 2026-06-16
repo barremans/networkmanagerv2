@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/floorplan_view.py
 # Role:    Grondplan viewer — basis mockup met rechter zijpaneel
-# Version: 1.27.0
+# Version: 1.27.1
 # Author:  Barremans
-# Changes: 1.27.0 — select_by_target_val: stap 3 volledig uitgewerkt (3a/3b/3c)
+# Changes: 1.27.1 -- F1: get_all_sites() voor v2 JSON
+#          1.27.0 — select_by_target_val: stap 3 volledig uitgewerkt (3a/3b/3c)
 #                   3a: wo_id → PP back-poort → directe mapping
 #                   3b: PP back → PP front via zelfde device+number, andere side
 #                   3c: PP front → switch-poort via connection → mapping
@@ -124,6 +125,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.helpers import settings_storage
+from app.helpers.settings_storage import get_all_sites
 from app.helpers.i18n import t
 from app.services import floorplan_service
 from app.services import floorplan_svg_service
@@ -661,7 +663,7 @@ class FloorplanView(QWidget):
         # Stap 2: "ep:ep_id" → zoek via gekoppeld wandpunt outlet_id
         if not svg_point and target_val.startswith("ep:"):
             ep_id = target_val[3:]
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for wo in room.get("wall_outlets", []):
                         if wo.get("endpoint_id") == ep_id:
@@ -742,7 +744,7 @@ class FloorplanView(QWidget):
 
         # Stap 4: wo_id → endpoint_id → "ep:ep_id" in mappings
         if not svg_point and target_val and not target_val.startswith(("ep:", "port:")):
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     for wo in room.get("wall_outlets", []):
                         if wo.get("id") == target_val:
@@ -820,7 +822,7 @@ class FloorplanView(QWidget):
 
         site_id = self._floorplan.get("site_id", "")
         site    = next(
-            (s for s in self._data.get("sites", []) if s["id"] == site_id),
+            (s for s in get_all_sites(self._data) if s["id"] == site_id),
             {"id": site_id, "name": ""},
         )
 
@@ -998,7 +1000,7 @@ class FloorplanView(QWidget):
                 return
             # Zoek rack/room/site/slot voor dit device
             rack = room = site = slot_found = None
-            for s in self._data.get("sites", []):
+            for s in get_all_sites(self._data):
                 for r in s.get("rooms", []):
                     for ra in r.get("racks", []):
                         for sl in ra.get("slots", []):
@@ -1045,7 +1047,7 @@ class FloorplanView(QWidget):
         # ── Wandpunt ──────────────────────────────────────────────────
         outlet_id = sel
         outlet = next(
-            (wo for s in self._data.get("sites", [])
+            (wo for s in get_all_sites(self._data)
              for r in s.get("rooms", [])
              for wo in r.get("wall_outlets", [])
              if wo["id"] == outlet_id),
@@ -1061,7 +1063,7 @@ class FloorplanView(QWidget):
 
         def _do_edit():
             room_id = next(
-                (r["id"] for s in self._data.get("sites", [])
+                (r["id"] for s in get_all_sites(self._data)
                  for r in s.get("rooms", [])
                  if any(wo["id"] == outlet_id
                         for wo in r.get("wall_outlets", []))),
@@ -1341,7 +1343,7 @@ class FloorplanView(QWidget):
             return f"🖥  {ep.get('name', ep_id)}" if ep else ep_id
 
         # Wandpunt
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for outlet in room.get("wall_outlets", []):
                     if outlet.get("id") == outlet_id:

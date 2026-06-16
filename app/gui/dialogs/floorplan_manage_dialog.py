@@ -2,9 +2,16 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_manage_dialog.py
 # Role:    Dialoog — grondplan beheren (naam, site, locatie, verwijderen)
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.4.0 — Zoekbalk boven de tabel: real-time filter op naam, site
+# Changes: 1.6.0 — G1: Bedrijf-dropdown in formulier rechts (cascade → site)
+#                   _populate_form vult cmb_company_form + cascade site-DDL
+#                   _set_form_enabled en _apply_read_only bijgewerkt
+#          1.5.0 — G1: Bedrijfskolom in tabel (Bedrijf | Naam | Site | Locatie)
+#                   Bedrijfsfilter-dropdown boven zoekbalk (verborgen bij 1 bedrijf)
+#                   Site-DDL gefilterd op gekozen bedrijf (cascade)
+#                   _sites gebruikt get_all_sites() ipv data["sites"] (v2 JSON fix)
+#          1.4.0 — Zoekbalk boven de tabel: real-time filter op naam, site
 #                   en wandpunt locatie. Rijen worden verborgen/getoond zonder
 #                   de onderliggende _floorplans lijst te wijzigen.
 #          1.3.0 — SVG vervangen: preview vóór bevestiging
@@ -45,6 +52,7 @@ from PySide6.QtWidgets import (
 
 from app.helpers import settings_storage
 from app.helpers.i18n import get_language, t
+from app.helpers.settings_storage import get_all_sites, get_all_companies, get_company_for_site
 from app.services import floorplan_service
 
 
@@ -72,6 +80,9 @@ class FloorplanManageDialog(QDialog):
 
         self._build_ui()
         self._load_data()
+        # Verberg bedrijfsfilter bij 1 bedrijf
+        if len(get_all_companies(self._data)) <= 1 and hasattr(self, '_cmb_company_filter'):
+            self._cmb_company_filter.setVisible(False)
 
     # ------------------------------------------------------------------
     # UI
@@ -95,6 +106,14 @@ class FloorplanManageDialog(QDialog):
         lbl.setObjectName("secondary")
         left_layout.addWidget(lbl)
 
+        # 1.5.0 — Bedrijfsfilter
+        self._cmb_company_filter = QComboBox()
+        self._cmb_company_filter.addItem(f"— {t('label_company')} —", "")
+        for _c in get_all_companies(self._data):
+            self._cmb_company_filter.addItem(_c.get("name", "?"), _c.get("id", ""))
+        self._cmb_company_filter.currentIndexChanged.connect(self._filter_table)
+        left_layout.addWidget(self._cmb_company_filter)
+
         # 1.4.0 — Zoekbalk
         self._search = QLineEdit()
         self._search.setPlaceholderText("🔍  " + t("search_placeholder_floorplan"))
@@ -103,8 +122,9 @@ class FloorplanManageDialog(QDialog):
         left_layout.addWidget(self._search)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(3)
+        self._table.setColumnCount(4)
         self._table.setHorizontalHeaderLabels([
+            t("label_company"),
             t("label_name"),
             t("label_site"),
             t("settings_tab_outlet_locations"),
@@ -112,9 +132,10 @@ class FloorplanManageDialog(QDialog):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self._table.verticalHeader().setVisible(False)
         self._table.setAlternatingRowColors(True)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -153,6 +174,11 @@ class FloorplanManageDialog(QDialog):
         self._edit_desc.setFixedHeight(60)
         self._edit_desc.setPlaceholderText("(optioneel)")
         form.addRow(t("label_notes") + ":", self._edit_desc)
+
+        # Bedrijf (cascade → site)
+        self._cmb_company_form = QComboBox()
+        self._cmb_company_form.currentIndexChanged.connect(self._on_company_form_changed)
+        form.addRow(t("label_company") + ":", self._cmb_company_form)
 
         # Site
         self._cmb_site = QComboBox()
@@ -225,8 +251,14 @@ class FloorplanManageDialog(QDialog):
         }
         self._locs = locs
 
-        # Sites voor DDL
-        self._sites = self._data.get("sites", [])
+        # Sites voor DDL (v2: via get_all_sites)
+        self._sites = get_all_sites(self._data)
+
+        # Bedrijf lookup: site_id → (company_id, company_name)
+        self._site_to_company: dict[str, tuple[str, str]] = {}
+        for _c in get_all_companies(self._data):
+            for _s in _c.get("sites", []):
+                self._site_to_company[_s["id"]] = (_c.get("id", ""), _c.get("name", "-"))
 
         self._refresh_table()
 
@@ -243,6 +275,9 @@ class FloorplanManageDialog(QDialog):
             loc_key = fp.get("outlet_location_key", "")
             loc     = self._loc_labels.get(loc_key, loc_key or "⚠ geen locatie")
 
+            _, cname = self._site_to_company.get(fp.get("site_id", ""), ("", "-"))
+
+            item_company = QTableWidgetItem(cname)
             item_name = QTableWidgetItem(name)
             item_name.setData(Qt.ItemDataRole.UserRole, fp.get("id"))
             if not loc_key:
@@ -250,9 +285,10 @@ class FloorplanManageDialog(QDialog):
                 for item in [item_name]:
                     item.setForeground(Qt.GlobalColor.red)
 
-            self._table.setItem(row, 0, item_name)
-            self._table.setItem(row, 1, QTableWidgetItem(site))
-            self._table.setItem(row, 2, QTableWidgetItem(loc))
+            self._table.setItem(row, 0, item_company)
+            self._table.setItem(row, 1, item_name)
+            self._table.setItem(row, 2, QTableWidgetItem(site))
+            self._table.setItem(row, 3, QTableWidgetItem(loc))
 
         # Hertoepas actieve zoekfilter na herladen
         if hasattr(self, '_search'):
@@ -270,14 +306,19 @@ class FloorplanManageDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _filter_table(self, text: str = ""):
-        """1.4.0 — Verberg rijen die niet overeenkomen met de zoektekst."""
-        needle = text.strip().lower()
+        """1.4.0/1.5.0 — Verberg rijen op zoektekst + bedrijfsfilter."""
+        needle = text.strip().lower() if isinstance(text, str) else self._search.text().strip().lower()
+        company_filter = self._cmb_company_filter.currentData() if hasattr(self, "_cmb_company_filter") else ""
         for row in range(self._table.rowCount()):
-            match = not needle or any(
+            fp_id = self._table.item(row, 1).data(Qt.ItemDataRole.UserRole) if self._table.item(row, 1) else None
+            fp = next((f for f in self._floorplans if f.get("id") == fp_id), {})
+            cid, _ = self._site_to_company.get(fp.get("site_id", ""), ("", ""))
+            company_match = not company_filter or cid == company_filter
+            text_match = not needle or any(
                 needle in (self._table.item(row, col).text().lower() if self._table.item(row, col) else "")
                 for col in range(self._table.columnCount())
             )
-            self._table.setRowHidden(row, not match)
+            self._table.setRowHidden(row, not (company_match and text_match))
 
         # Selecteer eerste zichtbare rij als huidige selectie verborgen is
         cur = self._table.currentRow()
@@ -295,7 +336,7 @@ class FloorplanManageDialog(QDialog):
             self._btn_delete.setEnabled(False)
             return
 
-        fp_id = self._table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        fp_id = self._table.item(row, 1).data(Qt.ItemDataRole.UserRole)
         self._selected_fp = next(
             (f for f in self._floorplans if f.get("id") == fp_id), None
         )
@@ -377,10 +418,32 @@ class FloorplanManageDialog(QDialog):
 
         # Herselect hetzelfde grondplan
         for row in range(self._table.rowCount()):
-            item = self._table.item(row, 0)
+            item = self._table.item(row, 1)
             if item and item.data(Qt.ItemDataRole.UserRole) == fp_id:
                 self._table.selectRow(row)
                 break
+
+    def _on_company_form_changed(self, idx: int):
+        """Bij bedrijfwissel in formulier: herlaad site-DDL gefilterd op dat bedrijf."""
+        self._refresh_site_ddl_for_company()
+
+    def _refresh_site_ddl_for_company(self, preselect_site_id: str = ""):
+        """Herlaad site-DDL op basis van gekozen bedrijf in formulier."""
+        self._cmb_site.blockSignals(True)
+        self._cmb_site.clear()
+        company_id = self._cmb_company_form.currentData() or ""
+        sites_to_show = [
+            s for s in self._sites
+            if not company_id or self._site_to_company.get(s["id"], ("",""))[0] == company_id
+        ] or self._sites
+        for site in sites_to_show:
+            self._cmb_site.addItem(site.get("name", "?"), site.get("id"))
+        if preselect_site_id:
+            idx = self._cmb_site.findData(preselect_site_id)
+            if idx >= 0:
+                self._cmb_site.setCurrentIndex(idx)
+        self._cmb_site.blockSignals(False)
+        self._populate_location_ddl()
 
     def _on_site_changed(self, idx: int):
         """Bij site wissel: herlaad wandpunt locaties DDL."""
@@ -456,15 +519,21 @@ class FloorplanManageDialog(QDialog):
         self._edit_desc.setPlainText(fp.get("description", ""))
         self._lbl_svg.setText(fp.get("svg_file", "-"))
 
-        # Sites DDL
-        self._cmb_site.blockSignals(True)
-        self._cmb_site.clear()
-        for site in self._sites:
-            self._cmb_site.addItem(site.get("name", "?"), site.get("id"))
-        idx = self._cmb_site.findData(fp.get("site_id", ""))
-        if idx >= 0:
-            self._cmb_site.setCurrentIndex(idx)
-        self._cmb_site.blockSignals(False)
+        # Bedrijf-DDL vullen + preselecteren
+        self._cmb_company_form.blockSignals(True)
+        self._cmb_company_form.clear()
+        self._cmb_company_form.addItem(f"— {t('label_company')} —", "")
+        for c in get_all_companies(self._data):
+            self._cmb_company_form.addItem(c.get("name", "?"), c.get("id", ""))
+        fp_cid, _ = self._site_to_company.get(fp.get("site_id", ""), ("", ""))
+        if fp_cid:
+            idx_c = self._cmb_company_form.findData(fp_cid)
+            if idx_c >= 0:
+                self._cmb_company_form.setCurrentIndex(idx_c)
+        self._cmb_company_form.blockSignals(False)
+
+        # Site-DDL gefilterd op bedrijf + preselectie
+        self._refresh_site_ddl_for_company(preselect_site_id=fp.get("site_id", ""))
 
         self._populate_location_ddl(preselect=fp.get("outlet_location_key", ""))
 
@@ -482,13 +551,14 @@ class FloorplanManageDialog(QDialog):
 
     def _set_form_enabled(self, enabled: bool):
         for w in [self._edit_name, self._edit_desc,
-                  self._cmb_site, self._cmb_location,
+                  self._cmb_company_form, self._cmb_site, self._cmb_location,
                   self._btn_save, self._btn_replace_svg]:
             w.setEnabled(enabled)
         if not enabled:
             self._edit_name.clear()
             self._edit_desc.clear()
             self._lbl_svg.setText("-")
+            self._cmb_company_form.clear()
             self._cmb_site.clear()
             self._cmb_location.clear()
 
@@ -499,6 +569,7 @@ class FloorplanManageDialog(QDialog):
             self._btn_replace_svg.setEnabled(False)
             self._edit_name.setReadOnly(True)
             self._edit_desc.setReadOnly(True)
+            self._cmb_company_form.setEnabled(False)
             self._cmb_site.setEnabled(False)
             self._cmb_location.setEnabled(False)
 

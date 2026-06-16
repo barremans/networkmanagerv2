@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/move_connection_dialog.py
 # Role:    Dialoog — verbinding verplaatsen naar een andere vrije poort
-# Version: 1.2.0
+# Version: 1.3.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #          1.1.0 — UX verbetering: scope filter (zelfde rack / ruimte / site)
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.helpers.i18n import t
+from app.helpers.settings_storage import get_all_sites
 
 _SCOPE_RACK = "rack"
 _SCOPE_ROOM = "room"
@@ -74,7 +75,7 @@ class MoveConnectionDialog(QDialog):
         if not port:
             return "", "", ""
         dev_id = port.get("device_id", "")
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     for slot in rack.get("slots", []):
@@ -215,7 +216,7 @@ class MoveConnectionDialog(QDialog):
         dev_map   = {d["id"]: d for d in self._data.get("devices", [])}
         ports_map = {}  # dev_id -> [(port, rack_name)]
 
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             if site["id"] != self._current_site_id:
                 continue
 

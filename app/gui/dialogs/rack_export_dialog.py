@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/rack_export_dialog.py
 # Role:    Scopekeuze + exportopties dialog voor MD rack-export (E2)
-# Version: 2.1.0
+# Version: 2.1.1
 # Author:  Barremans
-# Changes: 2.1.0 — Tracing-only checkbox toegevoegd
+# Changes: 2.1.1 -- F1: get_all_sites() voor v2 JSON
+#          2.1.0 — Tracing-only checkbox toegevoegd
 #                  _update_tracing_mode: schakelt andere opties uit
 #          2.0.2 — setMaximumHeight(640) om scherm-overflow te vermijden
 #          2.0.1 — QSS radiobutton fluo-geel
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.helpers.i18n import t
+from app.helpers.settings_storage import get_all_sites
 
 
 _RADIO_QSS = """
@@ -116,7 +118,7 @@ class RackExportDialog(QDialog):
         site_form = QFormLayout(self._site_row)
         site_form.setContentsMargins(0, 4, 0, 0)
         self._ddl_site = QComboBox()
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             self._ddl_site.addItem(site.get("name", "?"), userData=site["id"])
         site_form.addRow(t("rack_export_select_site") + ":", self._ddl_site)
         layout.addWidget(self._site_row)
@@ -215,7 +217,7 @@ class RackExportDialog(QDialog):
 
     def _populate_racks(self):
         self._ddl_rack.clear()
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     label = (f"{site.get('name','?')}  \u203a  "

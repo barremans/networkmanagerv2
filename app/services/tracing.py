@@ -1,8 +1,9 @@
+from app.helpers.settings_storage import get_all_sites
 # =============================================================================
 # Networkmap_Creator
 # File:    app/services/tracing.py
 # Role:    Trace berekening — pure logica, GEEN Qt imports
-# Version: 1.8.0
+# Version: 1.8.1
 # Author:  Barremans
 # Changes: 1.1.0 — B8: _is_patchpanel() helper — type check accepteert
 #                       zowel "patch_panel" als "patchpanel" (beide komen
@@ -86,7 +87,7 @@ def _get_device(data: dict, device_id: str) -> dict | None:
 
 
 def _get_wall_outlet(data: dict, outlet_id: str) -> dict | None:
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for wo in room.get("wall_outlets", []):
                 if wo["id"] == outlet_id:
@@ -148,7 +149,7 @@ def _get_port_context(data: dict, port: dict) -> tuple[str, str]:
     Retourneert ("", "") als niet gevonden.
     """
     device_id = port.get("device_id", "")
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
                 for slot in rack.get("slots", []):

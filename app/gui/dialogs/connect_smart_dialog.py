@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_smart_dialog.py
 # Role:    Poort koppelen aan wandpunt, eindapparaat of poort — met zoekfunctie
-# Version: 1.2.0
+# Version: 1.4.0
 # Author:  Barremans
 # Changes: 1.0.0 — Initiële versie
 #                   3 tabs: Wandpunt / Eindapparaat / Poort
@@ -10,6 +10,10 @@
 #          1.1.0 — "⊕ Nieuw wandpunt" knop in wandpunt-tab
 #                   Aparte in-gebruik tekst per type (wandpunt / eindapparaat / poort)
 #                   Vrije wandpunten sorteren vóór in-gebruik wandpunten
+#          1.4.0 — F: company_id filter — koppelen beperkt tot zelfde bedrijf
+#                   Wandpunten, eindapparaten en poorten gefilterd op company
+#                   endpoints gefilterd via site-membership van bronpoort
+#          1.3.0 — (zie eerder)
 #          1.2.0 — Auto-focus op zoekveld bij openen dialoog
 #                   Auto-focus op zoekveld bij wisselen van tab
 # =============================================================================
@@ -36,7 +40,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from app.helpers.i18n import t, get_language
-from app.helpers.settings_storage import get_outlet_location_label
+from app.helpers.settings_storage import (
+    get_outlet_location_label,
+    get_all_sites,
+    get_company_for_site,
+)
 
 _USER_ROLE  = 256   # Qt.UserRole  — item id
 _IN_USE_ROLE = 257  # bool — al verbonden
@@ -74,6 +82,7 @@ class ConnectSmartDialog(QDialog):
         port_id: str,
         port_label: str,
         initial_tab: int = _TAB_OUTLET,
+        company_id: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -88,12 +97,23 @@ class ConnectSmartDialog(QDialog):
         src_port = next((p for p in data.get("ports", []) if p["id"] == port_id), None)
         if src_port:
             self._src_device_id = src_port.get("device_id", "")
-            for site in data.get("sites", []):
+            for site in get_all_sites(data):
                 for room in site.get("rooms", []):
                     for rack in room.get("racks", []):
                         for slot in rack.get("slots", []):
                             if slot.get("device_id") == self._src_device_id:
                                 self._src_site_id = site["id"]
+
+        # F: company filter — bepaal company_id en bijhorende site-IDs
+        # company_id wordt meegegeven vanuit main_window; als leeg: geen filter
+        self._src_company_id = company_id
+        self._company_site_ids: set[str] = set()
+        if company_id:
+            for company in data.get("companies", []):
+                if company["id"] == company_id:
+                    for site in company.get("sites", []):
+                        self._company_site_ids.add(site["id"])
+                    break
 
         # Verbonden sets opbouwen
         self._connected_outlets = set()
@@ -274,7 +294,10 @@ class ConnectSmartDialog(QDialog):
         self._all_outlets = []
         lang = get_language()
 
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
+            # F — filter op company: sla sites van andere bedrijven over
+            if self._company_site_ids and site["id"] not in self._company_site_ids:
+                continue
             site_name = site.get("name", "?")
             for room in site.get("rooms", []):
                 room_name = room.get("name", "?")
@@ -326,11 +349,33 @@ class ConnectSmartDialog(QDialog):
             for et in settings_storage.load_endpoint_types()
         }
 
+        # F — bouw endpoint→site map via wandpunt-verbindingen
+        # Een endpoint is "van" een company als zijn wandpunt in een company-site zit.
+        # Endpoints zonder wandpunt-verbinding zijn vrij en altijd zichtbaar.
+        ep_site_map: dict[str, str] = {}  # ep_id → site_id
+        if self._company_site_ids:
+            outlet_site: dict[str, str] = {}  # outlet_id → site_id
+            for site in get_all_sites(self._data):
+                for room in site.get("rooms", []):
+                    for wo in room.get("wall_outlets", []):
+                        outlet_site[wo["id"]] = site["id"]
+            for conn in self._data.get("connections", []):
+                ft, fid = conn.get("from_type", ""), conn.get("from_id", "")
+                tt, tid = conn.get("to_type",   ""), conn.get("to_id",   "")
+                if ft == "endpoint" and tt == "wall_outlet":
+                    ep_site_map[fid] = outlet_site.get(tid, "")
+                elif tt == "endpoint" and ft == "wall_outlet":
+                    ep_site_map[tid] = outlet_site.get(fid, "")
+
         for ep in sorted(
             self._data.get("endpoints", []),
             key=lambda e: e.get("name", "").lower()
         ):
             ep_id    = ep.get("id", "")
+            # F — filter: skip endpoints die aantoonbaar bij een andere company horen
+            if self._company_site_ids and ep_id in ep_site_map:
+                if ep_site_map[ep_id] not in self._company_site_ids:
+                    continue
             ep_name  = ep.get("name", ep_id or "?")
             ep_type  = ep.get("type", "")
             type_lbl = ep_type_map.get(ep_type, ep_type)
@@ -377,7 +422,10 @@ class ConnectSmartDialog(QDialog):
         self._all_ports = []
         device_map = {d["id"]: d for d in self._data.get("devices", [])}
 
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
+            # F — filter op company: sla sites van andere bedrijven over
+            if self._company_site_ids and site["id"] not in self._company_site_ids:
+                continue
             site_name = site.get("name", "?")
             for room in site.get("rooms", []):
                 room_name = room.get("name", "?")
@@ -449,7 +497,7 @@ class ConnectSmartDialog(QDialog):
 
         # Bepaal standaard ruimte op basis van huidige site (eerste ruimte)
         default_room_id = ""
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 if room.get("wall_outlets") is not None:
                     default_room_id = room.get("id", "")
@@ -486,7 +534,7 @@ class ConnectSmartDialog(QDialog):
             return
 
         # Voeg wandpunt toe aan de ruimte in self._data
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 if room["id"] == effective_room_id:
                     room.setdefault("wall_outlets", []).append(result)

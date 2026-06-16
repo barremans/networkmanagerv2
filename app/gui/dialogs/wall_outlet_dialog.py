@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.11.0
+# Version: 1.12.0
 # Author:  Barremans
-# Changes: 1.11.0 — Locatie en VLAN: QComboBox vervangen door QLineEdit +
+# Changes: 1.12.0 -- F1: get_all_sites() voor v2 JSON
+#          1.11.0 — Locatie en VLAN: QComboBox vervangen door QLineEdit +
 #                   QListWidget met real-time zoekfilter
 #          1.10.0 — Eindapparaat DDL vervangen door zoekbalk + QListWidget
 #                   Zoeken op naam en type, directe selectie via klik
@@ -27,6 +28,7 @@ from app.helpers.i18n import t
 from app.services.vlan_service import load_vlans
 from app.gui.dialogs.device_dialog import _bind_uppercase
 from app.helpers.settings_storage import load_outlet_locations
+from app.helpers.settings_storage import get_all_sites, get_all_sites
 
 
 class WallOutletDialog(QDialog):
@@ -75,7 +77,7 @@ class WallOutletDialog(QDialog):
         self._show_room_ddl = bool(self._outlet) or not self._room_id
         if self._show_room_ddl:
             self._ddl_room.addItem("-- " + t("label_room") + " --", "")
-            for _site in self._data.get("sites", []):
+            for _site in get_all_sites(self._data):
                 for _room in _site.get("rooms", []):
                     lbl = f"{_site['name']}  /  {_room['name']}"
                     self._ddl_room.addItem(lbl, _room["id"])
@@ -453,7 +455,7 @@ class WallOutletDialog(QDialog):
         # Duplicate check: gebruik data van de effectieve doelruimte (1.9.0)
         if self._data and effective_room_id:
             check_room = next(
-                (r for s in self._data.get("sites", [])
+                (r for s in get_all_sites(self._data)
                  for r in s.get("rooms", []) if r["id"] == effective_room_id),
                 None
             )

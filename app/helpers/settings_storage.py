@@ -2,9 +2,17 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.12.0
+# Version: 1.13.0
 # Author:  Barremans
-# Changes: 1.12.0 — get_vlan_config_path(): volgt network_data.json pad
+# Changes: 1.13.0 — F1/F2: companies[] structuur (v2 dataformaat)
+#                   · _DEFAULT_NETWORK bijgewerkt naar v2 (companies[] ipv sites[])
+#                   · _REQUIRED_NETWORK_KEYS aangepast voor v1 én v2
+#                   · get_all_companies(data) — geeft companies[] terug
+#                   · get_all_sites(data) — geeft alle sites terug (v1 én v2)
+#                   · load_network_data(): automatische v1→v2 migratie bij laden
+#                   · validate_network_data(): ondersteunt v1 én v2
+#                   · save_company(), get_company_by_id() toegevoegd
+#          1.12.0 — get_vlan_config_path(): volgt network_data.json pad
 #                   zodat vlan_config.json gedeeld wordt via netwerkshare
 #          1.11.0 — SVG label prefixen configureerbaar via settings
 #                   _DEFAULT_OUTLET_LABEL_PREFIXES, load/save_outlet_label_prefixes
@@ -98,9 +106,21 @@ _NETWORK_FILE    = os.path.join(_DATA_DIR, "network_data.json")
 _FLOORPLANS_FILE = os.path.join(_DATA_DIR, "floorplans.json")
 _FLOORPLANS_DIR  = os.path.join(_DATA_DIR, "floorplans")
 
-# Verplichte sleutels voor validatie
-_REQUIRED_SETTINGS_KEYS = ["app_version", "language", "backup", "ui", "last_folders"]
-_REQUIRED_NETWORK_KEYS  = ["version", "sites", "devices", "ports", "endpoints", "connections"]
+# Verplichte sleutels voor validatie — v1 én v2 worden ondersteund
+_REQUIRED_SETTINGS_KEYS    = ["app_version", "language", "backup", "ui", "last_folders"]
+_REQUIRED_NETWORK_KEYS_V1  = ["version", "sites", "devices", "ports", "endpoints", "connections"]
+_REQUIRED_NETWORK_KEYS_V2  = ["version", "companies", "devices", "ports", "endpoints", "connections"]
+
+# Standaard bedrijf bij v1→v2 migratie
+_DEFAULT_COMPANY = {
+    "id":      "company_cgk_group",
+    "name":    "CGK Group",
+    "address": "",
+    "vat":     "",
+    "phone":   "",
+    "email":   "",
+    "website": "",
+}
 
 # Ingebouwde eindapparaat-types
 _DEFAULT_ENDPOINT_TYPES = [
@@ -209,13 +229,15 @@ _DEFAULT_SETTINGS = {
     "read_only_mode": True,
 }
 
-# Fallback defaults bij ontbrekend of corrupt network_data.json
+# Fallback defaults bij ontbrekend of corrupt network_data.json — v2
 _DEFAULT_NETWORK = {
-    "version": "1.0",
-    "sites": [],
-    "devices": [],
-    "ports": [],
-    "endpoints": [],
+    "version": "2.0",
+    "companies": [
+        {**_DEFAULT_COMPANY, "sites": []}
+    ],
+    "devices":     [],
+    "ports":       [],
+    "endpoints":   [],
     "connections": []
 }
 
@@ -274,6 +296,34 @@ def _make_backup(path: str):
         shutil.copy2(path, backup_path)
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# v1 → v2 migratie (in-memory, geen bestandsschrijven)
+# ---------------------------------------------------------------------------
+
+def _migrate_v1_to_v2(data: dict) -> dict:
+    """
+    Converteert v1-structuur (sites[] op top-niveau) naar v2 (companies[]).
+    Werkt in-memory — het bestand wordt daarna opgeslagen door load_network_data().
+    """
+    company = {**_DEFAULT_COMPANY, "sites": data.get("sites", [])}
+    migrated = {
+        "version":   "2.0",
+        "companies": [company],
+    }
+    for key, value in data.items():
+        if key not in ("version", "sites"):
+            migrated[key] = value
+    return migrated
+
+
+def _is_v1(data: dict) -> bool:
+    return "sites" in data and "companies" not in data
+
+
+def _is_v2(data: dict) -> bool:
+    return "companies" in data
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +522,10 @@ def get_vlan_config_path() -> str:
 # ---------------------------------------------------------------------------
 
 def load_network_data() -> dict:
-    """F3 — Laadt network_data van het actieve pad (lokaal of netwerk)."""
+    """
+    F3 — Laadt network_data van het actieve pad (lokaal of netwerk).
+    v1.13.0: automatische v1→v2 migratie bij laden indien nodig.
+    """
     _ensure_data_dir()
     path = get_network_data_path()
     data = _load_json(path)
@@ -483,6 +536,13 @@ def load_network_data() -> dict:
         _save_json(path, _DEFAULT_NETWORK)
         return dict(_DEFAULT_NETWORK)
 
+    # Automatische v1 → v2 migratie
+    if _is_v1(data):
+        _make_backup(path)
+        data = _migrate_v1_to_v2(data)
+        _save_json(path, data)
+
+    # Ontbrekende top-level sleutels aanvullen vanuit v2 default
     changed = False
     for key, value in _DEFAULT_NETWORK.items():
         if key not in data:
@@ -499,6 +559,83 @@ def save_network_data(data: dict) -> bool:
     """F3 — Slaat network_data op naar het actieve pad (lokaal of netwerk)."""
     path = get_network_data_path()
     return _save_json(path, data)
+
+
+# ---------------------------------------------------------------------------
+# Companies helpers — F1 (v1.13.0)
+# ---------------------------------------------------------------------------
+
+def get_all_companies(data: dict) -> list:
+    """
+    Geeft de companies[] lijst terug.
+    Werkt voor v2-structuur. Voor v1 (nog niet gemigreerd): geeft lege lijst.
+    Gebruik load_network_data() om zeker v2-data te krijgen.
+    """
+    return data.get("companies", [])
+
+
+def get_all_sites(data: dict) -> list:
+    """
+    Geeft alle sites terug over alle companies heen.
+    Ondersteunt zowel v1 (sites[] op top-niveau) als v2 (companies[].sites[]).
+    Zo blijft bestaande code die over sites itereert ongewijzigd werken.
+
+    Gebruik:
+        for site in get_all_sites(self._data):
+            ...
+    """
+    if _is_v2(data):
+        return [
+            site
+            for company in data.get("companies", [])
+            for site in company.get("sites", [])
+        ]
+    # v1 fallback (zou normaal niet meer voorkomen na migratie)
+    return data.get("sites", [])
+
+
+def get_company_by_id(data: dict, company_id: str) -> dict | None:
+    """Geeft een company dict terug op basis van id, of None."""
+    for company in data.get("companies", []):
+        if company.get("id") == company_id:
+            return company
+    return None
+
+
+def get_company_for_site(data: dict, site_id: str) -> dict | None:
+    """Geeft de company terug waartoe een site behoort, of None."""
+    for company in data.get("companies", []):
+        for site in company.get("sites", []):
+            if site.get("id") == site_id:
+                return company
+    return None
+
+
+def save_company(data: dict, company: dict) -> None:
+    """
+    Voegt een nieuwe company toe of vervangt een bestaande (op id).
+    Werkt in-place op data — daarna save_network_data(data) aanroepen.
+    """
+    companies = data.setdefault("companies", [])
+    for i, c in enumerate(companies):
+        if c.get("id") == company.get("id"):
+            companies[i] = company
+            return
+    companies.append(company)
+
+
+def delete_company(data: dict, company_id: str) -> bool:
+    """
+    Verwijdert een company op id. Geeft True als gevonden en verwijderd.
+    Werkt in-place op data — daarna save_network_data(data) aanroepen.
+    Weigert als er maar één company is (minimaal 1 vereist).
+    """
+    companies = data.get("companies", [])
+    if len(companies) <= 1:
+        return False
+    original_len = len(companies)
+    data["companies"] = [c for c in companies if c.get("id") != company_id]
+    return len(data["companies"]) < original_len
 
 
 # ---------------------------------------------------------------------------
@@ -580,11 +717,25 @@ def set_read_only_mode(read_only: bool) -> bool:
 # ---------------------------------------------------------------------------
 
 def validate_network_data(data: dict) -> tuple[bool, str]:
+    """
+    Valideert network_data voor v1 én v2.
+    v1: vereist 'sites' op top-niveau.
+    v2: vereist 'companies' op top-niveau.
+    """
     if not isinstance(data, dict):
         return False, "Geen geldig JSON object."
-    for key in _REQUIRED_NETWORK_KEYS:
-        if key not in data:
-            return False, f"Verplichte sleutel ontbreekt: '{key}'"
+
+    if _is_v2(data):
+        for key in _REQUIRED_NETWORK_KEYS_V2:
+            if key not in data:
+                return False, f"Verplichte sleutel ontbreekt: '{key}'"
+    elif _is_v1(data):
+        for key in _REQUIRED_NETWORK_KEYS_V1:
+            if key not in data:
+                return False, f"Verplichte sleutel ontbreekt: '{key}'"
+    else:
+        return False, "Onbekend dataformaat: 'sites' noch 'companies' aanwezig."
+
     return True, ""
 
 

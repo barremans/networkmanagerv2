@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_port_to_port_dialog.py
 # Role:    Poort ↔ Poort verbinding aanmaken (cross-rack / cross-ruimte)
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
+# Changes: 1.1.0 -- F1: get_all_sites() voor v2 JSON
+#          1.0.0 — Initiële versie
 #                  Trapgewijze selectie: Site → Ruimte → Rack → Device → Poort
 #                  Alleen vrije poorten tonen als doelpoort
 #                  Kabeltype + notitie velden
@@ -36,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from app.helpers.i18n import t
+from app.helpers.settings_storage import get_all_sites
 
 _CABLE_TYPES = [
     ("utp_cat5e",  "cable_utp_cat5e"),
@@ -111,7 +113,7 @@ class ConnectPortToPortDialog(QDialog):
 
         # Vul sites
         self._ddl_site.addItem(f"— {t('label_site')} —", "")
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             self._ddl_site.addItem(site["name"], site["id"])
 
         # Vooraf huidige site selecteren indien beschikbaar
@@ -188,7 +190,7 @@ class ConnectPortToPortDialog(QDialog):
 
         if not site_id:
             return
-        site = next((s for s in self._data["sites"] if s["id"] == site_id), None)
+        site = next((s for s in get_all_sites(self._data) if s["id"] == site_id), None)
         if not site:
             return
 
@@ -217,7 +219,7 @@ class ConnectPortToPortDialog(QDialog):
 
         if not site_id or not room_id:
             return
-        site = next((s for s in self._data["sites"] if s["id"] == site_id), None)
+        site = next((s for s in get_all_sites(self._data) if s["id"] == site_id), None)
         if not site:
             return
         room = next((r for r in site.get("rooms", []) if r["id"] == room_id), None)
@@ -248,7 +250,7 @@ class ConnectPortToPortDialog(QDialog):
         if not rack_id:
             return
 
-        site = next((s for s in self._data["sites"] if s["id"] == site_id), None)
+        site = next((s for s in get_all_sites(self._data) if s["id"] == site_id), None)
         if not site:
             return
         room = next((r for r in site.get("rooms", []) if r["id"] == room_id), None)

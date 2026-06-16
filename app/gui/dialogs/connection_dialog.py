@@ -2,7 +2,7 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connection_dialog.py
 # Role:    Verbinding aanmaken via DDL (alternatief voor klik-klik)
-# Version: 1.0.0
+# Version: 1.1.0
 # Author:  Barremans
 # =============================================================================
 
@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 
 from app.helpers.i18n import t
 from app.helpers import settings_storage
+from app.helpers.settings_storage import get_all_sites
 
 # Kabeltype DDL waarden
 _CABLE_TYPES = [
@@ -103,7 +104,7 @@ class ConnectionDialog(QDialog):
         ddl_port.setEnabled(False)
 
         # Vul sites
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             ddl_site.addItem(site["name"], site["id"])
         ddl_site.insertItem(0, "— " + t("label_site") + " —", "")
         ddl_site.setCurrentIndex(0)
@@ -144,7 +145,7 @@ class ConnectionDialog(QDialog):
 
         if not site_id:
             return
-        site = next((s for s in self._data["sites"] if s["id"] == site_id), None)
+        site = next((s for s in get_all_sites(self._data) if s["id"] == site_id), None)
         if not site:
             return
 
@@ -254,7 +255,7 @@ class ConnectionDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _find_room(self, room_id: str) -> dict | None:
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 if room["id"] == room_id:
                     return room
@@ -267,7 +268,7 @@ class ConnectionDialog(QDialog):
         if not port:
             return
         # Zoek site en room
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     for slot in rack.get("slots", []):

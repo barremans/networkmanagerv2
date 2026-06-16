@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/services/search_service.py
 # Role:    Zoekfunctie over alle objecten — GEEN Qt imports
-# Version: 2.3.0
+# Version: 2.3.1
 # Author:  Barremans
-# Changes: 2.3.0 — Orphan devices uitgesloten van zoekresultaten:
+# Changes: 2.3.1 -- F1: get_all_sites() voor v2 JSON
+#          2.3.0 — Orphan devices uitgesloten van zoekresultaten:
 #                   Devices zonder rack-slot EN zonder verbonden poorten
 #                   worden niet getoond (zijn onnavigeerbaar en vervuilen resultaten)
 #                   _build_device_loc_map uitgebreid met set van "navigeerbare" device IDs
@@ -32,6 +33,7 @@ import re
 
 from app.helpers.i18n import get_language
 from app.helpers.settings_storage import get_outlet_location_label
+from app.helpers.settings_storage import get_all_sites
 
 # Minimale querylengte
 _MIN_QUERY_LEN = 2
@@ -84,7 +86,7 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
     search_ports    = filter_type in ("all", "port")
     search_endpoints = filter_type in ("all", "endpoint")
 
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         site_name = site.get("name", "")
         site_id   = site["id"]
 
@@ -323,7 +325,7 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
             ep_room_id  = ""
             ep_site_id  = ""
             outlet_name = ""
-            for site in data.get("sites", []):
+            for site in get_all_sites(data):
                 for room in site.get("rooms", []):
                     for wo in room.get("wall_outlets", []):
                         if wo.get("endpoint_id") == ep["id"]:
@@ -428,7 +430,7 @@ def _match(query: str, *fields) -> bool:
 
 def _build_device_loc_map(data: dict) -> dict:
     result = {}
-    for site in data.get("sites", []):
+    for site in get_all_sites(data):
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
                 for slot in rack.get("slots", []):

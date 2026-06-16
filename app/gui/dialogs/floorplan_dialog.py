@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/floorplan_dialog.py
 # Role:    Dialoog — nieuw grondplan koppelen aan site en wandpunt locatie
-# Version: 1.6.0
+# Version: 1.8.0
 # Author:  Barremans
-# Changes: 1.6.0 — Wandpunt locaties: QComboBox vervangen door zoekbare
+# Changes: 1.8.0 — G1: Bedrijf-dropdown toegevoegd (cascade: bedrijf → site)
+#                   Site-lijst gefilterd op gekozen bedrijf
+#                   Preselection ondersteunt ook company_id
+#          1.7.0 -- F1: get_all_sites() voor v2 JSON
+#          1.6.0 — Wandpunt locaties: QComboBox vervangen door zoekbare
 #                   QLineEdit + QListWidget combinatie (real-time filter)
 #          1.5.0 — Naam en notities velden toegevoegd
 #          1.4.0 — bugfix: outlet_locations ipv rooms
@@ -43,6 +47,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.helpers import settings_storage
+from app.helpers.settings_storage import get_all_sites, get_all_companies, get_company_for_site
 from app.helpers.i18n import t
 from app.services import floorplan_service
 from app.services import floorplan_svg_service
@@ -62,18 +67,21 @@ class FloorplanDialog(QDialog):
         data: dict | None = None,
         preselected_site_id: str | None = None,
         preselected_location_key: str | None = None,
+        preselected_company_id: str | None = None,
     ):
         super().__init__(parent)
 
         self._data = data or {}
         self._result: dict | None = None
 
-        self._preselected_site_id = preselected_site_id
+        self._preselected_company_id   = preselected_company_id
+        self._preselected_site_id      = preselected_site_id
         self._preselected_location_key = preselected_location_key
 
         self._detected_points: list[str] = []
 
         self._build_ui()
+        self._populate_companies()
         self._populate_sites()
         self._populate_outlet_locations()
         self._apply_preselection()
@@ -133,6 +141,11 @@ class FloorplanDialog(QDialog):
         self._edit_notes.setPlaceholderText(t("label_notes") + " (optioneel)")
         form.addRow(f"{t('label_notes')}:", self._edit_notes)
 
+        # Bedrijf (cascade → site)
+        self._cmb_company = QComboBox()
+        self._cmb_company.currentIndexChanged.connect(self._on_company_changed)
+        form.addRow(f"{t('label_company')}:", self._cmb_company)
+
         # Site
         self._cmb_site = QComboBox()
         form.addRow(f"{t('label_floorplan_site')}:", self._cmb_site)
@@ -188,13 +201,48 @@ class FloorplanDialog(QDialog):
     # Init data
     # ------------------------------------------------------------------
 
+    def _populate_companies(self):
+        self._cmb_company.blockSignals(True)
+        self._cmb_company.clear()
+        companies = get_all_companies(self._data)
+        if len(companies) > 1:
+            self._cmb_company.addItem(f"— {t('label_company')} —", "")
+        for company in companies:
+            self._cmb_company.addItem(company.get("name", "?"), company.get("id"))
+        # Als er maar 1 bedrijf is: meteen selecteren en verbergen
+        if len(companies) == 1:
+            self._cmb_company.setCurrentIndex(0)
+            # Rij verbergen: zoek het label-widget
+            form = self._cmb_company.parent().layout() if self._cmb_company.parent() else None
+        self._cmb_company.blockSignals(False)
+        self._populate_sites()
+
+    def _on_company_changed(self):
+        self._populate_sites()
+
     def _populate_sites(self):
+        self._cmb_site.blockSignals(True)
         self._cmb_site.clear()
 
-        for site in self._data.get("sites", []):
-            site_name = site.get("name", "?")
-            site_id = site.get("id")
-            self._cmb_site.addItem(site_name, site_id)
+        company_id = self._cmb_company.currentData() if self._cmb_company.count() else ""
+
+        companies = get_all_companies(self._data)
+        if company_id:
+            # Alleen sites van het gekozen bedrijf
+            sites = next(
+                (c.get("sites", []) for c in companies if c.get("id") == company_id),
+                []
+            )
+        elif companies:
+            # Nog geen bedrijf gekozen maar er zijn meerdere — toon alle sites
+            sites = get_all_sites(self._data)
+        else:
+            sites = get_all_sites(self._data)
+
+        for site in sites:
+            self._cmb_site.addItem(site.get("name", "?"), site.get("id"))
+
+        self._cmb_site.blockSignals(False)
 
     def _populate_outlet_locations(self):
         self._list_location.clear()
@@ -228,6 +276,19 @@ class FloorplanDialog(QDialog):
             self._list_location.setCurrentRow(first)
 
     def _apply_preselection(self):
+        # Bedrijf — afleiden uit preselected_company_id of via site
+        company_id = self._preselected_company_id
+        if not company_id and self._preselected_site_id:
+            c = get_company_for_site(self._data, self._preselected_site_id)
+            if c:
+                company_id = c.get("id")
+
+        if company_id:
+            idx = self._find_combo_index_by_data(self._cmb_company, company_id)
+            if idx >= 0:
+                self._cmb_company.setCurrentIndex(idx)
+                # cascade triggert _populate_sites al via signal
+
         if self._preselected_site_id:
             idx = self._find_combo_index_by_data(self._cmb_site, self._preselected_site_id)
             if idx >= 0:
@@ -244,9 +305,26 @@ class FloorplanDialog(QDialog):
         if read_only:
             self._btn_browse.setEnabled(False)
             self._btn_save.setEnabled(False)
+            self._cmb_company.setEnabled(False)
             self._cmb_site.setEnabled(False)
             self._list_location.setEnabled(False)
             self._search_location.setEnabled(False)
+
+        # Verberg bedrijf-dropdown als er maar 1 bedrijf is (niet relevant voor gebruiker)
+        companies = get_all_companies(self._data)
+        if len(companies) <= 1:
+            self._cmb_company.setVisible(False)
+            # Zoek het bijhorende label in het formulier en verberg dat ook
+            form_layout = None
+            parent = self._cmb_company.parent()
+            if parent:
+                form_layout = parent.layout()
+            if form_layout:
+                idx = form_layout.indexOf(self._cmb_company)
+                if idx >= 0:
+                    role_item = form_layout.itemAt(idx - 1)
+                    if role_item and role_item.widget():
+                        role_item.widget().setVisible(False)
 
     # ------------------------------------------------------------------
     # Events

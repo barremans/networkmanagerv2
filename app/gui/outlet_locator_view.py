@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/outlet_locator_view.py
 # Role:    Wandpunten overzicht — omgekeerde trace UX
-# Version: 1.1.0
+# Version: 1.1.1
 # Author:  Barremans
-# Changes: 1.1.0 — Titel toont site naam ipv generieke label
+# Changes: 1.1.1 -- F1: get_all_sites() voor v2 JSON
+#          1.1.0 — Titel toont site naam ipv generieke label
 #                   Dubbelklik op kaartje → _OutletDetailDialog (zelfde als WallOutletView)
 #                   Rechtsklik op kaartje → contextmenu (Bewerken, Eindapparaat,
 #                   Koppelen/Loskoppelen, Dupliceren, Verwijderen)
@@ -30,6 +31,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QCursor
 
 from app.helpers.i18n import t
+from app.helpers.settings_storage import get_all_sites
 from app.services import tracing
 
 
@@ -239,7 +241,7 @@ class OutletLocatorView(QWidget):
         self._ddl_room.addItem(f"— {t('label_room')} —", "")
 
         select_idx = 0
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 n_outlets = len(room.get("wall_outlets", []))
                 label = (
@@ -298,7 +300,7 @@ class OutletLocatorView(QWidget):
             return
 
         site_name = ""
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for r in site.get("rooms", []):
                 if r["id"] == self._current_room_id:
                     site_name = site["name"]
@@ -344,7 +346,7 @@ class OutletLocatorView(QWidget):
     def _update_title(self):
         """1.1.0 — Titelregel bijwerken met site naam als ruimte geselecteerd is."""
         if self._current_room_id:
-            for site in self._data.get("sites", []):
+            for site in get_all_sites(self._data):
                 for room in site.get("rooms", []):
                     if room["id"] == self._current_room_id:
                         self._title_lbl.setText(
@@ -485,7 +487,7 @@ class OutletLocatorView(QWidget):
     def _find_room(self, room_id: str) -> dict | None:
         if not room_id:
             return None
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 if room["id"] == room_id:
                     return room

@@ -39,6 +39,7 @@ from PySide6.QtGui   import (
 from PySide6.QtPrintSupport import QPrinter
 
 from app.helpers.i18n import t
+from app.helpers.settings_storage import get_all_sites
 from app.services     import tracing
 
 # ---------------------------------------------------------------------------
@@ -167,7 +168,7 @@ def _port_label(data: dict, port_id: str) -> str:
         return other_id
 
     if other_type == "wall_outlet":
-        for site in data.get("sites", []):
+        for site in get_all_sites(data):
             for room in site.get("rooms", []):
                 for wo in room.get("wall_outlets", []):
                     if wo["id"] == other_id:
@@ -529,7 +530,7 @@ class OutletsRenderer:
         else:
             self._room = room_or_site
             self._site = next(
-                (s for s in data.get("sites", [])
+                (s for s in get_all_sites(data)
                  for r in s.get("rooms", [])
                  if r["id"] == room_or_site["id"]),
                 {"name": ""}
@@ -552,7 +553,7 @@ class OutletsRenderer:
         """Geeft [(room, [outlets])] — één groep per ruimte."""
         if self._mode == "site":
             result = []
-            for site in self._data.get("sites", []):
+            for site in self._get_all_sites(data):
                 if site["id"] == self._site["id"]:
                     for room in site.get("rooms", []):
                         outlets = room.get("wall_outlets", [])
@@ -835,7 +836,7 @@ class FloorplanRenderer:
 
     def _build_maps(self):
         data = self._data
-        for s in data.get("sites", []):
+        for s in get_all_sites(data):
             for r in s.get("rooms", []):
                 for wo in r.get("wall_outlets", []):
                     self._outlet_map[wo["id"]] = wo
@@ -1040,7 +1041,7 @@ class FloorplanRenderer:
 
         site_id = self._floorplan.get("site_id", "")
         alt = False
-        for site in self._data.get("sites", []):
+        for site in self._get_all_sites(data):
             if site["id"] != site_id:
                 continue
             for room in site.get("rooms", []):
@@ -1091,7 +1092,7 @@ class FloorplanRenderer:
         conn_ports  = _connected_ports(self._data)
         alt = False
 
-        for site in self._data.get("sites", []):
+        for site in self._get_all_sites(data):
             if site["id"] != site_id:
                 continue
             for room in site.get("rooms", []):
@@ -1360,7 +1361,7 @@ class FloorplanRenderer:
 
         # Wandpunt zoeken dat aan deze poort gekoppeld is
         wo = None
-        for s in self._data.get("sites", []):
+        for s in self._get_all_sites(data):
             for r in s.get("rooms", []):
                 for outlet in r.get("wall_outlets", []):
                     if outlet.get("port_id") == port_id:
@@ -1370,7 +1371,7 @@ class FloorplanRenderer:
         # Rack-locatie
         loc = "—"
         if dev:
-            for s in self._data.get("sites", []):
+            for s in self._get_all_sites(data):
                 for r in s.get("rooms", []):
                     for ra in r.get("racks", []):
                         for sl in ra.get("slots", []):
@@ -1488,7 +1489,7 @@ class FloorplanRenderer:
 
         from app.services import tracing as _tr
         any_wo = False
-        for site in self._data.get("sites", []):
+        for site in self._get_all_sites(data):
             if site["id"] != site_id:
                 continue
             for room in site.get("rooms", []):
@@ -1533,7 +1534,7 @@ class FloorplanRenderer:
         conn_ports = _connected_ports(self._data)
         any_dev    = False
         alt        = False
-        for site in self._data.get("sites", []):
+        for site in self._get_all_sites(data):
             if site["id"] != site_id:
                 continue
             for room in site.get("rooms", []):
@@ -1669,7 +1670,7 @@ class FloorplanRenderer:
             name     = f"{dev_name} — {pname} ({side.upper()})" if dev_name else pname
             loc      = ""
             # Zoek rack-locatie
-            for s in data.get("sites", []):
+            for s in get_all_sites(data):
                 for r in s.get("rooms", []):
                     for ra in r.get("racks", []):
                         for sl in ra.get("slots", []):

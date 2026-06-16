@@ -2,11 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/help_window.py
 # Role:    H1 — Help venster: sneltoetsen, gebruiksaanwijzing, versie-info
-# Version: 1.2.2
+# Version: 1.3.0
 # Author:  Barremans
-# Changes: 1.1.0 — donkere kleuren, version.py dynamisch, help_texts.py
-#          1.2.0 — D: "Controleer op updates" knop in Over tabblad
-#          1.2.1 — D: update_available_with_url signaal
+# Changes: 1.3.0 — V8: sneltoetsentabel vult volledige tabhoogte (geen addStretch)
+#                  Sneltoetsen bijgewerkt via help_texts v1.1.0
 #          1.2.2 — D: download-knop actief via DownloadDialog
 # =============================================================================
 
@@ -115,6 +114,9 @@ class HelpWindow(QDialog):
             "QTableWidget { border: none; }"
             f"QTableWidget::item {{ color: {_C_BODY}; padding: 4px 0px; }}"
         )
+        # V8 — tabel vult volledige tabhoogte
+        from PySide6.QtWidgets import QSizePolicy as _QSP
+        tbl.setSizePolicy(_QSP.Policy.Expanding, _QSP.Policy.Expanding)
 
         mono = QFont("Consolas", 10)
         mono.setBold(True)
@@ -130,7 +132,7 @@ class HelpWindow(QDialog):
             tbl.setRowHeight(row, 30)
 
         layout.addWidget(tbl)
-        layout.addStretch()
+        # V8 — geen addStretch() zodat tabel de resterende hoogte inneemt
         return widget
 
     # ------------------------------------------------------------------

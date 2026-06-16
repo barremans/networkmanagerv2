@@ -2,9 +2,14 @@
 # Networkmap_Creator
 # File:    app/services/backup_service.py
 # Role:    Backup beheer — GEEN Qt imports
-# Version: 1.8.0
+# Version: 1.9.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
+# Changes: 1.9.0 — Bedrijfslogica:
+#                  create_backup_company(): backup van 1 bedrijf
+#                  Gefilterde network_data + eigen floorplans submap
+#                  History-bestand krijgt bedrijfsnaam in bestandsnaam
+#          1.8.0 — Fix backup UNC: OSError bij copy2 ook via robocopy fallback
+#          1.0.0 — Initiële versie
 #          1.1.0 — F3: has_changes_since_last_backup()
 #          1.2.0 — F4: UNC-pad fix — mkdir() niet aanroepen op UNC root
 #          1.3.0 — B9: retry-logica + _copy_with_retry()
@@ -360,6 +365,190 @@ def create_backup(
 
             # Oudste backups verwijderen als max bereikt is
             _trim_history(history_dir, config.get("max_backups", 10))
+
+        return True, ""
+
+    except Exception as e:
+        return False, str(e)
+
+
+def create_backup_company(
+    company_id: str,
+    company_name: str,
+    config: dict,
+    network_data: dict,
+    floorplans_path: str | None = None,
+    floorplans_dir: str | None = None,
+    vlan_path: str | None = None,
+) -> tuple[bool, str]:
+    """
+    1.9.0 — Maakt een backup van data van één bedrijf.
+
+    Parameters:
+        company_id      — id van het te backuppen bedrijf
+        company_name    — naam (voor submap + bestandsnaam)
+        config          — backup sectie uit settings.json
+        network_data    — volledige geladen network_data dict (in-memory)
+        floorplans_path — pad naar floorplans.json
+        floorplans_dir  — pad naar SVG bestanden map
+        vlan_path       — pad naar vlan_config.json
+
+    Structuur in backup map:
+        <network_path>/<company_slug>/
+            network_data.json   (gefilterd op bedrijf)
+            floorplans.json     (gefilterd op sites van bedrijf)
+            floorplans/         (alleen SVG van dit bedrijf)
+            vlan_config.json    (volledig)
+            history/
+                network_data_<company_slug>_<ts>.json
+    """
+    import json, uuid, tempfile
+    from app.helpers.settings_storage import get_all_companies
+
+    if not config.get("enabled", False):
+        return True, ""
+
+    network_path = config.get("network_path", "").strip()
+    if not network_path:
+        return False, "Geen backup-pad geconfigureerd."
+
+    # Bedrijfsslug voor submapnaam
+    slug = "".join(c if c.isalnum() else "_" for c in company_name).strip("_").lower()
+
+    try:
+        dest_dir = Path(network_path) / slug
+        ok, err = _ensure_dir(dest_dir)
+        if not ok:
+            return False, err
+
+        # Zoek bedrijf in data
+        company = next(
+            (c for c in network_data.get("companies", []) if c.get("id") == company_id),
+            None
+        )
+        if not company:
+            return False, f"Bedrijf niet gevonden: {company_id}"
+
+        # Verzamel site-IDs van dit bedrijf
+        site_ids = {s["id"] for s in company.get("sites", [])}
+
+        # Verzamel device-IDs via slots in racks
+        device_ids = {
+            sl.get("device_id")
+            for s in company.get("sites", [])
+            for r in s.get("rooms", [])
+            for ra in r.get("racks", [])
+            for sl in ra.get("slots", [])
+            if sl.get("device_id")
+        }
+        outlet_ids = {
+            wo["id"]
+            for s in company.get("sites", [])
+            for r in s.get("rooms", [])
+            for wo in r.get("wall_outlets", [])
+        }
+
+        filtered_devices = [d for d in network_data.get("devices", [])
+                            if d.get("id") in device_ids]
+        filtered_dev_ids = {d["id"] for d in filtered_devices}
+        filtered_ports   = [p for p in network_data.get("ports", [])
+                            if p.get("device_id") in filtered_dev_ids]
+        filtered_port_ids = {p["id"] for p in filtered_ports}
+
+        ep_ids = {
+            wo.get("endpoint_id")
+            for s in company.get("sites", [])
+            for r in s.get("rooms", [])
+            for wo in r.get("wall_outlets", [])
+            if wo.get("endpoint_id")
+        }
+        filtered_eps = [e for e in network_data.get("endpoints", [])
+                        if e.get("id") in ep_ids]
+
+        all_ids = (filtered_dev_ids | filtered_port_ids |
+                   {e["id"] for e in filtered_eps} | outlet_ids)
+        filtered_conns = [
+            c for c in network_data.get("connections", [])
+            if c.get("from_id") in all_ids and c.get("to_id") in all_ids
+        ]
+
+        filtered_nd = {
+            "version":     "2.0",
+            "companies":   [company],
+            "devices":     filtered_devices,
+            "ports":       filtered_ports,
+            "endpoints":   filtered_eps,
+            "connections": filtered_conns,
+        }
+
+        # Schrijf gefilterde network_data naar tijdelijk bestand
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        json.dump(filtered_nd, tmp, indent=2, ensure_ascii=False)
+        tmp.close()
+        tmp_path = tmp.name
+
+        try:
+            dest_main = dest_dir / _BACKUP_FILENAME
+            ok, err = _copy_with_retry(tmp_path, dest_main)
+            if not ok:
+                return False, err
+
+            # Gefilterde floorplans.json
+            if floorplans_path and Path(floorplans_path).is_file():
+                import json as _json
+                with open(floorplans_path, encoding="utf-8") as f:
+                    fp_data = _json.load(f)
+                filtered_fps = [
+                    fp for fp in fp_data.get("floorplans", [])
+                    if fp.get("site_id") in site_ids
+                ]
+                fp_tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False, encoding="utf-8"
+                )
+                _json.dump({"floorplans": filtered_fps}, fp_tmp,
+                           indent=2, ensure_ascii=False)
+                fp_tmp.close()
+                try:
+                    ok, err = _copy_with_retry(fp_tmp.name, dest_dir / "floorplans.json")
+                    if not ok:
+                        return False, f"floorplans.json backup mislukt: {err}"
+                finally:
+                    Path(fp_tmp.name).unlink(missing_ok=True)
+
+                # Alleen SVG's van dit bedrijf
+                if floorplans_dir and Path(floorplans_dir).is_dir():
+                    dest_svg = dest_dir / "floorplans"
+                    ok, err = _ensure_dir(dest_svg)
+                    if ok:
+                        for fp in filtered_fps:
+                            svg = fp.get("svg_file", "")
+                            if svg:
+                                src_svg = Path(floorplans_dir) / svg
+                                if src_svg.exists():
+                                    ok2, err2 = _copy_with_retry(
+                                        str(src_svg), dest_svg / svg
+                                    )
+
+            # vlan_config.json (volledig)
+            if vlan_path and Path(vlan_path).is_file():
+                ok, err = _copy_with_retry(vlan_path, dest_dir / "vlan_config.json")
+                if not ok:
+                    return False, f"vlan_config.json backup mislukt: {err}"
+
+            # History
+            if config.get("keep_history", True):
+                history_dir = dest_dir / _HISTORY_DIR
+                ok_h, err_h = _ensure_dir(history_dir)
+                if ok_h:
+                    ts      = datetime.now().strftime(_TIMESTAMP_FMT)
+                    dest_ts = history_dir / f"network_data_{slug}_{ts}.json"
+                    _copy_with_retry(tmp_path, dest_ts)
+                    _trim_history(history_dir, config.get("max_backups", 10))
+
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
 
         return True, ""
 

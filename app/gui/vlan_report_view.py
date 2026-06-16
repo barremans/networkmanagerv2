@@ -2,20 +2,24 @@
 # Networkmap_Creator
 # File:    app/gui/vlan_report_view.py
 # Role:    Zijpaneel VLAN rapport — alle poorten per VLAN, over sites/racks
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.4.0 — Direct endpoint: conn_label herkent to_type=="endpoint"
+# Changes: 1.6.0 -- F1: get_all_sites() voor v2 JSON
+#          1.5.0 — F2: VLAN selector vervangen door QLineEdit + QListWidget
+#                  met real-time zoekfilter
+#          1.4.0 — Direct endpoint: conn_label herkent to_type=="endpoint"
 #                  _add_vlan_direct_endpoints() toegevoegd
 #          1.3.0 — B4: VLAN type-mismatch fix
 # =============================================================================
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QFrame, QComboBox, QPushButton, QSizePolicy
+    QFrame, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy
 )
 from PySide6.QtCore import Qt
 from app.helpers.i18n import t
 from app.services.vlan_service import load_vlans, vlan_label
+from app.helpers.settings_storage import get_all_sites
 
 
 def _vlan_eq(port_vlan, vlan_num: int) -> bool:
@@ -47,7 +51,7 @@ class VlanReportView(QWidget):
             v = p.get("vlan")
             if v:
                 vlans.add(int(v))
-        for s in self._data.get("sites", []):
+        for s in get_all_sites(self._data):
             for r in s.get("rooms", []):
                 for wo in r.get("wall_outlets", []):
                     v = wo.get("vlan")
@@ -90,22 +94,67 @@ class VlanReportView(QWidget):
             layout.addWidget(scroll)
             return
 
-        # VLAN selector
+        # VLAN selector — zoekbaar (v1.5.0)
         sel_row = QHBoxLayout()
         sel_lbl = QLabel("VLAN:")
-        self._ddl = QComboBox()
-        self._ddl.addItem("— alle —", None)
-        for v in vlans:
-            self._ddl.addItem(vlan_label(v), v)
-        self._ddl.currentIndexChanged.connect(self._refresh_report)
         sel_row.addWidget(sel_lbl)
-        sel_row.addWidget(self._ddl)
+
+        vlan_widget = QWidget()
+        vlan_vl = QVBoxLayout(vlan_widget)
+        vlan_vl.setContentsMargins(0, 0, 0, 0)
+        vlan_vl.setSpacing(3)
+
+        self._search_vlan = QLineEdit()
+        self._search_vlan.setPlaceholderText("🔍  VLAN zoeken...")
+        self._search_vlan.setClearButtonEnabled(True)
+        self._search_vlan.textChanged.connect(self._filter_vlan_list)
+        vlan_vl.addWidget(self._search_vlan)
+
+        self._list_vlan = QListWidget()
+        self._list_vlan.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._list_vlan.setFixedHeight(110)
+        self._list_vlan.currentRowChanged.connect(self._on_vlan_selection_changed)
+
+        all_item = QListWidgetItem("— alle —")
+        all_item.setData(Qt.ItemDataRole.UserRole, None)
+        self._list_vlan.addItem(all_item)
+        for v in vlans:
+            item = QListWidgetItem(vlan_label(v))
+            item.setData(Qt.ItemDataRole.UserRole, v)
+            self._list_vlan.addItem(item)
+        self._list_vlan.setCurrentRow(0)
+        vlan_vl.addWidget(self._list_vlan)
+
+        sel_row.addWidget(vlan_widget, 1)
         sel_row.addStretch()
         layout.addLayout(sel_row)
 
         layout.addWidget(scroll)
 
         self._refresh_report()
+
+    def _filter_vlan_list(self, text: str):
+        """Real-time filter op VLAN lijst."""
+        needle = text.strip().lower()
+        first  = None
+        for i in range(self._list_vlan.count()):
+            item  = self._list_vlan.item(i)
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match and first is None:
+                first = i
+        if first is not None:
+            self._list_vlan.setCurrentRow(first)
+
+    def _on_vlan_selection_changed(self, _row: int):
+        self._refresh_report()
+
+    def _current_vlan(self):
+        """Geeft het geselecteerde VLAN terug (int of None voor 'alle')."""
+        item = self._list_vlan.currentItem()
+        if item and not item.isHidden():
+            return item.data(Qt.ItemDataRole.UserRole)
+        return None
 
     def _refresh_report(self):
         # Leeg content
@@ -114,7 +163,7 @@ class VlanReportView(QWidget):
             if item.widget():
                 item.widget().setParent(None)
 
-        selected_vlan = self._ddl.currentData()
+        selected_vlan = self._current_vlan()
         vlans_to_show = (
             [selected_vlan] if selected_vlan is not None
             else self._collect_vlans()
@@ -141,7 +190,7 @@ class VlanReportView(QWidget):
         ]
         # Wandpunten met dit VLAN verzamelen
         vlan_outlets = []
-        for s in self._data.get("sites", []):
+        for s in get_all_sites(self._data):
             for r in s.get("rooms", []):
                 for wo in r.get("wall_outlets", []):
                     if _vlan_eq(wo.get("vlan"), vlan_num):
@@ -188,7 +237,7 @@ class VlanReportView(QWidget):
         # Groepeer per site → rack → device
         # Bouw lookup: device_id → (site, rack, device)
         device_location = {}
-        for site in self._data.get("sites", []):
+        for site in get_all_sites(self._data):
             for room in site.get("rooms", []):
                 for rack in room.get("racks", []):
                     for slot in rack.get("slots", []):
@@ -217,10 +266,10 @@ class VlanReportView(QWidget):
             site_id, room_id, rack_id, dev_id = key
             ports_in_group = grouped[key]
 
-            site  = next((s for s in self._data.get("sites", []) if s["id"] == site_id), None)
-            room  = next((r for s in self._data.get("sites", [])
+            site  = next((s for s in get_all_sites(self._data) if s["id"] == site_id), None)
+            room  = next((r for s in get_all_sites(self._data)
                           for r in s.get("rooms", []) if r["id"] == room_id), None)
-            rack  = next((ra for s in self._data.get("sites", [])
+            rack  = next((ra for s in get_all_sites(self._data)
                           for r in s.get("rooms", [])
                           for ra in r.get("racks", []) if ra["id"] == rack_id), None)
             dev   = dev_map.get(dev_id)
@@ -280,7 +329,7 @@ class VlanReportView(QWidget):
                         if op and od:
                             conn_label = f"  →  {od['name']} / {op['name']}"
                     elif other_type == "wall_outlet":
-                        for s2 in self._data.get("sites", []):
+                        for s2 in get_all_sites(self._data):
                             for r2 in s2.get("rooms", []):
                                 for wo in r2.get("wall_outlets", []):
                                     if wo["id"] == other_id:
@@ -332,7 +381,7 @@ class VlanReportView(QWidget):
         # Ook wandpunten met DIRECT VLAN toewijzing tonen
         direct_outlets = []
         direct_ids = {oc[0] for oc in outlet_conns}  # al via trace gevonden
-        for s in self._data.get("sites", []):
+        for s in get_all_sites(self._data):
             for r in s.get("rooms", []):
                 for wo in r.get("wall_outlets", []):
                     if (_vlan_eq(wo.get("vlan"), vlan_num)
@@ -373,7 +422,7 @@ class VlanReportView(QWidget):
 
         for outlet_id, port_id in outlet_conns:
             wo = room_name = site_name = None
-            for s in self._data.get("sites", []):
+            for s in get_all_sites(self._data):
                 for r in s.get("rooms", []):
                     for w in r.get("wall_outlets", []):
                         if w["id"] == outlet_id:
