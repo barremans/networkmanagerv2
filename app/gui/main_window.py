@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.77.0
+# Version: 1.78.0
 # Author:  Barremans
-# Changes: 1.77.0 — Import/Export bedrijfslogica:
+# Changes: 1.78.0 — B9: expanded-state boom ook op rack-niveau bewaren/herstellen.
+#                   _populate_tree(): rack-IDs toegevoegd aan expanded-set (4e niveau).
+#                   Herstel ook rack-items na _populate_tree() zodat rack niet
+#                   inklapt na toevoegen/bewerken device.
+#          1.77.0 — Import/Export bedrijfslogica:
 #                   _on_export: bedrijfskeuze bij meerdere bedrijven
 #                     → export_company_to_dir() bij specifiek bedrijf
 #                     → suggested_dirname(company_name) in mapnaam
@@ -937,6 +941,12 @@ class MainWindow(QMainWindow):
                     room_data = room_item.data(_COL, Qt.ItemDataRole.UserRole)
                     if room_item.isExpanded() and room_data:
                         expanded.add(room_data.get("id", ""))
+                    # B9 — ook rack-niveau bewaren
+                    for m in range(room_item.childCount()):
+                        rack_item = room_item.child(m)
+                        rack_data = rack_item.data(_COL, Qt.ItemDataRole.UserRole)
+                        if rack_item.isExpanded() and rack_data:
+                            expanded.add(rack_data.get("id", ""))
 
         self._tree.clear()
         companies = get_all_companies(self._data)
@@ -1164,6 +1174,12 @@ class MainWindow(QMainWindow):
                         child_data = child.data(_COL, Qt.ItemDataRole.UserRole)
                         if child_data and child_data.get("id", "") in expanded:
                             child.setExpanded(True)
+                            # B9 — herstel ook rack-niveau
+                            for k in range(child.childCount()):
+                                rack_child = child.child(k)
+                                rack_data  = rack_child.data(_COL, Qt.ItemDataRole.UserRole)
+                                if rack_data and rack_data.get("id", "") in expanded:
+                                    rack_child.setExpanded(True)
 
         # company_item volledig opgebouwd — toevoegen aan boom (buiten site-loop)
             self._tree.addTopLevelItem(company_item)

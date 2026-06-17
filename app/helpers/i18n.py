@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.35.0
+# Version: 1.36.0
 # Author:  Barremans
-# Changes: 1.35.0 — F3: report_company_prompt, report_company_all (NL + EN)
+# Changes: 1.36.0 — F4: rack_export_scope_company, rack_export_select_company (NL + EN)
+#          1.35.0 — F3: report_company_prompt, report_company_all (NL + EN)
 #          1.34.0 — CompanyDialog sleutels toegevoegd (F1/F2): bedrijfsnaam,
 #                  adres, BTW, telefoon, e-mail, website, menu-acties
 #          1.33.0 — help_shortcut_new_outlet, help_shortcut_new_endpoint (NL+EN)
@@ -686,9 +687,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "rack_export_hint":         "Kies het bereik van de export. Elk rack wordt visueel weergegeven met poorten, verbindingen en VLAN.",
         "rack_export_scope_group":  "Bereik",
         "rack_export_scope_all":    "Alle sites en racks",
+        "rack_export_scope_company":"Één bedrijf — alle racks",
         "rack_export_scope_site":   "Één site — alle racks",
         "rack_export_scope_rack":   "Één specifiek rack",
         "rack_export_select_site":  "Site",
+        "rack_export_select_company": "Bedrijf",
         "rack_export_select_rack":  "Rack",
         "rack_export_btn_export":   "Exporteren",
 
@@ -1370,9 +1373,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "rack_export_hint":         "Choose the scope of the export. Each rack is displayed visually with ports, connections and VLAN.",
         "rack_export_scope_group":  "Scope",
         "rack_export_scope_all":    "All sites and racks",
+        "rack_export_scope_company":"One company — all racks",
         "rack_export_scope_site":   "One site — all racks",
         "rack_export_scope_rack":   "One specific rack",
         "rack_export_select_site":  "Site",
+        "rack_export_select_company": "Company",
         "rack_export_select_rack":  "Rack",
         "rack_export_btn_export":   "Export",
 

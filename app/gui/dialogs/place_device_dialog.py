@@ -12,6 +12,12 @@
 #          1.5.0 — S/N en MAC velden toegevoegd (pariteit met device_dialog)
 #          1.6.0 — Fix: grenzenvalidatie bij bottom_up nummering
 #                  (u_start > total_u ipv u_start + height - 1 > total_u)
+# Version: 1.12.0
+# Author:  Barremans
+# Changes: 1.12.0 — F3: zoekfilter op type toegevoegd boven _ddl_type.
+#                   QLineEdit _type_search filtert _ddl_type live op label.
+#                   Lege zoekbalk toont alle types. Selectie blijft bewaard
+#                   bij typen als het huidig type nog in gefilterde lijst zit.
 #          1.11.0 — Uitbreiding ports_per_row: optie 48 toegevoegd voor 48-poort switches
 #          1.8.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
 #          1.9.0 — Subnetmasker veld toegevoegd (direct na IP adres)
@@ -105,7 +111,14 @@ class PlaceDeviceDialog(QDialog):
 
         self._name = QLineEdit()
 
+        # F3 — zoekfilter op type
+        self._type_search = QLineEdit()
+        self._type_search.setPlaceholderText("🔍  Zoek type...")
+        self._type_search.setClearButtonEnabled(True)
+        self._type_search.textChanged.connect(self._filter_types)
+
         self._ddl_type = QComboBox()
+        self._ddl_type.setMinimumWidth(220)
         lang = "nl"
         for dt in self._device_types:
             label = dt.get(f"label_{lang}", dt.get("label_nl", dt["key"]))
@@ -147,6 +160,7 @@ class PlaceDeviceDialog(QDialog):
             _bind_uppercase(field)
 
         form.addRow(t("label_name")          + " *:", self._name)
+        form.addRow("",                                self._type_search)
         form.addRow(t("label_type")          + " *:", self._ddl_type)
         form.addRow(t("label_front_ports")   + ":",   self._front_ports)
         form.addRow(t("label_back_ports")    + ":",   self._back_ports)
@@ -237,6 +251,30 @@ class PlaceDeviceDialog(QDialog):
             display_u = self._internal_to_display(s.get("u_start", 1))
             self._u_start.setValue(display_u)
             self._height.setValue(s.get("height", 1))
+
+    # ------------------------------------------------------------------
+    # Type filter — F3
+    # ------------------------------------------------------------------
+
+    def _filter_types(self, text: str):
+        """Herlaad _ddl_type met enkel types die overeenkomen met zoektekst."""
+        lang    = "nl"
+        query   = text.strip().lower()
+        current = self._ddl_type.currentData()  # huidig geselecteerd type bewaren
+
+        self._ddl_type.blockSignals(True)
+        self._ddl_type.clear()
+        for dt in self._device_types:
+            label = dt.get(f"label_{lang}", dt.get("label_nl", dt["key"]))
+            if not query or query in label.lower() or query in dt["key"].lower():
+                self._ddl_type.addItem(label, dt["key"])
+
+        # Herstel vorige selectie als die nog in de gefilterde lijst zit
+        idx = self._ddl_type.findData(current)
+        if idx >= 0:
+            self._ddl_type.setCurrentIndex(idx)
+        self._ddl_type.blockSignals(False)
+        self._on_type_changed()
 
     # ------------------------------------------------------------------
     # Type DDL handler

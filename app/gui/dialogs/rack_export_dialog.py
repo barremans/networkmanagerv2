@@ -2,9 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/rack_export_dialog.py
 # Role:    Scopekeuze + exportopties dialog voor MD rack-export (E2)
-# Version: 2.1.1
+# Version: 2.2.0
 # Author:  Barremans
-# Changes: 2.1.1 -- F1: get_all_sites() voor v2 JSON
+# Changes: 2.2.0 — F4: bedrijfskeuze dropdown toegevoegd (scope "company")
+#                  get_all_companies geïmporteerd
+#                  _btn_company radiobutton + _ddl_company dropdown
+#                  company_id property beschikbaar na accept()
+#                  _populate_sites_for_company() — cascade bedrijf → site
+#                  setMaximumHeight verhoogd naar 720
+#          2.1.1 — F1: get_all_sites() voor v2 JSON
 #          2.1.0 — Tracing-only checkbox toegevoegd
 #                  _update_tracing_mode: schakelt andere opties uit
 #          2.0.2 — setMaximumHeight(640) om scherm-overflow te vermijden
@@ -25,7 +31,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.helpers.i18n import t
-from app.helpers.settings_storage import get_all_sites
+from app.helpers.settings_storage import get_all_sites, get_all_companies
 
 
 _RADIO_QSS = """
@@ -57,23 +63,25 @@ class RackExportDialog(QDialog):
     Dialog voor scopekeuze en exportopties bij Markdown rack-export.
 
     Na accept() zijn beschikbaar:
-        .scope    : "all" | "site" | "rack"
-        .site_id  : str (alleen bij scope=="site")
-        .rack_id  : str (alleen bij scope=="rack")
-        .options  : dict met exportopties voor rack_export_md.export_md()
+        .scope      : "all" | "company" | "site" | "rack"
+        .company_id : str (alleen bij scope=="company")
+        .site_id    : str (alleen bij scope=="site")
+        .rack_id    : str (alleen bij scope=="rack")
+        .options    : dict met exportopties voor rack_export_md.export_md()
     """
 
     def __init__(self, data: dict, parent=None):
         super().__init__(parent)
-        self._data   = data
-        self.scope   = "all"
-        self.site_id = ""
-        self.rack_id = ""
+        self._data      = data
+        self.scope      = "all"
+        self.company_id = ""
+        self.site_id    = ""
+        self.rack_id    = ""
         self.options: dict = {}
 
         self.setWindowTitle(t("rack_export_dialog_title"))
         self.setMinimumWidth(460)
-        self.setMaximumHeight(640)
+        self.setMaximumHeight(720)
         self.setModal(True)
         self.setStyleSheet(_RADIO_QSS)
         self._build()
@@ -98,20 +106,35 @@ class RackExportDialog(QDialog):
         grp_layout = QVBoxLayout(grp)
         grp_layout.setSpacing(8)
 
-        self._btn_all  = QRadioButton(t("rack_export_scope_all"))
-        self._btn_site = QRadioButton(t("rack_export_scope_site"))
-        self._btn_rack = QRadioButton(t("rack_export_scope_rack"))
+        self._btn_all     = QRadioButton(t("rack_export_scope_all"))
+        self._btn_company = QRadioButton(t("rack_export_scope_company"))
+        self._btn_site    = QRadioButton(t("rack_export_scope_site"))
+        self._btn_rack    = QRadioButton(t("rack_export_scope_rack"))
         self._btn_all.setChecked(True)
 
         self._grp_btns = QButtonGroup(self)
-        self._grp_btns.addButton(self._btn_all,  0)
-        self._grp_btns.addButton(self._btn_site, 1)
-        self._grp_btns.addButton(self._btn_rack, 2)
+        self._grp_btns.addButton(self._btn_all,     0)
+        self._grp_btns.addButton(self._btn_company, 1)
+        self._grp_btns.addButton(self._btn_site,    2)
+        self._grp_btns.addButton(self._btn_rack,    3)
 
         grp_layout.addWidget(self._btn_all)
+        grp_layout.addWidget(self._btn_company)
         grp_layout.addWidget(self._btn_site)
         grp_layout.addWidget(self._btn_rack)
         layout.addWidget(grp)
+
+        # --- Bedrijf dropdown ---
+        self._company_row = QWidget()
+        company_form = QFormLayout(self._company_row)
+        company_form.setContentsMargins(0, 4, 0, 0)
+        self._ddl_company = QComboBox()
+        for company in get_all_companies(self._data):
+            self._ddl_company.addItem(company.get("name", "?"), userData=company["id"])
+        company_form.addRow(t("rack_export_select_company") + ":", self._ddl_company)
+        layout.addWidget(self._company_row)
+        # Cascade: bedrijfsselectie herlaadt site-dropdown
+        self._ddl_company.currentIndexChanged.connect(self._populate_sites_for_company)
 
         # --- Site dropdown ---
         self._site_row = QWidget()
@@ -209,11 +232,22 @@ class RackExportDialog(QDialog):
 
         # Signals
         self._btn_all.toggled.connect(self._update_ui)
+        self._btn_company.toggled.connect(self._update_ui)
         self._btn_site.toggled.connect(self._update_ui)
         self._btn_rack.toggled.connect(self._update_ui)
         self._btn_short.toggled.connect(self._update_options_ui)
         self._btn_tech.toggled.connect(self._update_options_ui)
         self._btn_full.toggled.connect(self._update_options_ui)
+
+    def _populate_sites_for_company(self, _idx=None):
+        """Herlaad site-dropdown op basis van geselecteerd bedrijf."""
+        self._ddl_site.clear()
+        company_id = self._ddl_company.currentData()
+        for company in get_all_companies(self._data):
+            if company["id"] == company_id:
+                for site in company.get("sites", []):
+                    self._ddl_site.addItem(site.get("name", "?"), userData=site["id"])
+                break
 
     def _populate_racks(self):
         self._ddl_rack.clear()
@@ -230,8 +264,14 @@ class RackExportDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _update_ui(self, _checked=None):
+        self._company_row.setVisible(self._btn_company.isChecked())
         self._site_row.setVisible(self._btn_site.isChecked())
         self._rack_row.setVisible(self._btn_rack.isChecked())
+        # Bij overschakelen naar site-scope: altijd alle sites tonen (niet gefilterd op bedrijf)
+        if self._btn_site.isChecked() and not self._btn_company.isChecked():
+            if self._ddl_site.count() == 0:
+                for site in get_all_sites(self._data):
+                    self._ddl_site.addItem(site.get("name", "?"), userData=site["id"])
         self.adjustSize()
 
     def _update_options_ui(self, _checked=None):
@@ -261,6 +301,9 @@ class RackExportDialog(QDialog):
     def _on_export(self):
         if self._btn_all.isChecked():
             self.scope = "all"
+        elif self._btn_company.isChecked():
+            self.scope      = "company"
+            self.company_id = self._ddl_company.currentData() or ""
         elif self._btn_site.isChecked():
             self.scope   = "site"
             self.site_id = self._ddl_site.currentData() or ""

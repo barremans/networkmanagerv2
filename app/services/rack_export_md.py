@@ -2,9 +2,37 @@
 # Networkmap_Creator
 # File:    app/services/rack_export_md.py
 # Role:    Praktische rack-export naar Markdown — interventiedocumentatie
-# Version: 2.8.0
+# Version: 2.9.5
 # Author:  Barremans
-# Changes: 2.8.0 -- F1: get_all_sites() voor v2 JSON
+# Changes: 2.9.5 — Subkoppen switches/patchpanels meeschuiven met heading_level:
+#                  {h}# ipv ### voor switch- en patchpanel-namen in §6, §6b, §7.
+#                  Volledige heading-hiërarchie correct voor alle scopes:
+#                  standalone: ##/### | all+company: ####/#####
+#          2.9.4 — h-parameter alle _section_*() functies
+#                  Alle _section_*() functies krijgen h="##" parameter.
+#                  _build_rackfiche berekent sh (section heading) op basis van
+#                  heading_level: "#"→"##", "##"→"###", "###"→"####".
+#                  Sectieheadings (1. Identificatie t/m 10. Controlelog)
+#                  volgen automatisch het juiste niveau mee.
+#          2.9.3 — heading_level parameter _build_rackfiche; aandachtspunten sortering
+#                  _build_rackfiche() heading_level parameter (default "#").
+#                  render_all + render_company: heading_level="###" zodat
+#                  rackfiches correct genest zijn onder # 🏢 / ## 📍.
+#                  Aandachtspunten all-scope: bedrijven gesorteerd op
+#                  aflopend aantal hoog-items (meeste problemen eerst).
+#          2.9.2 — All-scope index/aandachtspunten/rackfiches per bedrijf gegroepeerd
+#                  (### 🏢 bedrijfsnaam boven elke groep).
+#                  Rackfiches render_all: # 🏢 bedrijf → ## 📍 site hiërarchie.
+#                  render_company: site-header ## 📍 (consistent met render_all).
+#                  render_tracing_all: # 🏢 bedrijfscheiding toegevoegd.
+#                  Aandachtspunten all-scope gesorteerd op bedrijf › ernst › rack.
+#                  _global_header: "Bedrijven: N" rij bij meerdere bedrijven.
+#          2.9.1 — Bugfix F4: _global_index + _global_attention_summary scoped_sites
+#                  render_company(), render_tracing_company() toegevoegd
+#                  _global_header: company_name parameter voor bedrijfsnaam in header
+#                  get_all_companies geïmporteerd
+#                  export_md: scope "company" + company_id doorgeven
+#          2.8.0 -- F1: get_all_sites() voor v2 JSON
 #          2.7.0 — Rackstatus: att_points is not None fix (lege lijst gaf NIET DEFINITIEF)
 #                  Switchlink-telling: zelfde filter als uplink-tabel (beide richtingen)
 #                  Summary labels: "Switchlinks (zie tabel §5)" met extern/intern/via-PP
@@ -61,7 +89,7 @@ from __future__ import annotations
 import re
 import datetime
 from collections import defaultdict
-from app.helpers.settings_storage import get_all_sites
+from app.helpers.settings_storage import get_all_sites, get_all_companies
 
 
 # =============================================================================
@@ -826,7 +854,8 @@ def _stack_info_lines_for_rack(data: dict, rack_dev_ids: set, idx: dict) -> list
 def _section_identification(site: dict, room: dict, rack: dict,
                               data: dict, version: str,
                               att_points: list | None = None,
-                              global_status: str = "") -> list[str]:
+                              global_status: str = "",
+                              h: str = "##") -> list[str]:
     # Rackstatus: altijd op basis van rack-aandachtspunten.
     # att_points is altijd een lijst (ook leeg []); None betekent niet berekend.
     if att_points is not None:
@@ -856,14 +885,14 @@ def _section_identification(site: dict, room: dict, rack: dict,
         ["Globale validatiestatus",  glob_status],
         ["Rackstatus",               val_status],
     ]
-    lines = ["## 1. Identificatie", ""]
+    lines = [f"{h} 1. Identificatie", ""]
     lines += _md_table(["Veld", "Waarde"], rows)
     lines.append("")
     return lines
 
 
 def _section_summary(rack: dict, idx: dict, data: dict,
-                      attention_points: list[dict]) -> list[str]:
+                      attention_points: list[dict], h: str = "##") -> list[str]:
     rack_dev_ids = {
         slot.get("device_id")
         for slot in rack.get("slots", [])
@@ -966,14 +995,14 @@ def _section_summary(rack: dict, idx: dict, data: dict,
         ["Aandachtspunten",
          f"{'⚠️ ' if high else ''}{n_warn} ({high} hoog)" if n_warn else "✅ geen"],
     ]
-    lines = ["## 2. Korte samenvatting", ""]
+    lines = [f"{h} 2. Korte samenvatting", ""]
     lines += _md_table(["Item", "Aantal"], rows,
                         alignments=["l", "r"])
     lines.append("")
     return lines
 
 
-def _section_layout(rack: dict, idx: dict) -> list[str]:
+def _section_layout(rack: dict, idx: dict, h: str = "##") -> list[str]:
     total_u = rack.get("total_units", 42)
     # Sorteer top-down: hoge U-positie bovenaan (u_start laag = hoge U)
     slots = sorted(
@@ -982,7 +1011,7 @@ def _section_layout(rack: dict, idx: dict) -> list[str]:
         reverse=True,  # hoogste U bovenaan
     )
     if not slots:
-        return ["## 3. Rack-layout", "", "*Leeg rack.*", ""]
+        return [f"{h} 3. Rack-layout", "", "*Leeg rack.*", ""]
 
     rows = []
     for slot in slots:
@@ -1012,7 +1041,7 @@ def _section_layout(rack: dict, idx: dict) -> list[str]:
             dev.get("notes", "") or "—",
         ])
 
-    lines = ["## 3. Rack-layout", ""]
+    lines = [f"{h} 3. Rack-layout", ""]
     lines += _md_table(
         ["U", "Device", "Type", "Hoogte", "IP", "Opmerking"],
         rows,
@@ -1023,7 +1052,7 @@ def _section_layout(rack: dict, idx: dict) -> list[str]:
 
 
 def _section_active_devices(rack: dict, idx: dict, dup_ips: set,
-                              data: dict) -> list[str]:
+                              data: dict, h: str = "##") -> list[str]:
     actives = []
     for slot in rack.get("slots", []):
         dev = idx["dev"].get(slot.get("device_id", ""), {})
@@ -1068,7 +1097,7 @@ def _section_active_devices(rack: dict, idx: dict, dup_ips: set,
             status,
         ])
 
-    lines = ["## 4. Actieve netwerkapparaten", ""]
+    lines = [f"{h} 4. Actieve netwerkapparaten", ""]
     lines += _md_table(
         ["Device", "Type", "Model", "IP", "MAC", "Rol", "Uplinks", "Status"],
         rows,
@@ -1090,7 +1119,7 @@ def _section_active_devices(rack: dict, idx: dict, dup_ips: set,
     return lines
 
 
-def _section_uplinks(rack: dict, idx: dict, data: dict) -> list[str]:
+def _section_uplinks(rack: dict, idx: dict, data: dict, h: str = "##") -> list[str]:
     switch_ids = {
         slot.get("device_id")
         for slot in rack.get("slots", [])
@@ -1130,7 +1159,7 @@ def _section_uplinks(rack: dict, idx: dict, data: dict) -> list[str]:
     if not uplinks:
         return []
 
-    lines = ["## 5. Uplinks", ""]
+    lines = [f"{h} 5. Uplinks", ""]
     lines += _md_table(
         ["Van device", "Poort", "Naar device", "Poort", "Kabeltype", "VLAN", "Status"],
         sorted(uplinks, key=lambda r: (r[0], r[1])),
@@ -1140,7 +1169,7 @@ def _section_uplinks(rack: dict, idx: dict, data: dict) -> list[str]:
 
 
 def _section_switch_ports(rack: dict, idx: dict, data: dict,
-                           options: dict) -> list[str]:
+                           options: dict, h: str = "##") -> list[str]:
     include_free = options.get("include_free_ports", True)
     switches = [
         idx["dev"].get(slot.get("device_id", ""))
@@ -1151,11 +1180,11 @@ def _section_switch_ports(rack: dict, idx: dict, data: dict,
     if not switches:
         return []
 
-    lines = ["## 6. Switchpoorten", ""]
+    lines = [f"{h} 6. Switchpoorten", ""]
 
     for sw in sorted(switches, key=lambda d: d.get("name", "")):
         ip = _normalize_ip(sw.get("ip", ""))
-        lines.append(f"### {sw.get('name', '?')} — {ip}")
+        lines.append(f"{h}# {sw.get('name', '?')} — {ip}")
         lines.append("")
 
         ports_front = sorted(
@@ -1206,7 +1235,7 @@ def _section_switch_ports(rack: dict, idx: dict, data: dict,
 
 
 def _section_patchpanels(rack: dict, idx: dict, data: dict,
-                          options: dict) -> list[str]:
+                          options: dict, h: str = "##") -> list[str]:
     include_free = options.get("include_free_ports", True)
     panels = [
         idx["dev"].get(slot.get("device_id", ""))
@@ -1217,10 +1246,10 @@ def _section_patchpanels(rack: dict, idx: dict, data: dict,
     if not panels:
         return []
 
-    lines = ["## 7. Patchpanels", ""]
+    lines = [f"{h} 7. Patchpanels", ""]
 
     for pp in sorted(panels, key=lambda d: d.get("name", "")):
-        lines.append(f"### {pp.get('name', '?')}")
+        lines.append(f"{h}# {pp.get('name', '?')}")
         lines.append("")
 
         # Data-conventie: side="front" = switchzijde = VOOR/F in rapport
@@ -1330,7 +1359,7 @@ def _section_patchpanels(rack: dict, idx: dict, data: dict,
 
 
 def _section_wallpoints(rack: dict, idx: dict, data: dict,
-                         site: dict) -> list[str]:
+                         site: dict, h: str = "##") -> list[str]:
     rack_dev_ids = {
         slot.get("device_id")
         for slot in rack.get("slots", [])
@@ -1387,7 +1416,7 @@ def _section_wallpoints(rack: dict, idx: dict, data: dict,
     if not rows:
         return []
 
-    lines = ["## 8. Wandpunten en eindapparaten", ""]
+    lines = [f"{h} 8. Wandpunten en eindapparaten", ""]
     lines += _md_table(
         ["Wandpunt", "Ruimte", "Eindapparaat", "Via patchpanel", "Switchpoort", "Status"],
         rows,
@@ -1396,9 +1425,9 @@ def _section_wallpoints(rack: dict, idx: dict, data: dict,
     return lines
 
 
-def _section_attention_points(attention_points: list[dict]) -> list[str]:
+def _section_attention_points(attention_points: list[dict], h: str = "##") -> list[str]:
     if not attention_points:
-        lines = ["## 9. Aandachtspunten", ""]
+        lines = [f"{h} 9. Aandachtspunten", ""]
         lines.append("✅ Geen aandachtspunten voor dit rack.")
         lines.append("")
         return lines
@@ -1411,7 +1440,7 @@ def _section_attention_points(attention_points: list[dict]) -> list[str]:
         )
         rows.append([ernst_lbl, ap["type"], ap["object"], ap["detail"], ap["actie"]])
 
-    lines = ["## 9. Aandachtspunten", ""]
+    lines = [f"{h} 9. Aandachtspunten", ""]
     lines += _md_table(
         ["Ernst", "Type", "Object", "Detail", "Actie"],
         rows,
@@ -1422,7 +1451,7 @@ def _section_attention_points(attention_points: list[dict]) -> list[str]:
 
 
 
-def _section_switch_cascade(rack: dict, idx: dict, data: dict) -> list[str]:
+def _section_switch_cascade(rack: dict, idx: dict, data: dict, h: str = "##") -> list[str]:
     """
     Volledig niveau: cascade-tracing per switch als leesbaar tekstblok.
     Hergebruikt _build_trace + _trace_to_cascade voor consistentie met de tabel.
@@ -1436,11 +1465,11 @@ def _section_switch_cascade(rack: dict, idx: dict, data: dict) -> list[str]:
     if not switches:
         return []
 
-    lines = ["## 6b. Switchpoorten — volledige tracing", ""]
+    lines = [f"{h} 6b. Switchpoorten — volledige tracing", ""]
 
     for sw in sorted(switches, key=lambda d: d.get("name", "")):
         ip = _normalize_ip(sw.get("ip", ""))
-        lines.append(f"### {sw.get('name', '?')} — {ip}")
+        lines.append(f"{h}# {sw.get('name', '?')} — {ip}")
         lines.append("")
         lines.append("```")
 
@@ -1460,7 +1489,7 @@ def _section_switch_cascade(rack: dict, idx: dict, data: dict) -> list[str]:
 
     return lines
 
-def _section_control_log() -> list[str]:
+def _section_control_log(h: str = "##") -> list[str]:
     rows = [
         ["", "", "Fysieke rackcontrole",    "☐ OK  /  ☐ Niet OK", ""],
         ["", "", "Patchpanelcontrole",      "☐ OK  /  ☐ Niet OK", ""],
@@ -1469,7 +1498,7 @@ def _section_control_log() -> list[str]:
         ["", "", "Uplink-controle",         "☐ OK  /  ☐ Niet OK", ""],
         ["", "", "Aandachtspunten afgewerkt","☐ OK  /  ☐ Niet OK", ""],
     ]
-    lines = ["## 10. Controlelog", ""]
+    lines = [f"{h} 10. Controlelog", ""]
     lines += _md_table(
         ["Datum", "Uitvoerder", "Controle", "Resultaat", "Opmerking"],
         rows,
@@ -1484,7 +1513,8 @@ def _section_control_log() -> list[str]:
 
 def _build_rackfiche(data: dict, idx: dict,
                      site: dict, room: dict, rack: dict,
-                     version: str, options: dict) -> list[str]:
+                     version: str, options: dict,
+                     heading_level: str = "#") -> list[str]:
     dup_ips     = _build_duplicate_ip_set(data)
     att_points  = _rack_attention_points(data, idx, rack, site, room, dup_ips)
 
@@ -1516,8 +1546,12 @@ def _build_rackfiche(data: dict, idx: dict,
 
     rack_name = rack.get("name", "?")
     lines: list[str] = []
-    lines.append(f"# Rackfiche — {rack_name}")
+    lines.append(f"{heading_level} Rackfiche — {rack_name}")
     lines.append("")
+
+    # Sectie-headings zijn altijd één niveau dieper dan de rackfiche-header
+    _h_map = {"#": "##", "##": "###", "###": "####"}
+    sh = _h_map.get(heading_level, "##")  # section heading
 
     # Aandachtspunten bovenaan bij technisch/volledig niveau
     level = options.get("detail_level", "technical")
@@ -1529,33 +1563,33 @@ def _build_rackfiche(data: dict, idx: dict,
         lines.append("")
 
     lines += _section_identification(site, room, rack, data, version,
-                                     att_points, global_status=_global_status)
-    lines += _section_summary(rack, idx, data, att_points)
-    lines += _section_layout(rack, idx)
+                                     att_points, global_status=_global_status, h=sh)
+    lines += _section_summary(rack, idx, data, att_points, h=sh)
+    lines += _section_layout(rack, idx, h=sh)
 
     # Detailniveaus:
     #   kort      = identificatie + samenvatting + U-layout + aandachtspunten + controlelog
     #   technisch = alles in tabelvorm
     #   volledig  = technisch + cascade-tracing als extra tekstblok per switch
     if level in ("technical", "full"):
-        lines += _section_active_devices(rack, idx, dup_ips, data)
-        lines += _section_uplinks(rack, idx, data)
+        lines += _section_active_devices(rack, idx, dup_ips, data, h=sh)
+        lines += _section_uplinks(rack, idx, data, h=sh)
 
         if options.get("include_switches", True):
-            lines += _section_switch_ports(rack, idx, data, options)
+            lines += _section_switch_ports(rack, idx, data, options, h=sh)
             if level == "full":
-                lines += _section_switch_cascade(rack, idx, data)
+                lines += _section_switch_cascade(rack, idx, data, h=sh)
 
         if options.get("include_patchpanels", True):
-            lines += _section_patchpanels(rack, idx, data, options)
+            lines += _section_patchpanels(rack, idx, data, options, h=sh)
 
-        lines += _section_wallpoints(rack, idx, data, site)
+        lines += _section_wallpoints(rack, idx, data, site, h=sh)
 
     if options.get("include_attention_points", True):
-        lines += _section_attention_points(att_points)
+        lines += _section_attention_points(att_points, h=sh)
 
     if options.get("include_control_log", True):
-        lines += _section_control_log()
+        lines += _section_control_log(h=sh)
 
     lines.append("---")
     lines.append("")
@@ -1567,10 +1601,12 @@ def _build_rackfiche(data: dict, idx: dict,
 # =============================================================================
 
 def _global_header(data: dict, subtitle: str, version: str,
-                   scoped_sites: list | None = None) -> list[str]:
+                   scoped_sites: list | None = None,
+                   company_name: str = "") -> list[str]:
     """
     scoped_sites: lijst van site-dicts voor deze scope.
     Als None, worden globale tellingen gebruikt (all-scope).
+    company_name: optionele bedrijfsnaam — verschijnt als extra rij in header.
     """
     datum     = datetime.date.today().strftime("%d/%m/%Y")
     sites     = scoped_sites if scoped_sites is not None else get_all_sites(data)
@@ -1624,6 +1660,11 @@ def _global_header(data: dict, subtitle: str, version: str,
         ["Scope",            subtitle],
         ["Gegenereerd op",   datum],
         ["Versie",           version],
+    ]
+    if company_name:
+        lbl = "Bedrijven" if company_name.endswith("bedrijven") else "Bedrijf"
+        rows.append([lbl, company_name])
+    rows += [
         ["Sites",            str(n_sites)],
         ["Racks",            str(n_racks)],
         ["Devices",          str(n_dev)],
@@ -1642,11 +1683,11 @@ def _global_header(data: dict, subtitle: str, version: str,
     return lines
 
 
-def _global_index(data: dict, idx: dict, dup_ips: set) -> list[str]:
+def _global_index(data: dict, idx: dict, dup_ips: set,
+                  scoped_sites: list | None = None) -> list[str]:
     lines = ["## Index", ""]
-    for site in get_all_sites(data):
-        lines.append(f"### {site.get('name', '?')}")
-        lines.append("")
+
+    def _site_rows(site: dict) -> list[list]:
         rows = []
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
@@ -1655,16 +1696,14 @@ def _global_index(data: dict, idx: dict, dup_ips: set) -> list[str]:
                     for slot in rack.get("slots", [])
                     if slot.get("device_id")
                 }
-                devs     = [idx["dev"].get(d) for d in rack_dev_ids if idx["dev"].get(d)]
-                n_sw     = sum(1 for d in devs if _is_switch(d))
-                n_pp     = sum(1 for d in devs if _is_patchpanel(d))
-                att      = _rack_attention_points(data, idx, rack, site, room, dup_ips)
-                n_warn   = len(att)
-                high     = sum(1 for a in att if a["ernst"] == "Hoog")
-                # Uniform formaat: 🔴 hoog / 🟠 middel / 🟡 laag
-                _med = sum(1 for a in att if a["ernst"] == "Middel")
-                _low = sum(1 for a in att if a["ernst"] == "Laag")
-                if n_warn == 0:
+                devs   = [idx["dev"].get(d) for d in rack_dev_ids if idx["dev"].get(d)]
+                n_sw   = sum(1 for d in devs if _is_switch(d))
+                n_pp   = sum(1 for d in devs if _is_patchpanel(d))
+                att    = _rack_attention_points(data, idx, rack, site, room, dup_ips)
+                high   = sum(1 for a in att if a["ernst"] == "Hoog")
+                _med   = sum(1 for a in att if a["ernst"] == "Middel")
+                _low   = sum(1 for a in att if a["ernst"] == "Laag")
+                if not att:
                     warn_lbl = "✅ 0"
                 else:
                     _parts_w = []
@@ -1680,27 +1719,52 @@ def _global_index(data: dict, idx: dict, dup_ips: set) -> list[str]:
                     str(n_pp),
                     warn_lbl,
                 ])
-        lines += _md_table(
-            ["Ruimte", "Rack", "Devices", "Switches", "Patchpanels", "Aandachtspunten"],
-            rows,
-            alignments=["l", "l", "r", "r", "r", "l"],
-        )
-        lines.append("")
+        return rows
+
+    _tbl_headers   = ["Ruimte", "Rack", "Devices", "Switches", "Patchpanels", "Aandachtspunten"]
+    _tbl_align     = ["l", "l", "r", "r", "r", "l"]
+
+    if scoped_sites is not None:
+        # Gefilterde scope (company of site): gewoon per site
+        for site in scoped_sites:
+            lines.append(f"### {site.get('name', '?')}")
+            lines.append("")
+            lines += _md_table(_tbl_headers, _site_rows(site), alignments=_tbl_align)
+            lines.append("")
+    else:
+        # All-scope: groepeer per bedrijf
+        for company in get_all_companies(data):
+            lines.append(f"### 🏢 {company.get('name', '?')}")
+            lines.append("")
+            for site in company.get("sites", []):
+                lines.append(f"**{site.get('name', '?')}**")
+                lines.append("")
+                lines += _md_table(_tbl_headers, _site_rows(site), alignments=_tbl_align)
+                lines.append("")
+
     lines.append("---")
     lines.append("")
     return lines
 
 
-def _global_attention_summary(data: dict, idx: dict, dup_ips: set) -> list[str]:
+def _global_attention_summary(data: dict, idx: dict, dup_ips: set,
+                              scoped_sites: list | None = None) -> list[str]:
     """Alle aandachtspunten over alle racks, gesorteerd op ernst."""
+    # Bouw site_id → bedrijfsnaam mapping voor all-scope
+    site_to_company: dict[str, str] = {}
+    for company in get_all_companies(data):
+        for s in company.get("sites", []):
+            site_to_company[s["id"]] = company.get("name", "")
+
     all_points = []
-    for site in get_all_sites(data):
+    for site in (scoped_sites if scoped_sites is not None else get_all_sites(data)):
+        company_name = site_to_company.get(site.get("id", ""), "") if scoped_sites is None else ""
         for room in site.get("rooms", []):
             for rack in room.get("racks", []):
                 rack_name = f"{site.get('name','?')} › {room.get('name','?')} › {rack.get('name','?')}"
                 pts = _rack_attention_points(data, idx, rack, site, room, dup_ips)
                 for p in pts:
-                    all_points.append({**p, "rack": rack_name})
+                    all_points.append({**p, "rack": rack_name, "_company": company_name})
 
     if not all_points:
         return [
@@ -1713,8 +1777,56 @@ def _global_attention_summary(data: dict, idx: dict, dup_ips: set) -> list[str]:
         ]
 
     order = {"Hoog": 0, "Middel": 1, "Laag": 2}
-    all_points.sort(key=lambda a: (order.get(a["ernst"], 9), a["rack"]))
+    # Per bedrijf: tel hoog-items voor volgorde (meeste hoog eerst)
+    company_order: dict[str, int] = {}
+    for ap in all_points:
+        c = ap["_company"]
+        if c not in company_order:
+            company_order[c] = 0
+        if ap["ernst"] == "Hoog":
+            company_order[c] += 1
+    # Sorteer: bedrijf op aflopend hoog-count, daarbinnen ernst → rack
+    all_points.sort(key=lambda a: (
+        -company_order.get(a["_company"], 0),
+        a["_company"],
+        order.get(a["ernst"], 9),
+        a["rack"],
+    ))
 
+    # Bij all-scope: groepeer per bedrijf met een scheidingskop
+    use_company_groups = scoped_sites is None and any(a["_company"] for a in all_points)
+
+    if use_company_groups:
+        lines = ["## Aandachtspunten — alle racks", ""]
+        current_company = None
+        current_rows: list[list] = []
+
+        def _flush(company: str, rows: list[list]) -> list[str]:
+            out = []
+            if rows:
+                out.append(f"### 🏢 {company}")
+                out.append("")
+                out += _md_table(["Ernst", "Rack", "Type", "Object", "Detail"], rows)
+                out.append("")
+            return out
+
+        for ap in all_points:
+            ernst_lbl = {"Hoog": "🔴 Hoog", "Middel": "🟠 Middel", "Laag": "🟡 Laag"}.get(
+                ap["ernst"], ap["ernst"]
+            )
+            if ap["_company"] != current_company:
+                if current_company is not None:
+                    lines += _flush(current_company, current_rows)
+                current_company = ap["_company"]
+                current_rows = []
+            current_rows.append([ernst_lbl, ap["rack"], ap["type"], ap["object"], ap["detail"]])
+        if current_company is not None:
+            lines += _flush(current_company, current_rows)
+        lines.append("---")
+        lines.append("")
+        return lines
+
+    # Enkelvoudige scope: platte tabel zoals voorheen
     rows = []
     for ap in all_points:
         ernst_lbl = {"Hoog": "🔴 Hoog", "Middel": "🟠 Middel", "Laag": "🟡 Laag"}.get(
@@ -1723,10 +1835,7 @@ def _global_attention_summary(data: dict, idx: dict, dup_ips: set) -> list[str]:
         rows.append([ernst_lbl, ap["rack"], ap["type"], ap["object"], ap["detail"]])
 
     lines = ["## Aandachtspunten — alle racks", ""]
-    lines += _md_table(
-        ["Ernst", "Rack", "Type", "Object", "Detail"],
-        rows,
-    )
+    lines += _md_table(["Ernst", "Rack", "Type", "Object", "Detail"], rows)
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -1901,7 +2010,7 @@ def _render_tracing_fiche(data: dict, idx: dict,
 
         for sw in sorted(switches, key=lambda d: d.get("name", "")):
             ip = _normalize_ip(sw.get("ip", ""))
-            lines.append(f"### {sw.get('name', '?')}  ·  {ip}")
+            lines.append(f"{h}# {sw.get('name', '?')}  ·  {ip}")
             lines.append("")
             lines.append("```")
 
@@ -1949,12 +2058,15 @@ def render_tracing_all(data: dict) -> str:
         "---",
         "",
     ]
-    for site in get_all_sites(data):
-        for room in site.get("rooms", []):
-            for rack in room.get("racks", []):
-                lines += _render_tracing_fiche(
-                    data, idx, site, room, rack, version
-                )
+    for company in get_all_companies(data):
+        lines.append(f"# 🏢 {company.get('name', '?')}")
+        lines.append("")
+        for site in company.get("sites", []):
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    lines += _render_tracing_fiche(
+                        data, idx, site, room, rack, version
+                    )
     return "\n".join(lines)
 
 
@@ -1996,27 +2108,108 @@ def render_tracing_rack(data: dict, rack_id: str) -> str:
     return f"# Rack niet gevonden: {rack_id}\n"
 
 
+def render_company(data: dict, company_id: str, options: dict | None = None) -> str:
+    """F4 — Rack export voor één bedrijf."""
+    opts    = _merged_options(options)
+    idx     = _build_index(data)
+    version = _get_version()
+    dup_ips = _build_duplicate_ip_set(data)
+
+    company = next((c for c in get_all_companies(data) if c["id"] == company_id), None)
+    if not company:
+        return f"# Bedrijf niet gevonden: {company_id}\n"
+
+    company_name = company.get("name", "?")
+    sites        = company.get("sites", [])
+
+    lines = _global_header(
+        data,
+        f"Bedrijf: {company_name}",
+        version,
+        scoped_sites=sites,
+        company_name=company_name,
+    )
+    lines += _global_index(data, idx, dup_ips, scoped_sites=sites)
+    lines += _global_attention_summary(data, idx, dup_ips, scoped_sites=sites)
+
+    lines.append("## Rackfiches")
+    lines.append("")
+
+    for site in sites:
+        lines.append(f"## 📍 {site.get('name', '?')}")
+        lines.append("")
+        for room in site.get("rooms", []):
+            for rack in room.get("racks", []):
+                lines += _build_rackfiche(
+                    data, idx, site, room, rack, version, opts,
+                    heading_level="###"
+                )
+
+    return "\n".join(lines)
+
+
+def render_tracing_company(data: dict, company_id: str) -> str:
+    """F4 — Tracing-only export voor één bedrijf."""
+    idx     = _build_index(data)
+    version = _get_version()
+    datum   = datetime.date.today().strftime("%d/%m/%Y")
+
+    company = next((c for c in get_all_companies(data) if c["id"] == company_id), None)
+    if not company:
+        return f"# Bedrijf niet gevonden: {company_id}\n"
+
+    company_name = company.get("name", "?")
+    sites        = company.get("sites", [])
+
+    n_racks = sum(
+        len(r.get("racks", []))
+        for s in sites
+        for r in s.get("rooms", [])
+    )
+
+    lines = [
+        f"# Networkmap Creator — Racktracing  ·  {company_name}",
+        "",
+        f"*Gegenereerd op {datum}  ·  Versie {version}  ·  {n_racks} racks*",
+        "",
+        "---",
+        "",
+    ]
+    for site in sites:
+        for room in site.get("rooms", []):
+            for rack in room.get("racks", []):
+                lines += _render_tracing_fiche(data, idx, site, room, rack, version)
+    return "\n".join(lines)
+
+
 def render_all(data: dict, options: dict | None = None) -> str:
     opts    = _merged_options(options)
     idx     = _build_index(data)
     version = _get_version()
     dup_ips = _build_duplicate_ip_set(data)
 
-    lines = _global_header(data, "Alle sites en racks", version)
+    n_companies = len(get_all_companies(data))
+    lines = _global_header(data, "Alle sites en racks", version,
+                           company_name=f"{n_companies} bedrijven" if n_companies > 1 else "")
     lines += _global_index(data, idx, dup_ips)
     lines += _global_attention_summary(data, idx, dup_ips)
 
     lines.append("## Rackfiches")
     lines.append("")
 
-    for site in get_all_sites(data):
-        lines.append(f"# 📍 {site.get('name', '?')}")
+    for company in get_all_companies(data):
+        company_name = company.get("name", "?")
+        lines.append(f"# 🏢 {company_name}")
         lines.append("")
-        for room in site.get("rooms", []):
-            for rack in room.get("racks", []):
-                lines += _build_rackfiche(
-                    data, idx, site, room, rack, version, opts
-                )
+        for site in company.get("sites", []):
+            lines.append(f"## 📍 {site.get('name', '?')}")
+            lines.append("")
+            for room in site.get("rooms", []):
+                for rack in room.get("racks", []):
+                    lines += _build_rackfiche(
+                        data, idx, site, room, rack, version, opts,
+                        heading_level="###"
+                    )
 
     return "\n".join(lines)
 
@@ -2033,12 +2226,8 @@ def render_site(data: dict, site_id: str, options: dict | None = None) -> str:
 
     lines = _global_header(data, f"Site: {site.get('name','?')}", version,
                            scoped_sites=[site])
-    lines += _global_index(
-        {**data, "sites": [site]}, idx, dup_ips
-    )
-    lines += _global_attention_summary(
-        {**data, "sites": [site]}, idx, dup_ips
-    )
+    lines += _global_index(data, idx, dup_ips, scoped_sites=[site])
+    lines += _global_attention_summary(data, idx, dup_ips, scoped_sites=[site])
 
     for room in site.get("rooms", []):
         for rack in room.get("racks", []):
@@ -2082,17 +2271,19 @@ def render_rack_only(data: dict, rack_id: str, options: dict | None = None) -> s
 # =============================================================================
 
 def export_md(
-    data:     dict,
-    filepath: str,
-    scope:    str = "all",
-    site_id:  str = "",
-    rack_id:  str = "",
-    options:  dict | None = None,
+    data:       dict,
+    filepath:   str,
+    scope:      str = "all",
+    company_id: str = "",
+    site_id:    str = "",
+    rack_id:    str = "",
+    options:    dict | None = None,
 ) -> tuple[bool, str]:
     """
     Schrijf de rack-export naar filepath.
     Signatuur is volledig achterwaarts compatibel met v1.
     options-dict is optioneel en overschrijft _DEFAULT_OPTIONS.
+    scope "company" + company_id: export gefilterd op één bedrijf (F4).
     """
     try:
         opts = _merged_options(options)
@@ -2103,6 +2294,8 @@ def export_md(
                 file_content = render_tracing_rack(data, rack_id)
             elif scope == "site":
                 file_content = render_tracing_site(data, site_id)
+            elif scope == "company":
+                file_content = render_tracing_company(data, company_id)
             else:
                 file_content = render_tracing_all(data)
         else:
@@ -2110,6 +2303,8 @@ def export_md(
                 file_content = render_rack_only(data, rack_id, options)
             elif scope == "site":
                 file_content = render_site(data, site_id, options)
+            elif scope == "company":
+                file_content = render_company(data, company_id, options)
             else:
                 file_content = render_all(data, options)
 

@@ -1,4 +1,4 @@
-# Networkmap Creator — Openstaande werkpunten v20
+# Networkmap Creator — Openstaande werkpunten v21
 
 ## Legende
 - 🔴 Bug  |  🟠 Hoge prioriteit  |  🟡 Visueel  |  🔵 Export  |  ⚪ Later  |  🟣 Nieuw  |  ✅ Opgelost  |  ⏸ Hold
@@ -20,7 +20,7 @@
 | ID | Omschrijving | Status |
 |---|---|---|
 | S4 | MFA/AD uitbreiden (bv. per-gebruiker rechten) | ⚪ Later |
-| S6 | Andere manier is nu hardcoded enkel voor CGK AD, ook voor andere firma's kunnen gebruiken. | |
+| S6 | AD-koppeling hardcoded voor CGK — uitbreiden naar andere firma's | ⚪ Later |
 
 ---
 
@@ -37,11 +37,6 @@
 
 | ID | Omschrijving | Status |
 |---|---|---|
-| G1| "Bekijk grondplan, enkel 1 site geen meerder sites, ook bedrijven keuze niet aanwezig - uitbreiden van zoekfuntie en filtering | Open |
-| G2 | beheer grondmappen geeft errorTraceback (most recent call last):
-  File "C:\PY\networkmanager\app\gui\main_window.py", line 4133, in _on_floorplan_manage
-    from app.gui.dialogs.floorplan_manage_dialog import FloorplanManageDialog
-ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.floorplan_manage_dialog' (C:\PY\networkmanager\app\gui\dialogs\floorplan_manage_dialog.py) | Open |
 
 ---
 
@@ -50,7 +45,6 @@ ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.fl
 | ID | Omschrijving | Status |
 |---|---|---|
 
-
 ---
 
 ## Direct verbonden apparaten (D)
@@ -58,14 +52,12 @@ ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.fl
 | ID | Omschrijving | Status |
 |---|---|---|
 
-
 ---
 
-## Cross-rack port↔port verbinding (v18)
+## Cross-rack port↔port verbinding
 
 | ID | Omschrijving | Status |
 |---|---|---|
-
 
 ---
 
@@ -81,11 +73,8 @@ ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.fl
 
 | ID | Omschrijving | Status |
 |---|---|---|
-|F1 |Menu Im/export, verwijderen van "Exporteer Afbeelding"| Open|
-|F2 |Menu Rapporteren, VLAN rapport, filtering toevoegen op VLAN (zelfde logica als wandpunten filtering| Open |
-
-
-
+| F2 | Menu Rapporteren → VLAN rapport: filtering op VLAN toevoegen (zelfde logica als wandpunten filtering) | 🟣 Open |
+| F3 | settings, toevoegen primair bedrijf - kijkt naar lijst van bedrijven, primair opent standaard bij opstarten alle gekoppelde sites, zodat alle racks zichtbaar zijn | open |
 ---
 
 ## Visuele verbeteringen (V)
@@ -93,7 +82,6 @@ ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.fl
 | ID | Omschrijving | Status |
 |---|---|---|
 | V7 | Snelle filter wandpunten op VLAN of locatie | 🟣 Open |
-| V8 | Help popup, Sneltoetsen menu - niet over gans de hoogte van de popup, visueel niet mooi
 
 ---
 
@@ -103,9 +91,7 @@ ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.fl
 |---|---|---|
 | K1 | Export-info bestand in exportmap (`export_info.txt`) | 🟣 Open |
 | K3 | Wijzigingslog (append-only, wie/wat/wanneer) | 🟣 Open |
-| K4 | Help - Gebruiksaanwijzing volledig maken | Open |
-
----
+| K4 | Help → Gebruiksaanwijzing volledig maken | 🟣 Open |---
 
 ## Netwerk (N)
 
@@ -119,30 +105,20 @@ ImportError: cannot import name 'FloorplanManageDialog' from 'app.gui.dialogs.fl
 
 ### Algemene regel
 
-- Altijd met underscore werken.
-- De eerste letter gebruiken als sneltoets.
-- Open vragen:
-  - Wat met andere talen?
-  - Wat met submenu-keuze?
+
 
 ### Hoofdmenu
 
 | Menu-item | Sneltoets | Underscore |
 |---|---|---|
-| Im/export | Ctrl + I | `_I` |
-| Rapporten | Ctrl + R | `_R` |
-| Settings | Ctrl + S | `_S` |
-| Grondplannen | Ctrl + G | `_G` |
-| Help | Ctrl + H | `_H` |
+
 
 ### Secundair menu
 
 | Menu-item | Sneltoets | Underscore |
 |---|---|---|
-| Zoeken | Ctrl + Z | `_Z` |
-| Wandpunten zoeken | Ctrl + W | `_W` |
+
 
 ---
 
 ## Aanbevolen volgorde nieuwe chat
-
