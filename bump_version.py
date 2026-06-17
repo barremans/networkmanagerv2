@@ -17,7 +17,7 @@ def read_version(path: Path) -> str:
     text = path.read_text(encoding="utf-8")
     match = re.search(r'__version__\s*=\s*["\']([0-9]+\.[0-9]+\.[0-9]+)["\']', text)
     if not match:
-        print(f"❌ Geen __version__ gevonden in {path}")
+        print(f"[FOUT] Geen __version__ gevonden in {path}")
         sys.exit(1)
     return match.group(1)
 
@@ -34,7 +34,7 @@ def bump(version: str, part: str) -> str:
     elif part == "patch":
         patch += 1
     else:
-        print(f"❌ Ongeldig part '{part}'. Gebruik: patch, minor of major.")
+        print(f"[FOUT] Ongeldig part '{part}'. Gebruik: patch, minor of major.")
         sys.exit(1)
     return f"{major}.{minor}.{patch}"
 
@@ -53,14 +53,14 @@ def main():
     part = sys.argv[1].lower() if len(sys.argv) > 1 else "patch"
 
     if not VERSION_FILE.exists():
-        print(f"❌ Bestand niet gevonden: {VERSION_FILE}")
+        print(f"[FOUT] Bestand niet gevonden: {VERSION_FILE}")
         sys.exit(1)
 
     old_version = read_version(VERSION_FILE)
     new_version = bump(old_version, part)
     write_version(VERSION_FILE, new_version)
 
-    print(f"✅ Versie verhoogd: {old_version} → {new_version}  ({VERSION_FILE})")
+    print(f"[OK] Versie verhoogd: {old_version} -> {new_version}  ({str(VERSION_FILE).replace(chr(92), '/')})")
 
 
 if __name__ == "__main__":

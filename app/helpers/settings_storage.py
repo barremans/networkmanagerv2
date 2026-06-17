@@ -2,9 +2,20 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.13.0
+# Version: 1.16.0
 # Author:  Barremans
-# Changes: 1.13.0 — F1/F2: companies[] structuur (v2 dataformaat)
+# Changes: 1.16.0 — S6b migratie fix: required_group → group_admin wordt
+#                   eenmalig weggeschreven naar settings.json zodat bestaande
+#                   installaties (CGK-APP-L6 als required_group) correct
+#                   migreren zonder herstart-probleem.
+#          1.15.0 — S6b: twee AD-groepen: group_admin + group_readonly
+#                   required_group vervangen door group_admin / group_readonly
+#                   get_azure_ad_config() backward compatible (required_group
+#                   migreert naar group_admin indien aanwezig)
+#          1.14.0 — S6: Azure AD-configuratie generiek gemaakt
+#                   azure_ad sectie toegevoegd aan _DEFAULT_SETTINGS
+#                   get_azure_ad_config(), save_azure_ad_config()
+#          1.13.0 — F1/F2: companies[] structuur (v2 dataformaat)
 #                   · _DEFAULT_NETWORK bijgewerkt naar v2 (companies[] ipv sites[])
 #                   · _REQUIRED_NETWORK_KEYS aangepast voor v1 én v2
 #                   · get_all_companies(data) — geeft companies[] terug
@@ -227,6 +238,14 @@ _DEFAULT_SETTINGS = {
     },
     # F5 — toegangsmodus: standaard read-only bij opstarten
     "read_only_mode": True,
+    # S6 — Azure AD configuratie (generiek, niet meer hardcoded voor CGK)
+    "azure_ad": {
+        "enabled":        True,
+        "tenant_id":      "",
+        "client_id":      "",
+        "group_admin":    "",   # S6b — volledige toegang
+        "group_readonly": "",   # S6b — enkel lezen
+    },
 }
 
 # Fallback defaults bij ontbrekend of corrupt network_data.json — v2
@@ -710,6 +729,48 @@ def get_read_only_mode() -> bool:
 def set_read_only_mode(read_only: bool) -> bool:
     """Slaat de toegangsmodus op. Geeft True bij succes."""
     return save_setting("read_only_mode", read_only)
+
+
+# ---------------------------------------------------------------------------
+# Azure AD configuratie — S6
+# ---------------------------------------------------------------------------
+
+_DEFAULT_AZURE_AD = {
+    "enabled":        True,
+    "tenant_id":      "",
+    "client_id":      "",
+    "group_admin":    "",
+    "group_readonly": "",
+}
+
+
+def get_azure_ad_config() -> dict:
+    """
+    Geeft de Azure AD-configuratie terug.
+    Vult ontbrekende sleutels aan met defaults.
+    Backward compatible: 'required_group' (S6) migreert eenmalig naar 'group_admin'
+    en schrijft de nieuwe structuur terug naar settings.json.
+    """
+    cfg    = load_settings().get("azure_ad", {})
+    result = dict(_DEFAULT_AZURE_AD)
+    result.update(cfg)
+    # Eenmalige migratie: oude 'required_group' → group_admin
+    if "required_group" in cfg and not result.get("group_admin"):
+        result["group_admin"] = cfg["required_group"]
+        del result["required_group"]
+        save_setting("azure_ad", result)   # wegschrijven zodat migratie niet herhaald wordt
+    return result
+
+
+def save_azure_ad_config(config: dict) -> bool:
+    """Slaat de Azure AD-configuratie op. Geeft True bij succes."""
+    return save_setting("azure_ad", {
+        "enabled":        bool(config.get("enabled", True)),
+        "tenant_id":      str(config.get("tenant_id",      "")).strip(),
+        "client_id":      str(config.get("client_id",      "")).strip(),
+        "group_admin":    str(config.get("group_admin",    "")).strip(),
+        "group_readonly": str(config.get("group_readonly", "")).strip(),
+    })
 
 
 # ---------------------------------------------------------------------------

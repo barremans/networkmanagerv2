@@ -84,3 +84,131 @@ Name: "{commondesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Worki
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "Start {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// =============================================================================
+// S6 - Azure AD configuratie migratie
+// Bij update op bestaande installatie: azure_ad sectie toevoegen aan
+// settings.json als tenant_id nog niet ingevuld is.
+// =============================================================================
+
+const
+  AD_TENANT_ID      = '526b32fa-8cb1-4d6a-9e2b-fd48e2a0e296';
+  AD_CLIENT_ID      = '58e2dacc-6e4c-4fd0-9166-03b467aeacd8';
+  AD_GROUP_ADMIN    = 'CGK-APP-L6';
+  AD_GROUP_READONLY = '';
+
+function ReadFileAsString(const FileName: String): String;
+var
+  Lines    : TArrayOfString;
+  I        : Integer;
+  Result2  : String;
+begin
+  Result := '';
+  if not LoadStringsFromFile(FileName, Lines) then
+    exit;
+  Result2 := '';
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    if I > 0 then
+      Result2 := Result2 + #13#10;
+    Result2 := Result2 + Lines[I];
+  end;
+  Result := Result2;
+end;
+
+procedure WriteFileAsString(const FileName: String; const Content: String);
+var
+  Lines : TArrayOfString;
+  Parts : TArrayOfString;
+  I     : Integer;
+  S     : String;
+  Pos1  : Integer;
+begin
+  // Splits op #13#10 en schrijft terug
+  S := Content;
+  SetArrayLength(Lines, 0);
+  I := 0;
+  repeat
+    Pos1 := Pos(#13#10, S);
+    SetArrayLength(Lines, I + 1);
+    if Pos1 > 0 then
+    begin
+      Lines[I] := Copy(S, 1, Pos1 - 1);
+      S := Copy(S, Pos1 + 2, Length(S));
+    end else
+    begin
+      Lines[I] := S;
+      S := '';
+    end;
+    I := I + 1;
+  until S = '';
+  SaveStringsToFile(FileName, Lines, False);
+end;
+
+procedure PatchAzureAdInSettings();
+var
+  SettingsPath  : String;
+  Content       : String;
+  AzureAdBlock  : String;
+  InsertPos     : Integer;
+begin
+  SettingsPath := ExpandConstant('{app}\data\settings.json');
+
+  if not FileExists(SettingsPath) then
+    exit;
+
+  Content := ReadFileAsString(SettingsPath);
+  if Content = '' then
+    exit;
+
+  // Tenant al correct ingevuld - niets te doen
+  if Pos(AD_TENANT_ID, Content) > 0 then
+    exit;
+
+  // Azure AD blok samenstellen
+  AzureAdBlock :=
+    ',' + #13#10 +
+    '  "azure_ad": {' + #13#10 +
+    '    "enabled": true,' + #13#10 +
+    '    "tenant_id": "' + AD_TENANT_ID + '",' + #13#10 +
+    '    "client_id": "' + AD_CLIENT_ID + '",' + #13#10 +
+    '    "group_admin": "' + AD_GROUP_ADMIN + '",' + #13#10 +
+    '    "group_readonly": "' + AD_GROUP_READONLY + '"' + #13#10 +
+    '  }';
+
+  // Verwijder bestaand leeg azure_ad blok indien aanwezig
+  if Pos('"azure_ad"', Content) > 0 then
+  begin
+    InsertPos := Pos('"azure_ad"', Content);
+    if InsertPos > 2 then
+    begin
+      InsertPos := InsertPos - 1;
+      while (InsertPos > 0) and
+            ((Content[InsertPos] = ' ') or (Content[InsertPos] = #13) or
+             (Content[InsertPos] = #10)) do
+        InsertPos := InsertPos - 1;
+      if (InsertPos > 0) and (Content[InsertPos] = ',') then
+        InsertPos := InsertPos - 1;
+      Content := Copy(Content, 1, InsertPos) + #13#10 + '}';
+    end;
+  end;
+
+  // Voeg azure_ad in voor de laatste sluitende }
+  InsertPos := Length(Content);
+  while (InsertPos > 0) and (Content[InsertPos] <> '}') do
+    InsertPos := InsertPos - 1;
+
+  if InsertPos > 0 then
+  begin
+    Content := Copy(Content, 1, InsertPos - 1) + AzureAdBlock + #13#10 + '}';
+    WriteFileAsString(SettingsPath, Content);
+    Log('S6 migratie: azure_ad sectie toegevoegd aan settings.json');
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    PatchAzureAdInSettings();
+end;

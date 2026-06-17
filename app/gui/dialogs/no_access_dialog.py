@@ -2,18 +2,22 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/no_access_dialog.py
 # Role:    Venster getoond bij geen AD-toegang
-# Version: 1.0.0
+# Version: 1.2.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
+# Changes: 1.2.0 — S6b: twee groepen tonen in foutmelding (admin + readonly)
+#          1.1.0 — S6: groepsnaam dynamisch uit settings
+#          1.0.0 — Initiële versie
 # =============================================================================
 
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
+from app.helpers.settings_storage import get_azure_ad_config
 
 
 class NoAccessDialog(QDialog):
     """
-    Wordt getoond wanneer de gebruiker niet in CGK-APP-L6 zit.
+    Wordt getoond wanneer de gebruiker niet in de vereiste AD-groep zit.
+    Groepsnaam wordt dynamisch gelezen uit Settings → Azure AD.
     App sluit na OK.
     """
 
@@ -22,6 +26,14 @@ class NoAccessDialog(QDialog):
         self.setWindowTitle("Geen toegang — Networkmap Creator")
         self.setFixedSize(480, 220)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+
+        cfg            = get_azure_ad_config()
+        group_admin    = cfg.get("group_admin",    "") or "—"
+        group_readonly = cfg.get("group_readonly", "")
+
+        groepen_tekst = f"Admin-groep: {group_admin}"
+        if group_readonly:
+            groepen_tekst += f"\nRead-only groep: {group_readonly}"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -34,7 +46,7 @@ class NoAccessDialog(QDialog):
 
         msg = QLabel(
             "U bent niet gemachtigd om Networkmap Creator te gebruiken.\n"
-            "Vereiste groep: CGK-APP-L6"
+            f"{groepen_tekst}"
         )
         msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         msg.setWordWrap(True)

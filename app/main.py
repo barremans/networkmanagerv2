@@ -2,9 +2,16 @@
 # Networkmap_Creator
 # File:    app/main.py
 # Role:    Entry point — QApplication, QSS laden, taal instellen, MainWindow
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: D   — update check bij opstarten via UpdateChecker
+# Changes: 1.6.0 — S6 update-fix: _run_security_gate() controleert eerst of
+#                  AD geconfigureerd is (tenant_id + client_id gevuld).
+#                  Als niet geconfigureerd → directe toegang, geen popup.
+#                  Voorkomt offline login popup na update op bestaande machines.
+#          1.5.0 — S6b: get_access_level() ipv has_access()
+#                  ipv has_access(). Twee niveaus: admin (read/write) en
+#                  readonly. Hardcoded "CGK-APP-L6" referenties verwijderd.
+#          D   — update check bij opstarten via UpdateChecker
 #          D.1 — update_available_with_url signaal
 #          D.2 — download-knop actief via DownloadDialog
 #          1.2.3 — versie dynamisch uit version.py (fix statusbalk vs Over)
@@ -150,35 +157,55 @@ def _run_security_gate() -> tuple[bool, bool]:
 
     Returns:
         (toegang_verleend, read_only)
-        - (True,  False) → online, CGK-APP-L6, volledige toegang
-        - (True,  True)  → offline, poweruser login geslaagd, read-only
+        - (True,  False) → online, admin-groep of AD niet geconfigureerd → volledige toegang
+        - (True,  True)  → online, readonly-groep of offline poweruser → read-only
         - (False, False) → geen toegang, app mag niet starten
     """
-    from app.security.permissions_networkmap import has_access, get_cached_user
+    from app.security.permissions_networkmap import get_access_level, get_cached_user
     from app.security.offline_auth import log_ad_login, log_app_start
     from app.gui.dialogs.no_access_dialog import NoAccessDialog
     from app.gui.dialogs.offline_login_dialog import OfflineLoginDialog
+    from app.helpers.settings_storage import get_azure_ad_config
+
+    # --- Configuratiecheck vóór elke netwerkpoging ---
+    cfg = get_azure_ad_config()
+    ad_enabled  = cfg.get("enabled", True)
+    tenant_id   = cfg.get("tenant_id", "").strip()
+    client_id   = cfg.get("client_id", "").strip()
+
+    if not ad_enabled or not tenant_id or not client_id:
+        # AD niet geconfigureerd (bv. na update zonder settings-migratie)
+        # → volledige toegang, geen popup
+        log_app_start("onbekend (AD niet geconfigureerd)", mode="readwrite")
+        print("[SECURITY] AD niet geconfigureerd — directe toegang verleend.")
+        return True, False
 
     print("[SECURITY] Azure AD login starten...")
     ad_ok = _try_azure_login(timeout_sec=60)
 
     if ad_ok:
-        user = get_cached_user() or {}
-        name = user.get("displayName", "")
-        upn  = user.get("userPrincipalName", "")
+        user  = get_cached_user() or {}
+        name  = user.get("displayName", "")
+        upn   = user.get("userPrincipalName", "")
+        level = get_access_level()   # "admin" | "readonly" | "none"
 
-        if has_access():
+        if level == "admin":
             log_ad_login(name, upn, success=True)
             log_app_start(f"{name} <{upn}>", mode="readwrite")
-            print("[SECURITY] Toegang verleend (CGK-APP-L6).")
+            print(f"[SECURITY] Toegang verleend (admin) voor {name}.")
             return True, False
-        else:
+
+        elif level == "readonly":
+            log_ad_login(name, upn, success=True)
+            log_app_start(f"{name} <{upn}>", mode="readonly")
+            print(f"[SECURITY] Read-only toegang verleend voor {name}.")
+            return True, True
+
+        else:  # "none"
             log_ad_login(name, upn, success=False,
-                         reason="niet in CGK-APP-L6")
-            print("[SECURITY] Gebruiker heeft geen toegang (niet in CGK-APP-L6).")
-            dlg = NoAccessDialog(
-                reason=f"Ingelogd als: {name} ({upn})"
-            )
+                         reason="niet in een toegestane AD-groep")
+            print(f"[SECURITY] Toegang geweigerd voor {name} ({upn}).")
+            dlg = NoAccessDialog(reason=f"Ingelogd als: {name} ({upn})")
             dlg.exec()
             return False, False
 
@@ -226,7 +253,7 @@ def main():
     if not toegang:
         sys.exit(0)
 
-    # --- Read-only modus instellen indien offline login ---
+    # --- Read-only modus instellen (readonly AD-groep of offline login) ---
     if read_only:
         settings_storage.set_read_only_mode(True)
         print("[SECURITY] Read-only modus actief.")

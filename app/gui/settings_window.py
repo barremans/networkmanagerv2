@@ -3,8 +3,13 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.14.0
-# Changes: 1.14.0 — Bedrijfslogica backup/restore:
+# Version: 1.16.0
+# Changes: 1.16.0 — S6b: Azure AD tab: twee groepsvelden (admin + readonly)
+#                   ipv één required_group veld
+#          1.15.0 — S6: Azure AD tab toegevoegd
+#                   Tenant ID, Client ID, vereiste groep, enabled checkbox
+#                   Opgeslagen via settings_storage.save_azure_ad_config()
+#          1.14.0 — Bedrijfslogica backup/restore:
 #                   _on_backup_now: bedrijfskeuze bij meerdere bedrijven
 #                     → create_backup_company() bij specifiek bedrijf
 #                   _on_restore_now: v1 detectie → QInputDialog voor
@@ -75,6 +80,7 @@ class SettingsWindow(QDialog):
         tabs.addTab(self._build_devicetype_tab(), t("settings_tab_device_types"))
         tabs.addTab(self._build_locations_tab(),  t("settings_tab_outlet_locations"))
         tabs.addTab(self._build_svg_labels_tab(), "SVG Labels")
+        tabs.addTab(self._build_azure_ad_tab(),   "Azure AD")
         layout.addWidget(tabs)
 
         btn_row = QHBoxLayout()
@@ -1219,6 +1225,113 @@ class SettingsWindow(QDialog):
         self._refresh_prefix_list(0)
 
     # ------------------------------------------------------------------
+    # Tabblad: Azure AD — S6
+    # ------------------------------------------------------------------
+
+    def _build_azure_ad_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        hint = QLabel(
+            "Configureer hier de Azure AD-koppeling voor toegangscontrole.\n"
+            "Personen in de opgegeven AD-groep krijgen toegang tot de applicatie."
+        )
+        hint.setObjectName("secondary")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        grp = QGroupBox("Azure AD configuratie")
+        form = QFormLayout(grp)
+        form.setSpacing(8)
+
+        self._chk_ad_enabled = QCheckBox("Azure AD authenticatie inschakelen")
+        form.addRow("", self._chk_ad_enabled)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        form.addRow(sep)
+
+        self._txt_tenant_id = QLineEdit()
+        self._txt_tenant_id.setPlaceholderText("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+        self._txt_tenant_id.setToolTip(
+            "Azure Portal → Azure Active Directory → Overzicht → Tenant-id"
+        )
+        form.addRow("Tenant ID *:", self._txt_tenant_id)
+
+        self._txt_client_id = QLineEdit()
+        self._txt_client_id.setPlaceholderText("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+        self._txt_client_id.setToolTip(
+            "Azure Portal → App-registraties → uw app → Overzicht → Client-id"
+        )
+        form.addRow("Client ID *:", self._txt_client_id)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        form.addRow(sep2)
+
+        self._txt_group_admin = QLineEdit()
+        self._txt_group_admin.setPlaceholderText("bijv. Networkmap-Admins")
+        self._txt_group_admin.setToolTip(
+            "Leden van deze groep krijgen volledige toegang (lezen + schrijven).\n"
+            "Leeg laten = iedereen met een geldig account krijgt admin-toegang."
+        )
+        form.addRow("Admin-groep:", self._txt_group_admin)
+
+        self._txt_group_readonly = QLineEdit()
+        self._txt_group_readonly.setPlaceholderText("bijv. Networkmap-Gebruikers")
+        self._txt_group_readonly.setToolTip(
+            "Leden van deze groep krijgen enkel leestoegang (read-only).\n"
+            "Leeg laten = geen read-only niveau beschikbaar."
+        )
+        form.addRow("Read-only groep:", self._txt_group_readonly)
+
+        lbl_info = QLabel(
+            "ℹ️  Iemand in beide groepen krijgt admin-toegang.\n"
+            "   Iemand in geen enkele groep krijgt geen toegang."
+        )
+        lbl_info.setObjectName("secondary")
+        lbl_info.setWordWrap(True)
+        form.addRow("", lbl_info)
+        layout.addWidget(grp)
+
+        help_grp = QGroupBox("Azure Portal instellen")
+        help_layout = QVBoxLayout(help_grp)
+        help_text = QLabel(
+            "1. Ga naar portal.azure.com → App-registraties → Nieuwe registratie\n"
+            "2. Naam: Networkmap Creator  |  Ondersteunde accounttypen: deze tenant\n"
+            "3. Na aanmaken: kopieer de Client-ID en Tenant-ID hierboven in\n"
+            "4. Ga naar API-machtigingen → Toevoegen → Microsoft Graph\n"
+            "   → Gedelegeerde machtigingen → User.Read + GroupMember.Read.All\n"
+            "5. Klik 'Beheerderstoestemming verlenen'\n"
+            "6. Maak een AD-groep aan en voeg gebruikers toe"
+        )
+        help_text.setObjectName("secondary")
+        help_text.setWordWrap(True)
+        help_layout.addWidget(help_text)
+        layout.addWidget(help_grp)
+        layout.addStretch()
+
+        # Laden
+        cfg = settings_storage.get_azure_ad_config()
+        self._chk_ad_enabled.setChecked(cfg.get("enabled", True))
+        self._txt_tenant_id.setText(cfg.get("tenant_id", ""))
+        self._txt_client_id.setText(cfg.get("client_id", ""))
+        self._txt_group_admin.setText(cfg.get("group_admin", ""))
+        self._txt_group_readonly.setText(cfg.get("group_readonly", ""))
+
+        self._chk_ad_enabled.toggled.connect(self._update_ad_fields)
+        self._update_ad_fields(self._chk_ad_enabled.isChecked())
+        return widget
+
+    def _update_ad_fields(self, enabled: bool):
+        """Velden uitschakelen als AD niet ingeschakeld is."""
+        for w in (self._txt_tenant_id, self._txt_client_id,
+                  self._txt_group_admin, self._txt_group_readonly):
+            w.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
     # Opslaan
     # ------------------------------------------------------------------
 
@@ -1262,6 +1375,13 @@ class SettingsWindow(QDialog):
             "network_path":     ds_path,
         })
         settings_storage.save_setting("read_only_mode", self._chk_read_only.isChecked())  # F5
+        settings_storage.save_azure_ad_config({                                            # S6
+            "enabled":        self._chk_ad_enabled.isChecked(),
+            "tenant_id":      self._txt_tenant_id.text().strip(),
+            "client_id":      self._txt_client_id.text().strip(),
+            "group_admin":    self._txt_group_admin.text().strip(),
+            "group_readonly": self._txt_group_readonly.text().strip(),
+        })
         settings_storage.save_endpoint_types(self._ep_types)
         settings_storage.save_device_types(self._dev_types)
         settings_storage.save_outlet_locations(self._loc_types)
