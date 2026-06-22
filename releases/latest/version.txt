@@ -1,2 +1,2 @@
-16.1.16
-https://github.com/barremans/networkmanagerv2/releases/download/v16.1.16/Networkmap_Creator_setup_16.1.16.exe
+16.2.0
+https://github.com/barremans/networkmanagerv2/releases/download/v16.2.0/Networkmap_Creator_setup_16.2.0.exe
