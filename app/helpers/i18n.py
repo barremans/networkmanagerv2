@@ -2,9 +2,22 @@
 # Networkmap_Creator
 # File:    app/helpers/i18n.py
 # Role:    Meertaligheid — NL/EN vertalingen, t() functie
-# Version: 1.36.0
+# Version: 1.43.0
 # Author:  Barremans
-# Changes: 1.36.0 — F4: rack_export_scope_company, rack_export_select_company (NL + EN)
+# Changes: 1.43.0 — V7: vlan_filter_btn, vlan_filter_all, vlan_filter_no_vlans,
+#                   vlan_filter_picker_title (NL + EN).
+#          1.42.0 - K-CABLE: settings_tab_cable_types + settings_ct_* sleutels (NL + EN).
+#          1.41.0 — K3: changelog_* sleutels toegevoegd (NL + EN).
+#          1.40.0 — I18N-REVIEW: review_* sleutels toegevoegd voor
+#                   action_review_window.py en menu_action_review voor
+#                   main_window.py — alle hardcoded NL-teksten vervangen (NL + EN).
+#          1.39.0 — F10: label_mac_eth en label_mac_wifi toegevoegd (NL + EN).
+#          1.38.0 — GP-F1: search_placeholder_port verduidelijkt (multi-term:
+#                   device, poort, VLAN, side). NL + EN.
+#          1.37.0 — F7/F8: ctx_show_detail, ctx_copy_ip, ctx_copy_mac,
+#                   ctx_copy_mac_eth, ctx_copy_mac_wifi, ctx_copy_name,
+#                   ctx_copy_location, ctx_copy, status_copied (NL + EN)
+#          1.36.0 — F4: rack_export_scope_company, rack_export_select_company (NL + EN)
 #          1.35.0 — F3: report_company_prompt, report_company_all (NL + EN)
 #          1.34.0 — CompanyDialog sleutels toegevoegd (F1/F2): bedrijfsnaam,
 #                  adres, BTW, telefoon, e-mail, website, menu-acties
@@ -143,6 +156,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_ip":                 "IP adres",
         "label_subnet":             "Subnetmasker",
         "label_mac":                "MAC adres",
+        "label_mac_eth":            "MAC (ETH)",
+        "label_mac_wifi":           "MAC (WiFi)",
         "label_serial":             "Serienummer",
         "label_url":                "URL",
         "btn_open_url":             "Link openen in browser",
@@ -509,6 +524,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_edit_endpoint":        "🖥  Eindapparaat bewerken",
         "ctx_delete_outlet":        "🗑  Wandpunt verwijderen",
 
+        # F7 — detail tonen / F8 — kopiëren naar klembord
+        "ctx_show_detail":          "ℹ  Detail tonen",
+        "ctx_copy_ip":              "📋  IP kopiëren",
+        "ctx_copy_mac":             "📋  MAC kopiëren",
+        "ctx_copy_mac_eth":         "📋  MAC (ETH) kopiëren",
+        "ctx_copy_mac_wifi":        "📋  MAC (WiFi) kopiëren",
+        "ctx_copy_name":            "📋  Naam kopiëren",
+        "ctx_copy_location":        "📋  Locatie kopiëren",
+        "ctx_copy":                 "📋  Kopiëren",
+        "status_copied":            "Gekopieerd naar klembord",
+
         # Site wandpunten-overzicht
         "tree_site_outlets":            "Alle wandpunten",
         "tree_endpoints":               "Eindapparaten",
@@ -578,7 +604,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "conn_type_direct_switch":      "Direct switch",
         "conn_type_via_patchpanel":     "Via patchpanel",
         "conn_type_via_device":         "Via toestel",
-        "search_placeholder_port":          "Zoek site, rack, device of poort...",
+        "search_placeholder_port":          "Zoek device, poort, VLAN of side (meerdere woorden)...",
         "err_no_endpoint_selected":         "Selecteer eerst een eindapparaat.",
         "warn_endpoint_already_connected":  "Dit eindapparaat is al verbonden. Toch doorgaan?",
         "lbl_already_connected":            "al verbonden",
@@ -750,6 +776,61 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_company_deleted":      "verwijderd.",
         "report_company_prompt":    "Genereer rapport voor:",
         "report_company_all":       "Alle bedrijven",
+
+        # ActionReviewWindow — I18N-REVIEW
+        "menu_action_review":           "📋  Actiepunten reviewen",
+        "review_title":                 "Actiepunten reviewen",
+        "review_title_readonly":        "Actiepunten reviewen  \u2014  alleen-lezen",
+        "review_filter_open":           "Open",
+        "review_filter_approved":       "Goedgekeurd",
+        "review_filter_all":            "Alles",
+        "review_btn_close":             "Sluiten",
+        "review_hint":                  "rechtsklik: goedkeuren / heropenen  \u00b7  dubbelklik: navigeer",
+        "review_item_approved":         "goedgekeurd",
+        "review_item_approved_by":      "door",
+        "review_item_approved_on":      "op",
+        "review_ctx_approve":           "\u2714  Goedkeuren als uitzondering\u2026",
+        "review_ctx_reopen":            "\u21ba  Heropenen (terug naar open)",
+        "review_ctx_navigate":          "\U0001f50d  Navigeer naar object",
+        "review_dlg_approve_title":     "Goedkeuren als uitzondering",
+        "review_dlg_approve_reason":    "Reden (optioneel):",
+        "review_status_total":          "totaal",
+
+        # changelog viewer — K3
+        "menu_changelog":               "📜  Wijzigingslog",
+        "changelog_title":              "Wijzigingslog",
+        "changelog_btn_close":          "Sluiten",
+        "changelog_btn_export":         "Exporteer…",
+        "changelog_empty":              "Geen wijzigingen gelogd.",
+        "changelog_col_ts":             "Tijdstip",
+        "changelog_col_action":         "Actie",
+        "changelog_col_type":           "Type",
+        "changelog_col_label":          "Omschrijving",
+        "changelog_col_user":           "Gebruiker",
+        "changelog_action_create":      "aangemaakt",
+        "changelog_action_update":      "gewijzigd",
+        "changelog_action_delete":      "verwijderd",
+        "changelog_action_approve":     "goedgekeurd",
+        "changelog_action_reopen":      "heropend",
+        "changelog_export_filter":      "Changelog (*.jsonl)",
+        "changelog_export_ok":          "Wijzigingslog geëxporteerd naar",
+        "changelog_export_fail":        "Exporteren mislukt",
+
+        # Kabeltypes settings tab -- K-CABLE
+        "settings_tab_cable_types":     "Kabeltypes",
+        "settings_ct_hint":             "Beheer de kabeltypes die beschikbaar zijn in verbindingsdialogen.",
+        "settings_ct_restore":          "Herstel standaardwaarden",
+        "settings_ct_restore_confirm":  "Alle kabeltypes terugzetten naar de standaardwaarden?",
+        "settings_ct_edit_title":       "Kabeltype bewerken",
+        "settings_ct_new_title":        "Kabeltype toevoegen",
+        "settings_ct_color":            "Kleur",
+        "settings_ct_color_hint":       "Hexadecimale kleurcode, bijv. #4A90D9",
+
+        # V7 — VLAN-filter wandpunten
+        "vlan_filter_btn":              "VLAN",
+        "vlan_filter_all":              "— Alle VLANs —",
+        "vlan_filter_no_vlans":         "Geen VLANs gevonden in deze selectie.",
+        "vlan_filter_picker_title":     "Filter op VLAN",
     },
 
     # -------------------------------------------------------------------------
@@ -829,6 +910,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "label_ip":                 "IP Address",
         "label_subnet":             "Subnet Mask",
         "label_mac":                "MAC Address",
+        "label_mac_eth":            "MAC (ETH)",
+        "label_mac_wifi":           "MAC (WiFi)",
         "label_serial":             "Serial Number",
         "label_url":                "URL",
         "btn_open_url":             "Open link in browser",
@@ -1195,6 +1278,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ctx_edit_endpoint":        "🖥  Edit Endpoint",
         "ctx_delete_outlet":        "🗑  Delete Wall Outlet",
 
+        # F7 — show detail / F8 — copy to clipboard
+        "ctx_show_detail":          "ℹ  Show detail",
+        "ctx_copy_ip":              "📋  Copy IP",
+        "ctx_copy_mac":             "📋  Copy MAC",
+        "ctx_copy_mac_eth":         "📋  Copy MAC (ETH)",
+        "ctx_copy_mac_wifi":        "📋  Copy MAC (WiFi)",
+        "ctx_copy_name":            "📋  Copy name",
+        "ctx_copy_location":        "📋  Copy location",
+        "ctx_copy":                 "📋  Copy",
+        "status_copied":            "Copied to clipboard",
+
         # Site wall outlets overview
         "tree_site_outlets":            "All Wall Outlets",
         "tree_endpoints":               "Endpoints",
@@ -1264,7 +1358,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "conn_type_direct_switch":      "Direct switch",
         "conn_type_via_patchpanel":     "Via patch panel",
         "conn_type_via_device":         "Via device",
-        "search_placeholder_port":          "Search site, rack, device or port...",
+        "search_placeholder_port":          "Search device, port, VLAN or side (multiple terms)...",
         "err_no_endpoint_selected":         "Please select an endpoint first.",
         "warn_endpoint_already_connected":  "This endpoint is already connected. Continue anyway?",
         "lbl_already_connected":            "already connected",
@@ -1436,6 +1530,61 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_company_deleted":      "deleted.",
         "report_company_prompt":    "Generate report for:",
         "report_company_all":       "All companies",
+
+        # ActionReviewWindow — I18N-REVIEW
+        "menu_action_review":           "📋  Review action items",
+        "review_title":                 "Review action items",
+        "review_title_readonly":        "Review action items  \u2014  read-only",
+        "review_filter_open":           "Open",
+        "review_filter_approved":       "Approved",
+        "review_filter_all":            "All",
+        "review_btn_close":             "Close",
+        "review_hint":                  "right-click: approve / reopen  \u00b7  double-click: navigate",
+        "review_item_approved":         "approved",
+        "review_item_approved_by":      "by",
+        "review_item_approved_on":      "on",
+        "review_ctx_approve":           "\u2714  Approve as exception\u2026",
+        "review_ctx_reopen":            "\u21ba  Reopen (back to open)",
+        "review_ctx_navigate":          "\U0001f50d  Navigate to object",
+        "review_dlg_approve_title":     "Approve as exception",
+        "review_dlg_approve_reason":    "Reason (optional):",
+        "review_status_total":          "total",
+
+        # changelog viewer — K3
+        "menu_changelog":               "📜  Changelog",
+        "changelog_title":              "Changelog",
+        "changelog_btn_close":          "Close",
+        "changelog_btn_export":         "Export…",
+        "changelog_empty":              "No changes logged yet.",
+        "changelog_col_ts":             "Timestamp",
+        "changelog_col_action":         "Action",
+        "changelog_col_type":           "Type",
+        "changelog_col_label":          "Description",
+        "changelog_col_user":           "User",
+        "changelog_action_create":      "created",
+        "changelog_action_update":      "updated",
+        "changelog_action_delete":      "deleted",
+        "changelog_action_approve":     "approved",
+        "changelog_action_reopen":      "reopened",
+        "changelog_export_filter":      "Changelog (*.jsonl)",
+        "changelog_export_ok":          "Changelog exported to",
+        "changelog_export_fail":        "Export failed",
+
+        # Cable types settings tab -- K-CABLE
+        "settings_tab_cable_types":     "Cable Types",
+        "settings_ct_hint":             "Manage the cable types available in connection dialogs.",
+        "settings_ct_restore":          "Restore defaults",
+        "settings_ct_restore_confirm":  "Reset all cable types to default values?",
+        "settings_ct_edit_title":       "Edit cable type",
+        "settings_ct_new_title":        "Add cable type",
+        "settings_ct_color":            "Color",
+        "settings_ct_color_hint":       "Hexadecimal color code, e.g. #4A90D9",
+
+        # V7 — VLAN filter wall outlets
+        "vlan_filter_btn":              "VLAN",
+        "vlan_filter_all":              "— All VLANs —",
+        "vlan_filter_no_vlans":         "No VLANs found in this selection.",
+        "vlan_filter_picker_title":     "Filter by VLAN",
     },
 }
 

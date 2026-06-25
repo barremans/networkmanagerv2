@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/device_dialog.py
 # Role:    Device aanmaken, bewerken en dupliceren
-# Version: 1.4.1
+# Version: 1.5.0
 # Author:  Barremans
-# Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
+# Changes: 1.5.0 — F10: MAC-veld gesplitst in MAC (ETH) en MAC (WiFi). Bestaande
+#                  'mac' wordt bij bewerken ingelezen als ETH (migratie). Bij opslaan
+#                  worden mac_eth + mac_wifi bewaard én 'mac' = ETH (of WiFi als ETH
+#                  leeg) voor compatibiliteit met zoek/rapport/kopieer.
+#          1.1.0 — Device types geladen uit settings_storage (configureerbaar)
 #                  ipv hardcoded lijst
 #          1.2.0 — Positie (U-start) en hoogte aanpasbaar bij bewerken
 #                  Extra ports_per_row opties: 3, 4
@@ -141,20 +145,22 @@ class DeviceDialog(QDialog):
         self._ip     = QLineEdit()
         self._subnet = QLineEdit()
         self._subnet.setPlaceholderText("bv. 255.255.255.0  of  /24")
-        self._mac    = QLineEdit()
+        self._mac_eth  = QLineEdit()
+        self._mac_wifi = QLineEdit()
         self._serial = QLineEdit()
         self._notes  = QTextEdit()
         self._notes.setFixedHeight(60)
 
         for field in (self._brand, self._model,
-                      self._ip, self._mac, self._serial):
+                      self._ip, self._mac_eth, self._mac_wifi, self._serial):
             _bind_uppercase(field)
 
         form.addRow(t("label_brand")  + ":", self._brand)
         form.addRow(t("label_model")  + ":", self._model)
         form.addRow(t("label_ip")     + ":", self._ip)
         form.addRow(t("label_subnet") + ":", self._subnet)
-        form.addRow(t("label_mac")    + ":", self._mac)
+        form.addRow(t("label_mac_eth")  + ":", self._mac_eth)
+        form.addRow(t("label_mac_wifi") + ":", self._mac_wifi)
         form.addRow(t("label_serial") + ":", self._serial)
         form.addRow(t("label_notes")  + ":", self._notes)
         layout.addWidget(grp_dev)
@@ -236,7 +242,8 @@ class DeviceDialog(QDialog):
         if not self._duplicate:
             self._ip.setText(self._device.get("ip", ""))
             self._subnet.setText(self._device.get("subnet", ""))
-            self._mac.setText(self._device.get("mac", ""))
+            self._mac_eth.setText(self._device.get("mac_eth", self._device.get("mac", "")))
+            self._mac_wifi.setText(self._device.get("mac_wifi", ""))
             self._serial.setText(self._device.get("serial", ""))
 
         self._notes.setPlainText(self._device.get("notes", ""))
@@ -281,7 +288,9 @@ class DeviceDialog(QDialog):
             "model":       self._model.text().strip(),
             "ip":          self._ip.text().strip(),
             "subnet":      self._subnet.text().strip(),
-            "mac":         self._mac.text().strip(),
+            "mac_eth":      self._mac_eth.text().strip(),
+            "mac_wifi":     self._mac_wifi.text().strip(),
+            "mac":          self._mac_eth.text().strip() or self._mac_wifi.text().strip(),
             "serial":      self._serial.text().strip(),
             "notes":         self._notes.toPlainText().strip(),
             "ports_per_row": self._ports_per_row.currentData(),

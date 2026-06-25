@@ -4,9 +4,15 @@
 # Role:    G-OPEN-8 — Grondplan export als Word-document (.docx)
 #          Pure Python via python-docx — geen Node.js of externe runtime nodig.
 #          Vereiste: pip install python-docx
-# Version: 2.16.0
+# Version: 2.17.0
 # Author:  Barremans
-# Changes: 2.16.0 — Fix: from __future__ import annotations verplaatst
+# Changes: 2.17.0 — GP-F2: pagina-oriëntatie van de grondplanpagina volgt nu
+#                   de afbeelding. Portret-afbeelding (hoogte > breedte) -> portret
+#                   A4-pagina met portret-maxima; landscape blijft landscape.
+#                   Header-tabstop volgt de sectiebreedte. Afmetingen via nieuwe
+#                   helper _image_ratio(). Kaartjespagina's blijven landscape;
+#                   ALL-export ongewijzigd (portret vult reeds max. hoogte).
+#          2.16.0 — Fix: from __future__ import annotations verplaatst
 #                   naar regel 1 (SyntaxError bij import opgelost).
 #                   Bedrijfsnaam toegevoegd aan paginaheader en ALL-header
 #                   via get_company_for_site().
@@ -240,10 +246,18 @@ def _build_document(floorplan: dict, site: dict, data: dict,
     style.font.size = Pt(10)
 
     # ── Pagina 1: grondplan PNG ──────────────────────────────────────────
+    # GP-F2: pagina-oriëntatie van de grondplanpagina volgt de afbeelding
+    _fp_ratio = _image_ratio(png_path) if (png_path and Path(png_path).exists()) else 1.41
+    _fp_portrait = _fp_ratio < 1.0
     sec0 = doc.sections[0]
-    sec0.orientation   = WD_ORIENT.LANDSCAPE
-    sec0.page_width    = Cm(29.7)
-    sec0.page_height   = Cm(21.0)
+    if _fp_portrait:
+        sec0.orientation = WD_ORIENT.PORTRAIT
+        sec0.page_width  = Cm(21.0)
+        sec0.page_height = Cm(29.7)
+    else:
+        sec0.orientation = WD_ORIENT.LANDSCAPE
+        sec0.page_width  = Cm(29.7)
+        sec0.page_height = Cm(21.0)
     sec0.left_margin   = Cm(1.0)
     sec0.right_margin  = Cm(1.0)
     sec0.top_margin    = Cm(1.2)
@@ -256,7 +270,8 @@ def _build_document(floorplan: dict, site: dict, data: dict,
         # Geen page_break_after — de sectie-paragraaf hieronder zorgt zelf
         # voor de pagina-wissel. page_break_after=True hier zou een lege
         # pagina veroorzaken (dubbele break).
-        _add_floorplan_image(doc, png_path, page_break_after=False)
+        _add_floorplan_image(doc, png_path, page_break_after=False,
+                             ratio=_fp_ratio, portrait=_fp_portrait)
     else:
         p = doc.add_paragraph()
         p.add_run("(Grondplan afbeelding niet beschikbaar)").italic = True
@@ -336,7 +351,40 @@ def _build_document(floorplan: dict, site: dict, data: dict,
     return doc
 
 
-def _add_floorplan_image(doc, png_path: str, page_break_after: bool = False):
+def _image_ratio(png_path: str) -> float:
+    """GP-F2 — lees breedte/hoogte-verhouding (w/h) uit een PNG of JPEG.
+    Fallback 1.41 (A4 landscape) als de afmetingen niet leesbaar zijn."""
+    try:
+        import struct
+        with open(png_path, 'rb') as f:
+            header = f.read(4)
+        if header[:4] == b'\x89PNG':
+            with open(png_path, 'rb') as f:
+                f.seek(16)
+                img_w = struct.unpack('>I', f.read(4))[0]
+                img_h = struct.unpack('>I', f.read(4))[0]
+            return img_w / max(img_h, 1)
+        if header[:2] == b'\xff\xd8':
+            with open(png_path, 'rb') as f:
+                f.read(2)
+                while True:
+                    marker = f.read(2)
+                    if len(marker) < 2:
+                        break
+                    length = struct.unpack('>H', f.read(2))[0]
+                    if marker[1] in (0xC0, 0xC1, 0xC2):
+                        f.read(1)
+                        img_h = struct.unpack('>H', f.read(2))[0]
+                        img_w = struct.unpack('>H', f.read(2))[0]
+                        return img_w / max(img_h, 1)
+                    f.seek(length - 2, 1)
+    except Exception:
+        pass
+    return 1.41
+
+
+def _add_floorplan_image(doc, png_path: str, page_break_after: bool = False,
+                         ratio: float | None = None, portrait: bool = False):
     """
     Voeg grondplan PNG in.
     Schaalt automatisch zodat de afbeelding altijd binnen A4 landscape past,
@@ -347,52 +395,19 @@ def _add_floorplan_image(doc, png_path: str, page_break_after: bool = False):
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
-    # Beschikbare ruimte op A4 landscape na marges en header
-    MAX_W_CM = 27.0
-    MAX_H_CM = 17.0   # conservatief: 21cm - 2.2cm marges - 1.5cm header - 0.3cm buffer
+    if ratio is None:
+        ratio = _image_ratio(png_path)
 
-    # Afmetingen uitlezen via python-docx interne helper (ondersteunt PNG + JPEG)
-    # of via struct voor PNG, of JPEG SOF marker voor JPEG
-    try:
-        import struct
-        with open(png_path, 'rb') as f:
-            header = f.read(4)
+    # Beschikbare ruimte na marges en header, afhankelijk van oriëntatie (GP-F2)
+    if portrait:
+        MAX_W_CM = 19.0   # 21cm - 2cm marges
+        MAX_H_CM = 25.0   # 29.7cm - marges - header - buffer
+    else:
+        MAX_W_CM = 27.0
+        MAX_H_CM = 17.0   # conservatief: 21cm - 2.2cm marges - 1.5cm header - 0.3cm buffer
 
-        if header[:4] == b'\x89PNG':
-            # PNG: breedte op bytes 16-19, hoogte op 20-23
-            with open(png_path, 'rb') as f:
-                f.seek(16)
-                img_w = struct.unpack('>I', f.read(4))[0]
-                img_h = struct.unpack('>I', f.read(4))[0]
-            ratio = img_w / max(img_h, 1)
-
-        elif header[:2] == b'\xff\xd8':
-            # JPEG: zoek SOF0/SOF2 marker voor afmetingen
-            with open(png_path, 'rb') as f:
-                f.read(2)  # skip SOI
-                ratio = 1.41  # default
-                while True:
-                    marker = f.read(2)
-                    if len(marker) < 2:
-                        break
-                    length = struct.unpack('>H', f.read(2))[0]
-                    if marker[1] in (0xC0, 0xC1, 0xC2):  # SOF marker
-                        f.read(1)  # precision
-                        img_h = struct.unpack('>H', f.read(2))[0]
-                        img_w = struct.unpack('>H', f.read(2))[0]
-                        ratio = img_w / max(img_h, 1)
-                        break
-                    f.seek(length - 2, 1)
-        else:
-            ratio = 1.41
-
-    except Exception:
-        ratio = 1.41   # A4 landscape als fallback
-
-    # Bereken optimale breedte: max breedte én max hoogte respecteren
-    w_from_max_w = MAX_W_CM
-    w_from_max_h = MAX_H_CM * ratio
-    use_w = min(w_from_max_w, w_from_max_h)
+    # Optimale breedte: respecteer zowel max breedte als max hoogte
+    use_w = min(MAX_W_CM, MAX_H_CM * ratio)
 
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -460,12 +475,18 @@ def _add_header(doc, floorplan: dict, site: dict, data: dict | None = None):
     rd.font.size      = Pt(10)
     rd.font.color.rgb = _C_SUBTXT
 
-    # Tab stop uiterst rechts (A4 landscape = 15840 twips content breedte)
+    # Tab stop uiterst rechts — volgt de sectiebreedte (GP-F2: portret of landscape)
+    _sec = doc.sections[0]
+    try:
+        _content_emu = int(_sec.page_width) - int(_sec.left_margin) - int(_sec.right_margin)
+        _tab_pos = max(1000, int(_content_emu / 635))  # EMU -> twips (1 twip = 635 EMU)
+    except Exception:
+        _tab_pos = 15840
     pPr  = p._p.get_or_add_pPr()
     tabs = OxmlElement('w:tabs')
     tab  = OxmlElement('w:tab')
     tab.set(qn('w:val'), 'right')
-    tab.set(qn('w:pos'), '15840')
+    tab.set(qn('w:pos'), str(_tab_pos))
     tabs.append(tab)
     pPr.append(tabs)
 

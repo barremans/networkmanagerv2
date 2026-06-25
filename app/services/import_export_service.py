@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/services/import_export_service.py
 # Role:    JSON import en export — GEEN Qt imports
-# Version: 2.2.0
+# Version: 2.3.0
 # Author:  Barremans
-# Changes: 2.2.0 — import_replace_dir: auto-migratie v1→v2
+# Changes: 2.3.0 — K1: write_export_info() toegevoegd — export_info.txt
+#                  wordt aangemaakt bij elke succesvolle map-export
+#                  (export_to_dir + export_company_to_dir). Aanroeper
+#                  geeft optioneel app_version en exported_by mee.
+#          2.2.0 — import_replace_dir: auto-migratie v1→v2
 #                  v1 data krijgt automatisch company 'Geïmporteerd bedrijf'
 #                  zodat app altijd met v2 structuur opstart na replace.
 #          2.1.0 — Bedrijfslogica (v2 JSON):
@@ -26,6 +30,7 @@
 import json
 import os
 import shutil
+import datetime
 from datetime import date
 from pathlib import Path
 from app.helpers.settings_storage import get_all_sites, get_all_companies
@@ -38,6 +43,7 @@ _FILE_SETTINGS  = "settings.json"
 _FILE_FLOORPLAN = "floorplans.json"
 _DIR_FLOORPLAN  = "floorplans"
 _FILE_VLAN      = "vlan_config.json"
+_FILE_INFO      = "export_info.txt"
 
 
 # ------------------------------------------------------------------
@@ -54,6 +60,62 @@ def _get_paths() -> dict:
         "floorplans_dir": settings_storage.get_floorplans_dir(),
         "vlan":           settings_storage.get_vlan_config_path(),
     }
+
+
+# ------------------------------------------------------------------
+# Export-info bestand (K1)
+# ------------------------------------------------------------------
+
+def write_export_info(
+    dest_dir: str,
+    scope: str = "full",
+    company_name: str = "",
+    app_version: str = "",
+    exported_by: str = "",
+) -> None:
+    """
+    Schrijft export_info.txt in dest_dir met metadata over de export:
+    tijdstip, scope, app-versie en gebruiker.
+
+    Wordt aangeroepen na elke succesvolle map-export.
+    Fouten worden stilzwijgend genegeerd zodat de export zelf nooit faalt.
+
+    Args:
+        dest_dir:      Doelmap (zelfde als de exportmap).
+        scope:         "full" of "company" — geeft aan wat geëxporteerd is.
+        company_name:  Bedrijfsnaam bij scope="company", anders leeg.
+        app_version:   App-versienummer (bijv. "1.84.0"), leeg = onbekend.
+        exported_by:   Azure AD-gebruikersnaam of "offline", leeg = onbekend.
+    """
+    try:
+        now = datetime.datetime.now()
+        lines = [
+            "Networkmap Creator — Export Info",
+            "=" * 40,
+            f"Date/time : {now.strftime('%Y-%m-%d  %H:%M:%S')}",
+            f"Scope     : {'All companies (full export)' if scope == 'full' else f'Company — {company_name}'}",
+            f"App ver.  : {app_version or 'unknown'}",
+            f"Exported by: {exported_by or 'unknown'}",
+            "",
+            "Files in this export:",
+            f"  {_FILE_NETWORK}   — network topology data",
+            f"  {_FILE_SETTINGS}      — application settings",
+            f"  {_FILE_FLOORPLAN}    — floorplan metadata",
+            f"  {_DIR_FLOORPLAN}/         — SVG floorplan files",
+            f"  {_FILE_VLAN}   — VLAN configuration",
+            f"  {_FILE_INFO}    — this file",
+            "",
+            "To restore: use Import → Replace in Networkmap Creator.",
+        ]
+        if scope == "company":
+            lines.append(
+                "Note: company export does not include settings.json "
+                "(installation-specific)."
+            )
+        path = Path(dest_dir) / _FILE_INFO
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass  # Info-bestand is niet kritisch — export mag nooit falen hierdoor
 
 
 # ------------------------------------------------------------------
@@ -92,7 +154,11 @@ def _migrate_v1_to_v2(data: dict, company_name: str = "Geïmporteerd bedrijf") -
 # Export — volledig
 # ------------------------------------------------------------------
 
-def export_to_dir(dest_dir: str) -> tuple[bool, str]:
+def export_to_dir(
+    dest_dir: str,
+    app_version: str = "",
+    exported_by: str = "",
+) -> tuple[bool, str]:
     """
     Exporteert alle data naar een map:
         <dest_dir>/
@@ -101,6 +167,7 @@ def export_to_dir(dest_dir: str) -> tuple[bool, str]:
             floorplans.json
             floorplans/
             vlan_config.json
+            export_info.txt   ← K1: metadata over de export
 
     Returns (True, "") bij succes, (False, foutmelding) bij fout.
     """
@@ -132,6 +199,12 @@ def export_to_dir(dest_dir: str) -> tuple[bool, str]:
         if src.is_file():
             shutil.copy2(src, d / _FILE_VLAN)
 
+        write_export_info(
+            dest_dir,
+            scope="full",
+            app_version=app_version,
+            exported_by=exported_by,
+        )
         return True, ""
     except Exception:
         import traceback
@@ -142,7 +215,12 @@ def export_to_dir(dest_dir: str) -> tuple[bool, str]:
 # Export — per bedrijf
 # ------------------------------------------------------------------
 
-def export_company_to_dir(dest_dir: str, company_id: str) -> tuple[bool, str]:
+def export_company_to_dir(
+    dest_dir: str,
+    company_id: str,
+    app_version: str = "",
+    exported_by: str = "",
+) -> tuple[bool, str]:
     """
     Exporteert data van één bedrijf naar een map.
 
@@ -153,6 +231,7 @@ def export_company_to_dir(dest_dir: str, company_id: str) -> tuple[bool, str]:
       - floorplans/: alleen de SVG-bestanden van die grondplannen
       - vlan_config.json: volledig (gedeeld)
       - settings.json: NIET (installatie-specifiek)
+      - export_info.txt: metadata over de export (K1)
 
     Returns (True, "") bij succes, (False, foutmelding) bij fout.
     """
@@ -291,6 +370,13 @@ def export_company_to_dir(dest_dir: str, company_id: str) -> tuple[bool, str]:
         if src.is_file():
             shutil.copy2(src, d / _FILE_VLAN)
 
+        write_export_info(
+            dest_dir,
+            scope="company",
+            company_name=company.get("name", ""),
+            app_version=app_version,
+            exported_by=exported_by,
+        )
         return True, ""
     except Exception:
         import traceback

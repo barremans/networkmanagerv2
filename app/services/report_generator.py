@@ -2,9 +2,39 @@
 # Networkmap_Creator
 # File:    app/services/report_generator.py
 # Role:    Word rapport generator (python-docx)
-# Version: 2.8.1
+# Version: 2.12.0
 # Author:  Barremans
-# Changes: 2.8.1 -- Fix: site-samenvatting telt verbindingen nu op beide zijden
+# Changes: 2.12.0 -- REVIEW-AP stap 2 (service-API): publieke
+#                  enumerate_action_items(data) -> alle actie-objecten met
+#                  status ('open'/'approved') + approval-record, voor het
+#                  reviewvenster. Bouwt index/maps intern. Eén bron met het
+#                  rapport zodat tellingen altijd overeenkomen.
+#          2.11.0 -- REVIEW-AP stap 1: actiepunten met manueel goed te keuren
+#                  uitzonderingen. Nieuwe object-niveau enumerator
+#                  _enumerate_action_objects() met stabiele sleutels
+#                  "<check>:<object_id>" = ENIGE bron voor telling + (later) de
+#                  reviewtool. _compute_action_items() telt nu vanuit de OPEN
+#                  objecten (goedgekeurde afgetrokken via data["approvals"]).
+#                  Risico-/onverbonden-detailtabellen sluiten goedgekeurde uit.
+#                  Nieuwe sectie _add_approved_exceptions() ("Goedgekeurde
+#                  uitzonderingen") per bedrijf. Drempelcheck VLAN-info blijft
+#                  aggregaat. Switch-overzicht dup-IP-vlag blijft informatief.
+#          2.10.0 -- F-RPT BugA: access point gold als 'niet verbonden / actiepunt'
+#                  wanneer de uplink via een wandpunt door een patchpaneel-keten
+#                  liep (geen directe endpoint↔poort verbinding). Nieuwe helper
+#                  _resolve_ap_uplink() bepaalt nu de terminerende ACTIEVE poort
+#                  via tracing.trace_from_wall_outlet (of directe verbinding).
+#                  Gebruikt in _add_wifi_overview (kolom 'Verbonden switch/poort')
+#                  en _compute_action_items ('zonder switch/poort'-telling).
+#          2.9.0 -- RW-rapport: volledige bedrijfsgroepering. render_report_docx
+#                  rendert nu per bedrijf een Heading 1-sectie (paginabreuk
+#                  vooraf, behalve het eerste) met alle rubrieken gefilterd op
+#                  dat bedrijf via _scope_data_to_company(); rubrieken als
+#                  Heading 2 -> automatische Word-TOC (_add_toc) toont bedrijven
+#                  en rubrieken. Glossarium/orphans/revisie eenmalig globaal
+#                  achteraan. Dubbel-IP redundantiecheck (#-stacks) was reeds
+#                  afgedekt en blijft ongewijzigd.
+#          2.8.1 -- Fix: site-samenvatting telt verbindingen nu op beide zijden
 #                  (gelijk aan detail/cover); cover-actiepunten en actieplan
 #                  delen nu _compute_action_items() zodat tellingen altijd
 #                  gelijk zijn; nieuwe sectie _add_orphans_section() voor
@@ -289,7 +319,14 @@ def _spacer(doc, cm: float = 0.3) -> None:
     p.paragraph_format.space_after  = Pt(0)
 
 
+_SUPPRESS_NEXT_BREAK = False
+
+
 def _add_page_break(doc) -> None:
+    global _SUPPRESS_NEXT_BREAK
+    if _SUPPRESS_NEXT_BREAK:
+        _SUPPRESS_NEXT_BREAK = False
+        return
     p  = doc.add_paragraph()
     r  = p.add_run()
     br = OxmlElement("w:br")
@@ -468,6 +505,250 @@ def _build_index(data: dict) -> dict:
                             "slot": slot_lbl,
                         }
     return idx
+
+
+def _is_patchpanel_type(dev_type: str) -> bool:
+    """True voor passieve patchpanelen (beide schrijfwijzen komen voor)."""
+    return dev_type in ("patch_panel", "patchpanel")
+
+
+def _resolve_ap_uplink(data: dict, idx: dict, ap_id: str) -> str | None:
+    """
+    Bepaalt de terminerende ACTIEVE switch-/netwerkpoort voor een access point.
+
+    Een AP kan op twee manieren verbonden zijn:
+      1. directe endpoint->poort verbinding;
+      2. via een wandpunt (wall_outlet.endpoint_id) dat door een patchpaneel-
+         keten naar een switchpoort gepatcht is.
+
+    Geeft het port_id van de LAATSTE niet-patchpaneel (actieve) poort in de
+    trace terug, of None als de AP nergens op een actief toestel uitkomt.
+    """
+    # 1. directe endpoint<->poort verbinding
+    for conn in data.get("connections", []):
+        if (conn.get("to_type") == "endpoint" and conn.get("to_id") == ap_id
+                and conn.get("from_type") == "port"):
+            return conn.get("from_id")
+        if (conn.get("from_type") == "endpoint" and conn.get("from_id") == ap_id
+                and conn.get("to_type") == "port"):
+            return conn.get("to_id")
+
+    # 2. via gekoppeld wandpunt -> trace door de patchpaneel-keten
+    outlet_id = None
+    for site in get_all_sites(data):
+        for room in site.get("rooms", []):
+            for wo in room.get("wall_outlets", []):
+                if wo.get("endpoint_id") == ap_id:
+                    outlet_id = wo["id"]
+                    break
+            if outlet_id:
+                break
+        if outlet_id:
+            break
+    if not outlet_id:
+        return None
+
+    from app.services import tracing
+    steps = tracing.trace_from_wall_outlet(data, outlet_id)
+    last_active_port = None
+    for st in steps:
+        if st.get("obj_type") != "port":
+            continue
+        port = idx["port"].get(st.get("obj_id", ""))
+        dev  = idx["dev"].get(port.get("device_id", "")) if port else None
+        if dev and not _is_patchpanel_type(dev.get("type", "")):
+            last_active_port = st.get("obj_id")
+    return last_active_port
+
+
+# ===========================================================================
+# ACTIEPUNTEN — object-niveau enumerator + goedkeuringen (REVIEW-AP)
+# ===========================================================================
+
+def _action_key(check: str, obj_id: str) -> str:
+    """Stabiele sleutel voor een actie-object: '<check>:<object_id>'."""
+    return f"{check}:{obj_id}"
+
+
+def _approved_keys(data: dict) -> dict:
+    """Map van goedgekeurde actie-sleutels -> approval-record (status 'approved')."""
+    out: dict = {}
+    for a in data.get("approvals", []):
+        if a.get("status") == "approved" and a.get("key"):
+            out[a["key"]] = a
+    return out
+
+
+def _enumerate_action_objects(data: dict, idx: dict,
+                              risk_by_site: dict, unwired_by_site: dict,
+                              dup_ips: set) -> list:
+    """
+    Object-niveau actiepunten met stabiele sleutel. ENIGE bron voor zowel de
+    telling (_compute_action_items) als de reviewtool, zodat aantallen altijd
+    overeenkomen. Aggregaat-/drempelchecks (poorten zonder VLAN) zitten hier
+    NIET in — die blijven categorie-niveau in _compute_action_items.
+
+    Elk object: dict met key, check, category, object_type, object_id, label,
+    detail, priority (+ optioneel _name / _desc / _mac voor de telling-teksten).
+    """
+    objs: list = []
+
+    def add(check, otype, oid, label, detail, prio, **extra):
+        o = {
+            "key":         _action_key(check, oid),
+            "check":       check,
+            "category":    _ACTION_CATEGORY.get(check, check),
+            "object_type": otype,
+            "object_id":   oid,
+            "label":       label,
+            "detail":      detail,
+            "priority":    prio,
+        }
+        o.update(extra)
+        objs.append(o)
+
+    # Risico wandpunten — verbonden zonder eindapparaat
+    for sn, rows in risk_by_site.items():
+        for (wo, rn, port, dev) in rows:
+            add("risk_outlet", "wall_outlet", wo["id"],
+                f"{wo.get('name','?')}  ·  {rn}",
+                "Verbonden aan netwerk zonder eindapparaat", "Hoog")
+
+    # Onverbonden wandpunten — geen kabelverbinding
+    for sn, rows in unwired_by_site.items():
+        for (wo, rn) in rows:
+            add("unwired_outlet", "wall_outlet", wo["id"],
+                f"{wo.get('name','?')}  ·  {rn}",
+                "Geen kabelverbinding geregistreerd", "Middel")
+
+    # Dubbele IP-adressen
+    for ip in sorted(dup_ips):
+        add("dup_ip", "ip", ip, ip, "Meerdere devices delen dit IP-adres", "Hoog")
+
+    # Eindapparaten zonder sitekoppeling
+    ep_site_map = _build_ep_site_map(data, idx)
+    for ep in data.get("endpoints", []):
+        if ep["id"] not in ep_site_map:
+            add("unknown_ep", "endpoint", ep["id"], ep.get("name", "?"),
+                "Niet verbonden via poort of wandpunt", "Laag")
+
+    # Wi-Fi access points — datakwaliteit (per AP, per subtype)
+    aps = [ep for ep in data.get("endpoints", []) if ep.get("type") == "access_point"]
+    for ep in aps:
+        if not ep.get("ip"):
+            add("ap_no_ip", "endpoint", ep["id"], ep.get("name", "?"),
+                "Access point zonder IP-adres", "Middel")
+        if _resolve_ap_uplink(data, idx, ep["id"]) is None:
+            add("ap_no_uplink", "endpoint", ep["id"], ep.get("name", "?"),
+                "Access point komt niet op een actieve switch uit", "Middel")
+    _seen_mac: dict = {}
+    for ep in aps:
+        m = ep.get("mac", "")
+        if m:
+            _seen_mac.setdefault(m, []).append(ep)
+    for m, eps in _seen_mac.items():
+        if len(eps) > 1:
+            for ep in eps:
+                add("ap_dup_mac", "endpoint", ep["id"], ep.get("name", "?"),
+                    f"Dubbele identiteit (MAC {_normalize_mac(m)})", "Middel", _mac=m)
+
+    # MAC-adressen in brondata niet genormaliseerd
+    for dv in data.get("devices", []):
+        mac = dv.get("mac", "")
+        if mac and ":" not in mac and "-" not in mac:
+            add("bad_mac", "device", dv["id"], dv.get("name", "?"),
+                f"MAC zonder scheidingstekens: {mac}", "Laag", _name=dv.get("name", "?"))
+
+    # Switches zonder merk/model
+    for dv in data.get("devices", []):
+        if dv.get("type") == "switch" and not dv.get("brand") and not dv.get("model"):
+            add("no_brand_model", "device", dv["id"], dv.get("name", "?"),
+                "Switch zonder merk/model", "Laag", _name=dv.get("name", "?"))
+
+    # SFP-uplinks met mogelijk verkeerd kabeltype (per verbinding)
+    _sw_ids = {dv["id"] for dv in data.get("devices", []) if dv.get("type") == "switch"}
+    for c in data.get("connections", []):
+        fp = idx.get("port", {}).get(c.get("from_id", ""), {})
+        tp = idx.get("port", {}).get(c.get("to_id", ""), {})
+        cb = (c.get("cable_type", "") or "")
+        if ("SFP" in (fp.get("name", "") + tp.get("name", "")).upper()
+                and any(kw in cb.upper() for kw in ("UTP", "CAT"))):
+            fd = idx.get("dev", {}).get(fp.get("device_id", ""), {})
+            td = idx.get("dev", {}).get(tp.get("device_id", ""), {})
+            if fd.get("id") in _sw_ids and td.get("id") in _sw_ids:
+                desc = (f"{fd.get('name','?')}/{fp.get('name','?')} -> "
+                        f"{td.get('name','?')}/{tp.get('name','?')}")
+                add("sfp_utp", "connection", c.get("id", ""), desc,
+                    "SFP-uplink met UTP/CAT-kabeltype", "Middel", _desc=desc)
+
+    return objs
+
+
+_ACTION_CATEGORY = {
+    "risk_outlet":     "Risico wandpunt",
+    "unwired_outlet":  "Onverbonden wandpunt",
+    "dup_ip":          "Dubbel IP-adres",
+    "unknown_ep":      "Eindapparaat zonder sitekoppeling",
+    "ap_no_ip":        "Wi-Fi datakwaliteit",
+    "ap_no_uplink":    "Wi-Fi datakwaliteit",
+    "ap_dup_mac":      "Wi-Fi datakwaliteit",
+    "bad_mac":         "MAC niet genormaliseerd",
+    "no_brand_model":  "Switch zonder merk/model",
+    "sfp_utp":         "SFP-uplink kabeltype",
+}
+
+
+def _strip_approved_outlets(risk_by_site: dict, unwired_by_site: dict,
+                            approved: dict) -> tuple[dict, dict]:
+    """Verwijder goedgekeurde wandpunten uit de risico-/onverbonden-maps zodat
+    detailtabellen én tellingen consistent blijven met het actieplan."""
+    r2 = {}
+    for sn, rows in risk_by_site.items():
+        kept = [t for t in rows if _action_key("risk_outlet", t[0]["id"]) not in approved]
+        if kept:
+            r2[sn] = kept
+    u2 = {}
+    for sn, rows in unwired_by_site.items():
+        kept = [t for t in rows if _action_key("unwired_outlet", t[0]["id"]) not in approved]
+        if kept:
+            u2[sn] = kept
+    return r2, u2
+
+
+def _collect_approved_objects(data: dict, idx: dict) -> list:
+    """Alle goedgekeurde actie-objecten (volledige maps), met approval-record."""
+    risk, unw = _build_wo_risk_maps(data, idx)
+    dup       = _build_duplicate_ip_set(data)
+    objs      = _enumerate_action_objects(data, idx, risk, unw, dup)
+    approved  = _approved_keys(data)
+    out = []
+    for o in objs:
+        ap = approved.get(o["key"])
+        if ap:
+            m = dict(o)
+            m["_approval"] = ap
+            out.append(m)
+    return out
+
+
+def enumerate_action_items(data: dict) -> list:
+    """
+    Publieke API voor de reviewtool. Geeft ALLE actie-objecten terug (open +
+    goedgekeurd), elk met:
+      key, check, category, object_type, object_id, label, detail, priority,
+      status ('open' | 'approved'), approval (record of {}).
+    Bouwt index en maps intern; identiek aan wat het rapport telt (één bron).
+    """
+    idx       = _build_index(data)
+    risk, unw = _build_wo_risk_maps(data, idx)
+    dup       = _build_duplicate_ip_set(data)
+    objs      = _enumerate_action_objects(data, idx, risk, unw, dup)
+    approved  = _approved_keys(data)
+    for o in objs:
+        ap = approved.get(o["key"])
+        o["status"]   = "approved" if ap else "open"
+        o["approval"] = ap or {}
+    return objs
 
 
 # ===========================================================================
@@ -1398,7 +1679,6 @@ def _add_site_summary(doc, data: dict, idx: dict, risk_by_site: dict) -> None:
             _shade(cell, bg); _no_borders(cell); _margins(cell, top=40, bottom=40, left=80, right=60)
             _cell_p(cell, val, bold=(i == 0), size=9, color=col)
     _col_widths(tbl, W); _spacer(doc, 0.4)
-    _add_glossary(doc)
 
 
 def _add_glossary(doc) -> None:
@@ -1606,12 +1886,14 @@ def _add_wifi_overview(doc, data: dict, idx: dict) -> None:
     r2.font.size = Pt(10); r2.font.color.rgb = RGBColor(0xCC, 0xDD, 0xEE)
     _spacer(doc, 0.4)
 
+    # F-RPT — Verbonden switch/poort per AP. Niet enkel directe endpoint<->poort
+    # verbindingen, maar ook AP's die via een wandpunt door een patchpaneel-keten
+    # naar een switch gepatcht zijn (_resolve_ap_uplink volgt de trace).
     ap_port_map: dict = {}
-    for conn in data.get("connections", []):
-        if conn.get("to_type") == "endpoint":
-            ap_port_map[conn["to_id"]] = conn["from_id"]
-        elif conn.get("from_type") == "endpoint":
-            ap_port_map[conn["from_id"]] = conn["to_id"]
+    for _ap in aps:
+        _up = _resolve_ap_uplink(data, idx, _ap["id"])
+        if _up:
+            ap_port_map[_ap["id"]] = _up
 
     COLS  = ["Naam", "IP", "MAC", "Locatie", "Merk / Model", "Verbonden switch / poort"]
     W     = [Cm(4.5), Cm(3.0), Cm(4.0), Cm(4.5), Cm(4.0), Cm(7.7)]
@@ -1928,100 +2210,83 @@ def _add_device_info_section(doc, data: dict, idx: dict, dup_ips: set) -> None:
 def _compute_action_items(data: dict, idx: dict,
                           risk_by_site: dict, unwired_by_site: dict,
                           dup_ips: set) -> list:
-    """Bouwt de actieplan-lijst (zonder renderen). Eén bron voor zowel de
-    cover-telling als de actieplan-tabel, zodat beide altijd gelijk zijn.
+    """Bouwt de actieplan-lijst (zonder renderen). Telt vanuit de OPEN
+    actie-objecten — goedgekeurde uitzonderingen (data["approvals"]) zijn
+    afgetrokken. Eén bron (_enumerate_action_objects) voor cover-telling,
+    actieplan-tabel en reviewtool. Drempelcheck VLAN-info blijft aggregaat.
     Elk item: (nr, bevinding, toelichting, prioriteit, actie, status)."""
+    from collections import defaultdict
+
+    approved  = _approved_keys(data)
+    objs      = _enumerate_action_objects(data, idx, risk_by_site, unwired_by_site, dup_ips)
+    open_objs = [o for o in objs if o["key"] not in approved]
+    by: dict = defaultdict(list)
+    for o in open_objs:
+        by[o["check"]].append(o)
+
     acties = []
     nr = 1
 
-    total_risk = sum(len(v) for v in risk_by_site.values())
-    if total_risk:
-        acties.append((nr, f"Risico wandpunten ({total_risk})",
-                       "Verbonden aan netwerk zonder eindapparaat — onbeheerde netwerktoegang",
-                       "Hoog", "Fysiek controleren en eindapparaat registreren of poort blokkeren", "Open"))
+    def _add(bevinding, toelichting, prio, actie):
+        nonlocal nr
+        acties.append((nr, bevinding, toelichting, prio, actie, "Open"))
         nr += 1
-    total_unwired = sum(len(v) for v in unwired_by_site.values())
-    if total_unwired:
-        acties.append((nr, f"Onverbonden wandpunten ({total_unwired})",
-                       "Geen kabelverbinding geregistreerd — onduidelijk of fysiek aangesloten",
-                       "Middel", "Fysiek controleren en verbinding registreren of wandpunt verwijderen", "Open"))
-        nr += 1
-    if dup_ips:
-        acties.append((nr, f"Dubbele IP-adressen ({len(dup_ips)})",
-                       f"Meerdere devices delen zelfde IP: {', '.join(sorted(dup_ips))}",
-                       "Hoog", "IP-conflict corrigeren (switches met # in naam en zelfde prefix zijn al uitgesloten)", "Open"))
-        nr += 1
-    ep_site_map = _build_ep_site_map(data, idx)
-    unknown_eps = [ep for ep in data.get("endpoints", []) if ep["id"] not in ep_site_map]
-    if unknown_eps:
-        acties.append((nr, f"Eindapparaten zonder sitekoppeling ({len(unknown_eps)})",
-                       "Niet verbonden via poort of wandpunt",
-                       "Laag", "Verbinding registreren of eindapparaat verwijderen", "Open"))
-        nr += 1
+
+    if by["risk_outlet"]:
+        _add(f"Risico wandpunten ({len(by['risk_outlet'])})",
+             "Verbonden aan netwerk zonder eindapparaat — onbeheerde netwerktoegang",
+             "Hoog", "Fysiek controleren en eindapparaat registreren of poort blokkeren")
+    if by["unwired_outlet"]:
+        _add(f"Onverbonden wandpunten ({len(by['unwired_outlet'])})",
+             "Geen kabelverbinding geregistreerd — onduidelijk of fysiek aangesloten",
+             "Middel", "Fysiek controleren en verbinding registreren of wandpunt verwijderen")
+    if by["dup_ip"]:
+        _ips = sorted(o["object_id"] for o in by["dup_ip"])
+        _add(f"Dubbele IP-adressen ({len(_ips)})",
+             f"Meerdere devices delen zelfde IP: {', '.join(_ips)}",
+             "Hoog", "IP-conflict corrigeren (switches met # in naam en zelfde prefix zijn al uitgesloten)")
+    if by["unknown_ep"]:
+        _add(f"Eindapparaten zonder sitekoppeling ({len(by['unknown_ep'])})",
+             "Niet verbonden via poort of wandpunt",
+             "Laag", "Verbinding registreren of eindapparaat verwijderen")
+
+    # Drempelcheck — aggregaat, niet per-object goedkeurbaar
     ports_no_vlan = sum(1 for p in data.get("ports", []) if not p.get("vlan") and p.get("side") == "front")
     if ports_no_vlan > 50:
-        acties.append((nr, f"Poorten zonder VLAN-info ({ports_no_vlan})",
-                       "VLAN-kolom leeg — onduidelijk of access, trunk of niet in gebruik",
-                       "Middel", "VLAN-informatie aanvullen per switchpoort", "Open"))
-        nr += 1
-    bad_macs = [dv["name"] for dv in data.get("devices", [])
-                if dv.get("mac") and ":" not in dv.get("mac", "") and "-" not in dv.get("mac", "")]
-    if bad_macs:
-        _mac_suffix = "..." if len(bad_macs) > 5 else ""
-        acties.append((nr, f"MAC-adressen in brondata niet genormaliseerd ({len(bad_macs)})",
-                       f"Brondata bevat MAC zonder scheidingstekens: {', '.join(bad_macs[:5])}{_mac_suffix}. "
-                       "Het rapport normaliseert visueel, brondata moet nog gecorrigeerd worden.",
-                       "Laag", "Brondata aanpassen naar AA:BB:CC:DD:EE:FF formaat", "Open"))
-        nr += 1
-    no_bm = [dv["name"] for dv in data.get("devices", [])
-             if dv.get("type") == "switch" and not dv.get("brand") and not dv.get("model")]
-    if no_bm:
-        acties.append((nr, f"Switches zonder merk/model ({len(no_bm)})",
-                       f"{', '.join(no_bm[:5])}",
-                       "Laag", "Merk en model aanvullen voor correcte inventaris", "Open"))
-        nr += 1
+        _add(f"Poorten zonder VLAN-info ({ports_no_vlan})",
+             "VLAN-kolom leeg — onduidelijk of access, trunk of niet in gebruik",
+             "Middel", "VLAN-informatie aanvullen per switchpoort")
 
-    # SFP-uplinks met mogelijk verkeerd kabeltype
-    _sfp_utp = []
-    _sw_ids  = {dv["id"] for dv in data.get("devices", []) if dv.get("type") == "switch"}
-    for _c in data.get("connections", []):
-        _fp2 = idx.get("port", {}).get(_c.get("from_id", ""), {})
-        _tp2 = idx.get("port", {}).get(_c.get("to_id",   ""), {})
-        _cb2 = _c.get("cable_type", "") or ""
-        if ("SFP" in (_fp2.get("name","") + _tp2.get("name","")).upper() and
-                any(kw in _cb2.upper() for kw in ("UTP","CAT"))):
-            _fd2 = idx.get("dev",{}).get(_fp2.get("device_id",""),{})
-            _td2 = idx.get("dev",{}).get(_tp2.get("device_id",""),{})
-            if _fd2.get("id") in _sw_ids and _td2.get("id") in _sw_ids:
-                _sfp_utp.append(f"{_fd2.get('name','?')}/{_fp2.get('name','?')} → "
-                                f"{_td2.get('name','?')}/{_tp2.get('name','?')}")
-    if _sfp_utp:
-        acties.append((nr, f"SFP-uplinks met mogelijk verkeerd kabeltype ({len(_sfp_utp)})",
-                       f"{'; '.join(_sfp_utp[:3])}{'...' if len(_sfp_utp) > 3 else ''}",
-                       "Middel", "Kabeltype controleren: fiber, DAC of koper-SFP", "Open"))
-        nr += 1
+    if by["bad_mac"]:
+        _names = [o["_name"] for o in by["bad_mac"]]
+        _suffix = "..." if len(_names) > 5 else ""
+        _add(f"MAC-adressen in brondata niet genormaliseerd ({len(_names)})",
+             f"Brondata bevat MAC zonder scheidingstekens: {', '.join(_names[:5])}{_suffix}. "
+             "Het rapport normaliseert visueel, brondata moet nog gecorrigeerd worden.",
+             "Laag", "Brondata aanpassen naar AA:BB:CC:DD:EE:FF formaat")
+    if by["no_brand_model"]:
+        _names = [o["_name"] for o in by["no_brand_model"]]
+        _add(f"Switches zonder merk/model ({len(_names)})",
+             f"{', '.join(_names[:5])}",
+             "Laag", "Merk en model aanvullen voor correcte inventaris")
+    if by["sfp_utp"]:
+        _items = [o["_desc"] for o in by["sfp_utp"]]
+        _add(f"SFP-uplinks met mogelijk verkeerd kabeltype ({len(_items)})",
+             f"{'; '.join(_items[:3])}{'...' if len(_items) > 3 else ''}",
+             "Middel", "Kabeltype controleren: fiber, DAC of koper-SFP")
 
-    # AP-datakwaliteit
-    _ap_list = [ep for ep in data.get("endpoints", []) if ep.get("type") == "access_point"]
-    if _ap_list:
-        _ap_no_ip    = [ep for ep in _ap_list if not ep.get("ip")]
-        _ap_seen_mac: dict = {}
-        for ep in _ap_list:
-            _m = ep.get("mac", "")
-            if _m: _ap_seen_mac.setdefault(_m, []).append(ep.get("name","?"))
-        _ap_dup_mac  = [nms for nms in _ap_seen_mac.values() if len(nms) > 1]
-        _cep_ids     = ({c.get("to_id") for c in data.get("connections",[])} |
-                        {c.get("from_id") for c in data.get("connections",[])})
-        _ap_no_port  = [ep for ep in _ap_list if ep.get("id") not in _cep_ids]
-        _ap_det      = []
-        if _ap_no_ip:   _ap_det.append(f"{len(_ap_no_ip)} zonder IP")
-        if _ap_no_port: _ap_det.append(f"{len(_ap_no_port)} zonder switch/poort")
-        if _ap_dup_mac: _ap_det.append(f"{len(_ap_dup_mac)} dubbele identiteit (MAC)")
-        if _ap_det:
-            acties.append((nr, "Wi-Fi access points — datakwaliteit",
-                           "; ".join(_ap_det),
-                           "Middel", "IP, poort en dubbele entries aanvullen/corrigeren", "Open"))
-            nr += 1
+    # Wi-Fi access points — datakwaliteit (gecombineerde lijn, open-telling)
+    _ap_no_ip   = len(by["ap_no_ip"])
+    _ap_no_port = len(by["ap_no_uplink"])
+    _ap_dup     = len({o["object_id"] for o in by["ap_dup_mac"]})
+    _ap_det = []
+    if _ap_no_ip:   _ap_det.append(f"{_ap_no_ip} zonder IP")
+    if _ap_no_port: _ap_det.append(f"{_ap_no_port} zonder switch/poort")
+    if _ap_dup:     _ap_det.append(f"{_ap_dup} dubbele identiteit (MAC)")
+    if _ap_det:
+        _add("Wi-Fi access points — datakwaliteit",
+             "; ".join(_ap_det),
+             "Middel", "IP, poort en dubbele entries aanvullen/corrigeren")
 
     return acties
 
@@ -2074,6 +2339,48 @@ def _add_action_plan(doc, data: dict, idx: dict,
             cell = row.cells[i]; cell.width = w
             _shade(cell, bg); _no_borders(cell); _margins(cell, top=35, bottom=35, left=80, right=60)
             _cell_p(cell, val, bold=(i == 1), size=9, color=col)
+    _col_widths(tbl, W); _spacer(doc, 0.4)
+
+
+def _add_approved_exceptions(doc, approved_objs: list) -> None:
+    """Goedgekeurde uitzonderingen: actiepunten die manueel zijn goedgekeurd en
+    daardoor NIET meetellen in het actieplan. Jouw keuze: apart tonen."""
+    if not approved_objs:
+        return
+    _add_page_break(doc)
+    cell = _full_cell(doc, _rgb_hex(_C_GROEN))
+    _clear_p(cell); p = cell.add_paragraph()
+    p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
+    r1 = p.add_run("\u2705  Goedgekeurde uitzonderingen")
+    r1.bold = True; r1.font.size = Pt(16); r1.font.color.rgb = _C_WIT
+    r2 = p.add_run(f"   \u2014   {len(approved_objs)} handmatig goedgekeurd \u00b7 niet meegeteld in het actieplan")
+    r2.font.size = Pt(10); r2.font.color.rgb = RGBColor(0xDD, 0xEE, 0xDD)
+    _spacer(doc, 0.4)
+
+    COLS  = ["Categorie", "Object", "Bevinding", "Reden", "Door", "Datum"]
+    W     = [Cm(4.0), Cm(5.0), Cm(6.0), Cm(8.0), Cm(3.0), Cm(3.7)]
+    NCOLS = len(COLS)
+    tbl   = doc.add_table(rows=0, cols=NCOLS); tbl.style = "Table Grid"
+
+    hdr_row = tbl.add_row(); _tbl_header(hdr_row)
+    for i, (col, w) in enumerate(zip(COLS, W)):
+        cell = hdr_row.cells[i]; cell.width = w
+        _shade(cell, _rgb_hex(_C_GROEN)); _no_borders(cell); _margins(cell, top=50, bottom=50, left=80, right=60)
+        _cell_p(cell, col, bold=True, size=9, color=_C_WIT)
+
+    for ri, o in enumerate(sorted(approved_objs, key=lambda x: (x["category"], x["label"]))):
+        ap  = o.get("_approval", {})
+        at  = (ap.get("at", "") or "")[:10]
+        row = tbl.add_row(); _cant_split(row)
+        bg  = _rgb_hex(_C_GRIJS) if ri % 2 == 0 else "FFFFFF"
+        vals = [o["category"], o["label"], o["detail"],
+                ap.get("reason", "") or "\u2014",
+                ap.get("by", "") or "\u2014", at or "\u2014"]
+        for i, (val, w) in enumerate(zip(vals, W)):
+            cell = row.cells[i]; cell.width = w
+            _shade(cell, bg); _no_borders(cell); _margins(cell, top=35, bottom=35, left=80, right=60)
+            _cell_p(cell, val, bold=(i == 1), size=9,
+                    color=(_C_ZWART if i == 1 else _C_SUBTXT))
     _col_widths(tbl, W); _spacer(doc, 0.4)
 
 
@@ -2285,16 +2592,165 @@ def _scope_data_to_company(data: dict, company: dict) -> dict:
     return scoped
 
 
+# ===========================================================================
+# RW-rapport — bedrijfsgroepering: koppen, inhoudsopgave, meta
+# ===========================================================================
+
+def _company_heading(doc, name: str, is_first: bool) -> None:
+    """Heading 1 per bedrijf (TOC-entry). Paginabreuk vooraf, behalve het eerste."""
+    h = doc.add_paragraph(name, style="Heading 1")
+    if not is_first:
+        h.paragraph_format.page_break_before = True
+
+
+def _rubriek(doc, title: str, page_break: bool = True) -> None:
+    """Heading 2 rubriektitel (TOC-entry).
+
+    Plaatst optioneel een paginabreuk vóór de rubriek en onderdrukt de eigen
+    paginabreuk van de daaropvolgende sectie, zodat de gekleurde sectiebanner op
+    dezelfde pagina komt als deze kop (geen lege tussenpagina).
+    """
+    global _SUPPRESS_NEXT_BREAK
+    h = doc.add_paragraph(title, style="Heading 2")
+    if page_break:
+        h.paragraph_format.page_break_before = True
+    _SUPPRESS_NEXT_BREAK = True
+
+
+def _add_toc(doc) -> None:
+    """Voegt een automatisch bijwerkbaar Word-inhoudsopgaveveld toe (Heading 1-3).
+
+    Word vult het veld bij het openen van het document (of via rechtsklik ->
+    'Veld bijwerken'). De bedrijven (Heading 1) en rubrieken (Heading 2)
+    verschijnen dan automatisch met paginanummers.
+    """
+    title = doc.add_paragraph()
+    rt = title.add_run("Inhoudsopgave")
+    rt.bold = True
+    rt.font.size = Pt(18)
+    rt.font.color.rgb = _C_ACCENT
+    _spacer(doc, 0.2)
+
+    p = doc.add_paragraph()
+    run = p.add_run()
+    f_begin = OxmlElement("w:fldChar"); f_begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText"); instr.set(qn("xml:space"), "preserve")
+    instr.text = 'TOC \\o "1-3" \\h \\z \\u'
+    f_sep = OxmlElement("w:fldChar"); f_sep.set(qn("w:fldCharType"), "separate")
+    t = OxmlElement("w:t")
+    t.text = "Rechtsklik en kies 'Veld bijwerken' om de inhoudsopgave te genereren."
+    f_end = OxmlElement("w:fldChar"); f_end.set(qn("w:fldCharType"), "end")
+    run._r.append(f_begin); run._r.append(instr); run._r.append(f_sep)
+    run._r.append(t); run._r.append(f_end)
+
+
+def _has_uplinks(data: dict, idx: dict) -> bool:
+    """True als er minstens één switch-naar-switch uplink bestaat (zelfde detectie
+    als _add_uplink_overview), zodat geen lege rubriekkop wordt geplaatst."""
+    switch_ids = {dv["id"] for dv in data.get("devices", []) if dv.get("type") == "switch"}
+    if len(switch_ids) < 2:
+        return False
+    for conn in data.get("connections", []):
+        fp = idx["port"].get(conn.get("from_id"))
+        tp = idx["port"].get(conn.get("to_id"))
+        if not fp or not tp:
+            continue
+        fd = idx["dev"].get(fp.get("device_id", ""))
+        td = idx["dev"].get(tp.get("device_id", ""))
+        if (fd and td and fd["id"] in switch_ids and td["id"] in switch_ids
+                and fd["id"] != td["id"]):
+            return True
+    return False
+
+
+def _prepare_report_meta(data: dict, idx: dict, risk_by_site: dict,
+                         unwired_by_site: dict, dup_ips: set,
+                         vlan_config: dict) -> None:
+    """Berekent VLAN-tellingen, validatiestatus en actieplan-aantallen en zet ze
+    op de meegegeven data dict (_vlan_*, _validation_status, _action_counts,
+    _vlan_config). Wordt zowel globaal (cover) als per bedrijf gebruikt zodat de
+    tellingen telkens kloppen voor de betreffende scope."""
+    sites = get_all_sites(data)
+
+    all_vlans_used: set = set()
+    for p in data.get("ports", []):
+        if p.get("vlan"):
+            try: all_vlans_used.add(int(p["vlan"]))
+            except Exception: all_vlans_used.add(p["vlan"])
+    for s in sites:
+        for room in s.get("rooms", []):
+            for wo in room.get("wall_outlets", []):
+                if wo.get("vlan"):
+                    try: all_vlans_used.add(int(wo["vlan"]))
+                    except Exception: all_vlans_used.add(wo["vlan"])
+    data["_vlan_count_corrected"] = len(all_vlans_used)
+    data["_vlan_count_used"]      = len(all_vlans_used)
+    data["_vlan_config"]          = vlan_config
+
+    if vlan_config:
+        import ipaddress as _ipa
+        _n_def = len(vlan_config)
+        _n_complete = 0
+        _n_issues = 0
+        _seen_gw: dict = {}
+        for _vid, _vcfg in vlan_config.items():
+            _ip  = _vcfg.get("ip", "")
+            _sub = _vcfg.get("subnet", "")
+            _ok_ip, _ok_sub = False, False
+            if _ip:
+                try: _ipa.ip_address(_ip); _ok_ip = True
+                except Exception: _n_issues += 1
+                if _ok_ip:
+                    _seen_gw.setdefault(_ip, []).append(_vid)
+            else:
+                _n_issues += 1
+            if _sub:
+                try: _ipa.ip_network(f"0.0.0.0/{_sub}", strict=False); _ok_sub = True
+                except Exception: _n_issues += 1
+            if _ok_ip and _ok_sub and _vcfg.get("name"):
+                _n_complete += 1
+        for _ip, _vids in _seen_gw.items():
+            if len(_vids) > 1:
+                _n_issues += 1
+        data["_vlan_count_defined"]  = _n_def
+        data["_vlan_count_complete"] = _n_complete
+        data["_vlan_issues"]         = _n_issues if _n_issues else "—"
+    else:
+        data["_vlan_count_defined"]  = 0
+        data["_vlan_count_complete"] = 0
+        data["_vlan_issues"]         = "—"
+
+    _risk_total = sum(len(v) for v in risk_by_site.values())
+    _high   = bool(dup_ips) or (_risk_total > 0)
+    _medium = bool(unwired_by_site and any(unwired_by_site.values()))
+    if _high:
+        data["_validation_status"] = "NIET DEFINITIEF"
+    elif _medium:
+        data["_validation_status"] = "TE CONTROLEREN"
+    else:
+        data["_validation_status"] = "GEVALIDEERD"
+
+    _ap_items = _compute_action_items(data, idx, risk_by_site, unwired_by_site, dup_ips)
+    data["_action_counts"] = {
+        "total":  len(_ap_items),
+        "high":   sum(1 for a in _ap_items if a[3] == "Hoog"),
+        "medium": sum(1 for a in _ap_items if a[3] == "Middel"),
+        "low":    sum(1 for a in _ap_items if a[3] == "Laag"),
+    }
+
+
 def render_report_docx(data: dict, filepath: str, company_id: str = "") -> tuple[bool, str]:
     """
-    Genereer volledig Word rapport.
+    Genereer volledig Word rapport met bedrijfsgroepering (RW-rapport).
 
-    company_id == ""  -> render alle bedrijven (oorspronkelijk gedrag). Bestaat er
-                         exact één bedrijf, dan wordt dat op de cover getoond.
-    company_id != ""  -> filter data op dat bedrijf; cover toont bedrijfsgegevens.
+    company_id == ""  -> render alle bedrijven. Elk bedrijf krijgt een eigen
+                         Heading 1-sectie (paginabreuk vooraf, behalve het eerste)
+                         met al zijn rubrieken; data wordt per bedrijf gefilterd via
+                         _scope_data_to_company(). Een automatische Word-TOC toont de
+                         bedrijven en rubrieken.
+    company_id != ""  -> enkel dat ene bedrijf (structuur identiek, één blok).
 
-    Behoudt achterwaartse compatibiliteit: bestaande aanroepen zonder company_id
-    blijven werken.
+    Achterwaarts compatibel: bestaande aanroepen zonder company_id blijven werken.
     Returns: (success: bool, error_message: str)
     """
     try:
@@ -2303,17 +2759,16 @@ def render_report_docx(data: dict, filepath: str, company_id: str = "") -> tuple
     except Exception:
         version = "2.0.0"
 
-    # F3 — bedrijfsselectie / -filter
-    company = None
+    # Bedrijfsselectie / -scope
     if company_id:
-        company = get_company_by_id(data, company_id)
-        if company is None:
+        sel = get_company_by_id(data, company_id)
+        if sel is None:
             return False, f"Bedrijf niet gevonden: {company_id}"
-        data = _scope_data_to_company(data, company)
+        companies = [sel]
     else:
-        _comps = get_all_companies(data)
-        if len(_comps) == 1:
-            company = _comps[0]
+        companies = list(get_all_companies(data))
+    if not companies:
+        return False, "Geen bedrijven in de data."
 
     try:
         doc = Document()
@@ -2326,39 +2781,7 @@ def render_report_docx(data: dict, filepath: str, company_id: str = "") -> tuple
         sec.left_margin   = Cm(1.5)
         sec.right_margin  = Cm(1.5)
 
-        idx   = _build_index(data)
-        sites = get_all_sites(data)
-
-        # Organisatienaam voor header
-        if company is not None:
-            org_name = company.get("name") or (sites[0]["name"] if sites else "Netwerk")
-        else:
-            org_name = " · ".join(s["name"] for s in sites) if len(sites) > 1 else (sites[0]["name"] if sites else "Netwerk")
-
-        # F3 — bedrijfsgegevens voor cover (None = meerdere bedrijven samen)
-        data["_company"] = company
-
-        # Pre-compute
-        ep_site_map                        = _build_ep_site_map(data, idx)
-        risk_by_site, unwired_by_site      = _build_wo_risk_maps(data, idx)
-        dup_ips                            = _build_duplicate_ip_set(data)
-
-        # VLAN-tellingen voor cover
-        all_vlans_used: set = set()
-        for p in data.get("ports", []):
-            if p.get("vlan"):
-                try: all_vlans_used.add(int(p["vlan"]))
-                except Exception: all_vlans_used.add(p["vlan"])
-        for s in sites:
-            for room in s.get("rooms", []):
-                for wo in room.get("wall_outlets", []):
-                    if wo.get("vlan"):
-                        try: all_vlans_used.add(int(wo["vlan"]))
-                        except Exception: all_vlans_used.add(wo["vlan"])
-        data["_vlan_count_corrected"] = len(all_vlans_used)
-        data["_vlan_count_used"]      = len(all_vlans_used)
-
-        # Laad VLAN configuratie (naam, subnet, gateway)
+        # VLAN-configuratie (globaal, niet bedrijfsspecifiek) — eenmaal laden
         vlan_config: dict = {}
         try:
             from app.services import vlan_service
@@ -2366,124 +2789,136 @@ def render_report_docx(data: dict, filepath: str, company_id: str = "") -> tuple
             vlan_config = {v["id"]: v for v in vlans_raw}
         except Exception:
             pass
-        data["_vlan_config"] = vlan_config
 
-        # VLAN-validatie voor cover-statistieken
-        if vlan_config:
-            import ipaddress as _ipa
-            _n_def = len(vlan_config)
-            _n_complete = 0
-            _n_issues = 0
-            _seen_gw: dict = {}
-            for _vid, _vcfg in vlan_config.items():
-                _ip  = _vcfg.get("ip", "")
-                _sub = _vcfg.get("subnet", "")
-                _ok_ip, _ok_sub = False, False
-                if _ip:
-                    try: _ipa.ip_address(_ip); _ok_ip = True
-                    except Exception: _n_issues += 1
-                    if _ok_ip:
-                        _seen_gw.setdefault(_ip, []).append(_vid)
-                else:
-                    _n_issues += 1
-                if _sub:
-                    try: _ipa.ip_network(f"0.0.0.0/{_sub}", strict=False); _ok_sub = True
-                    except Exception: _n_issues += 1
-                if _ok_ip and _ok_sub and _vcfg.get("name"):
-                    _n_complete += 1
-            for _ip, _vids in _seen_gw.items():
-                if len(_vids) > 1:
-                    _n_issues += 1
-            data["_vlan_count_defined"]  = _n_def
-            data["_vlan_count_complete"] = _n_complete
-            data["_vlan_issues"]         = _n_issues if _n_issues else "—"
-        else:
-            data["_vlan_count_defined"]  = 0
-            data["_vlan_count_complete"] = 0
-            data["_vlan_issues"]         = "—"
+        # Cover-scope: bij één bedrijf gefilterd, anders volledige data (alle bedrijven)
+        full_data = _scope_data_to_company(data, companies[0]) if company_id else data
+        g_idx   = _build_index(full_data)
+        g_sites = get_all_sites(full_data)
 
-        # Validatiestatus berekenen
-        _risk_total  = sum(len(v) for v in risk_by_site.values())
-        _high        = bool(dup_ips) or (_risk_total > 0)
-        _medium      = bool(unwired_by_site and any(unwired_by_site.values()))
-        if _high:
-            data["_validation_status"] = "NIET DEFINITIEF"
-        elif _medium:
-            data["_validation_status"] = "TE CONTROLEREN"
+        cover_company = companies[0] if len(companies) == 1 else None
+        if cover_company is not None:
+            org_name = cover_company.get("name") or (g_sites[0]["name"] if g_sites else "Netwerk")
         else:
-            data["_validation_status"] = "GEVALIDEERD"
+            org_name = " · ".join(c.get("name", "") for c in companies)
+
+        full_data["_company"] = cover_company
+        g_risk, g_unwired = _build_wo_risk_maps(full_data, g_idx)
+        g_dup             = _build_duplicate_ip_set(full_data)
+        g_risk, g_unwired = _strip_approved_outlets(g_risk, g_unwired, _approved_keys(full_data))
+        _prepare_report_meta(full_data, g_idx, g_risk, g_unwired, g_dup, vlan_config)
 
         _add_header(doc, org_name, version)
         _add_footer(doc, version)
 
-        # Actieplan-aantallen voor cover — exact dezelfde bron als _add_action_plan
-        _ap_items = _compute_action_items(data, idx, risk_by_site, unwired_by_site, dup_ips)
-        data["_action_counts"] = {
-            "total":  len(_ap_items),
-            "high":   sum(1 for a in _ap_items if a[3] == "Hoog"),
-            "medium": sum(1 for a in _ap_items if a[3] == "Middel"),
-            "low":    sum(1 for a in _ap_items if a[3] == "Laag"),
-        }
+        # 1. Titelblad (globaal) + automatische inhoudsopgave
+        _build_titlepage(doc, full_data, version)
+        _add_page_break(doc)
+        _add_toc(doc)
+        _add_page_break(doc)
 
-        # 1. Titelblad
-        _build_titlepage(doc, data, version)
+        # 2. Per bedrijf: alle rubrieken gefilterd op dat bedrijf
+        for i, comp in enumerate(companies):
+            sdata = full_data if company_id else _scope_data_to_company(data, comp)
+            sdata["_company"] = comp
+            sidx          = _build_index(sdata)
+            s_ep_map      = _build_ep_site_map(sdata, sidx)
+            s_risk, s_unw = _build_wo_risk_maps(sdata, sidx)
+            s_dup         = _build_duplicate_ip_set(sdata)
+            s_approved    = _collect_approved_objects(sdata, sidx)
+            s_risk, s_unw = _strip_approved_outlets(s_risk, s_unw, _approved_keys(sdata))
+            _prepare_report_meta(sdata, sidx, s_risk, s_unw, s_dup, vlan_config)
+            s_sites = get_all_sites(sdata)
 
-        # 2. Site-samenvatting + begrippenlijst
-        _add_site_summary(doc, data, idx, risk_by_site)
+            _company_heading(doc, comp.get("name", "Bedrijf"), is_first=(i == 0))
 
-        # 3. Actieplan (vroeg — na samenvatting, vóór detail)
-        _add_action_plan(doc, data, idx, risk_by_site, unwired_by_site, dup_ips)
+            _first = True
+            def _rb(title: str, render: bool) -> bool:
+                nonlocal _first
+                if not render:
+                    return False
+                _rubriek(doc, title, page_break=not _first)
+                _first = False
+                return True
 
-        # 4. Switch-overzicht
-        _add_switch_overview(doc, data, idx, dup_ips)
+            has_switch  = any(d.get("type") == "switch" for d in sdata.get("devices", []))
+            has_wifi    = any(e.get("type") == "access_point" for e in sdata.get("endpoints", []))
+            has_risk    = sum(len(v) for v in s_risk.values()) > 0
+            has_unw     = sum(len(v) for v in s_unw.values()) > 0
+            has_eps     = bool(sdata.get("endpoints"))
+            has_devinfo = any(d.get("mac") or d.get("serial") or d.get("ip")
+                              for d in sdata.get("devices", []))
+            has_detail  = any(
+                room.get("racks") or room.get("wall_outlets")
+                for site in s_sites for room in site.get("rooms", [])
+            )
 
-        # 5. Uplink-overzicht
-        _add_uplink_overview(doc, data, idx)
+            # 2.1 Samenvatting (altijd)
+            _rb("Samenvatting", True)
+            _add_site_summary(doc, sdata, sidx, s_risk)
 
-        # 6. Wi-Fi overzicht
-        _add_wifi_overview(doc, data, idx)
+            # 2.2 Aandachtspunten / actieplan (altijd)
+            _rb("Aandachtspunten", True)
+            _add_action_plan(doc, sdata, sidx, s_risk, s_unw, s_dup)
 
-        # 7. Per site: racks / devices / poorten / wandpunten / verbindingen / direct / VLAN
-        for site in sites:
-            _add_site_header(doc, site["name"], site.get("location", ""))
-            _spacer(doc, 0.4)
+            # 2.2b Goedgekeurde uitzonderingen (REVIEW-AP)
+            if _rb("Goedgekeurde uitzonderingen", bool(s_approved)):
+                _add_approved_exceptions(doc, s_approved)
 
-            for room in site.get("rooms", []):
-                if not room.get("racks") and not room.get("wall_outlets"):
-                    continue
-                _add_room_header(doc, room["name"], room.get("floor", ""))
-                _spacer(doc, 0.2)
-                _add_rack_overview(doc, room)
-                for rack in room.get("racks", []):
-                    if not rack.get("slots"):
-                        continue
-                    _add_rack_badge(doc, rack["name"], room["name"])
-                    _add_device_table(doc, rack, idx)
-                    _spacer(doc, 0.2)
-                    _add_port_table(doc, rack, data, idx)
-                    _spacer(doc, 0.5)
+            # 2.3 Switch-overzicht
+            if _rb("Switch-overzicht", has_switch):
+                _add_switch_overview(doc, sdata, sidx, s_dup)
 
-            _add_site_outlets(doc, data, idx, site)
-            _add_site_connections(doc, data, idx, site)
-            _add_site_direct_endpoints(doc, data, idx, site)
-            _add_site_vlans(doc, data, idx, site)
+            # 2.4 Uplink-overzicht
+            if _rb("Uplink-overzicht", _has_uplinks(sdata, sidx)):
+                _add_uplink_overview(doc, sdata, sidx)
 
-        # 8. Risico wandpunten
-        _add_risk_outlets_section(doc, data, idx, risk_by_site)
+            # 2.5 Wi-Fi overzicht
+            if _rb("Wi-Fi overzicht", has_wifi):
+                _add_wifi_overview(doc, sdata, sidx)
 
-        # 9. Onverbonden wandpunten
-        _add_unwired_outlets_section(doc, data, idx, unwired_by_site)
+            # 2.6 Netwerkdetail per ruimte (racks/devices/poorten/wandpunten/verbindingen)
+            if _rb("Netwerkdetail", has_detail):
+                for site in s_sites:
+                    _add_site_header(doc, site["name"], site.get("location", ""))
+                    _spacer(doc, 0.4)
+                    for room in site.get("rooms", []):
+                        if not room.get("racks") and not room.get("wall_outlets"):
+                            continue
+                        _add_room_header(doc, room["name"], room.get("floor", ""))
+                        _spacer(doc, 0.2)
+                        _add_rack_overview(doc, room)
+                        for rack in room.get("racks", []):
+                            if not rack.get("slots"):
+                                continue
+                            _add_rack_badge(doc, rack["name"], room["name"])
+                            _add_device_table(doc, rack, sidx)
+                            _spacer(doc, 0.2)
+                            _add_port_table(doc, rack, sdata, sidx)
+                            _spacer(doc, 0.5)
+                    _add_site_outlets(doc, sdata, sidx, site)
+                    _add_site_connections(doc, sdata, sidx, site)
+                    _add_site_direct_endpoints(doc, sdata, sidx, site)
+                    _add_site_vlans(doc, sdata, sidx, site)
 
-        # 10. Eindapparaten volledig
-        _add_endpoints_section(doc, data, idx, ep_site_map)
+            # 2.7 Risico-wandpunten
+            if _rb("Risico-wandpunten", has_risk):
+                _add_risk_outlets_section(doc, sdata, sidx, s_risk)
 
-        # 11. Device info uitgebreid
-        _add_device_info_section(doc, data, idx, dup_ips)
+            # 2.8 Onverbonden wandpunten
+            if _rb("Onverbonden wandpunten", has_unw):
+                _add_unwired_outlets_section(doc, sdata, sidx, s_unw)
 
-        # 12. Niet-geplaatste objecten (orphans) — enkel als die bestaan
-        _add_orphans_section(doc, data, idx)
+            # 2.9 Eindapparaten
+            if _rb("Eindapparaten", has_eps):
+                _add_endpoints_section(doc, sdata, sidx, s_ep_map)
 
-        # 13. Revisiehistoriek
+            # 2.10 Device-info
+            if _rb("Device-info", has_devinfo):
+                _add_device_info_section(doc, sdata, sidx, s_dup)
+
+        # 3. Globale afsluiting: niet-geplaatste objecten + begrippenlijst + revisie
+        _add_orphans_section(doc, full_data, g_idx)
+        _add_glossary(doc)
         _add_revision_history(doc, version)
 
         doc.save(filepath)
@@ -2492,6 +2927,7 @@ def render_report_docx(data: dict, filepath: str, company_id: str = "") -> tuple
     except Exception:
         import traceback
         return False, traceback.format_exc()
+
 
 
 # ---------------------------------------------------------------------------

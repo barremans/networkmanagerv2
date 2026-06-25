@@ -3,7 +3,7 @@ from app.helpers.settings_storage import get_all_sites
 # Networkmap_Creator
 # File:    app/services/tracing.py
 # Role:    Trace berekening — pure logica, GEEN Qt imports
-# Version: 1.8.1
+# Version: 1.9.0
 # Author:  Barremans
 # Changes: 1.1.0 — B8: _is_patchpanel() helper — type check accepteert
 #                       zowel "patch_panel" als "patchpanel" (beide komen
@@ -34,6 +34,19 @@ from app.helpers.settings_storage import get_all_sites
 #                       B8-blok zette internal te vroeg in visited. Nieuwe helper
 #                       _follow_internal_external() volgt externe verbinding van
 #                       reeds-bezochte interne partner alsnog.
+#          1.9.0 — PP-poort met TWEE verbindingen (port→port naar switch ÉN
+#                       wall_outlet naar wandpunt op dezelfde PP-poort).
+#                       Probleemgeval "Workflow A": switch eerst aan PP BACK
+#                       gekoppeld, daarna wandpunt aan diezelfde PP BACK.
+#                       Tracer volgde voorheen maar één verbinding per poort
+#                       (alle _get_*-helpers gebruiken next() = eerste match).
+#                       Nieuwe helpers _get_all_connections_for_port() en
+#                       _follow_extras(): volgen de EXTRA verbinding(en) van een
+#                       patchpanel-poort die de primaire branch niet pakt.
+#                       Vuurt UITSLUITEND op patchpanel-poorten met 2+ verbindingen
+#                       → geen enkele bestaande trace verandert (zero regressie).
+#                       Externe partner (switch): prepend bij poort-start,
+#                       append bij wandpunt-start (skip_outlet_id gezet).
 # =============================================================================
 #
 # BELANGRIJK: Dit bestand bevat GEEN Qt imports.
@@ -125,6 +138,20 @@ def _get_connection_for_port(data: dict, port_id: str) -> dict | None:
             (c["to_id"]   == port_id and c["to_type"]   == "port")),
         None
     )
+
+
+def _get_all_connections_for_port(data: dict, port_id: str) -> list[dict]:
+    """
+    1.9.0 — ALLE verbindingen waarbij de poort betrokken is (als from of to).
+    Een patchpanel-poort mag fysiek twee verbindingen hebben:
+      - port→port  → richting switch
+      - wall_outlet → richting wandpunt
+    """
+    return [
+        c for c in data.get("connections", [])
+        if (c["from_id"] == port_id and c["from_type"] == "port") or
+           (c["to_id"]   == port_id and c["to_type"]   == "port")
+    ]
 
 
 def _get_partner_port(data: dict, port_id: str) -> tuple[dict | None, dict | None]:
@@ -269,7 +296,7 @@ def _trace_from_port_internal(data: dict, port_id: str,
     visited       : set[str]   = set()
     max_steps = 20
 
-    def _follow(current_port_id: str):
+    def _follow_core(current_port_id: str):
         if len(steps) >= max_steps or current_port_id in visited:
             return
         visited.add(current_port_id)
@@ -422,20 +449,33 @@ def _trace_from_port_internal(data: dict, port_id: str,
                 internal = _get_patchpanel_partner(data, partner_port)
                 if internal and internal["id"] not in visited:
                     _follow(internal["id"])
+                # 1.9.0 — PP-partner kan ZELF een tweede verbinding hebben
+                # (bv. wandpunt op dezelfde PP-poort als de port→port naar switch).
+                # De manuele append hierboven gaat niet via _follow, dus de
+                # extra-verbinding expliciet volgen.
+                if len(_get_all_connections_for_port(data, partner_port["id"])) >= 2:
+                    _follow_extras(partner_port["id"])
             else:
                 # 1.4.0/1.5.0 — Cross-rack port↔port: niet-patchpanel partner toevoegen.
                 # 1.6.0 — Gaat naar prepend_steps: SW10 hoort VOOR de huidige poort
                 #          zodat canonieke volgorde SW10→PP_BACK→PP_FRONT→SW9.3 is.
+                # 1.9.0 — Bij wandpunt-start (skip_outlet_id gezet) APPEND i.p.v.
+                #          prepend, zodat de switch helemaal achteraan de keten komt
+                #          (endpoint → wandpunt → PP → switch).
                 if partner_device:
                     visited.add(partner_port["id"])
-                    prepend_steps.insert(0, _make_step(
+                    step = _make_step(
                         obj_type   = "port",
                         obj_id     = partner_port["id"],
                         label      = _port_label_with_context(data, partner_port, partner_device),
                         side       = partner_port["side"],
                         cable_type = cable,
                         port_name  = partner_port.get("name", ""),
-                    ))
+                    )
+                    if skip_outlet_id is None:
+                        prepend_steps.insert(0, step)
+                    else:
+                        steps.append(step)
                 else:
                     _follow(partner_port["id"])
 
@@ -519,6 +559,90 @@ def _trace_from_port_internal(data: dict, port_id: str,
                     obj_type="endpoint", obj_id=ep_id,
                     label=ep.get("name", "?"),
                 ))
+
+    def _follow(current_port_id: str):
+        """
+        1.9.0 — Dunne wrapper rond _follow_core(). Na de normale (primaire)
+        afhandeling van een poort worden de EXTRA verbindingen gevolgd, maar
+        UITSLUITEND voor patchpanel-poorten met 2+ verbindingen. Voor elke
+        andere poort doet dit niets → bestaande traces blijven byte-identiek.
+        """
+        before = current_port_id in visited
+        _follow_core(current_port_id)
+        if before:
+            return
+        if current_port_id not in visited:
+            return  # niet verwerkt (bv. max_steps bereikt)
+        port = _get_port(data, current_port_id)
+        device = _get_device(data, port["device_id"]) if port else None
+        if (port and device and _is_patchpanel(device)
+                and len(_get_all_connections_for_port(data, current_port_id)) >= 2):
+            _follow_extras(current_port_id)
+
+    def _follow_extras(port_id: str):
+        """
+        1.9.0 — Volg de EXTRA verbinding(en) van een patchpanel-poort die de
+        primaire branch niet pakt (die volgt er maar één via next()).
+        Reeds gevolgde bestemmingen worden overgeslagen (idempotent):
+          - poort  → al in visited
+          - wandpunt/endpoint → al aanwezig in steps
+        Externe niet-PP partner (switch):
+          - poort-start (skip_outlet_id is None) → PREPEND (switch links)
+          - wandpunt-start (skip_outlet_id gezet) → APPEND (switch achteraan)
+        """
+        for c in _get_all_connections_for_port(data, port_id):
+            if c["from_id"] == port_id and c["from_type"] == "port":
+                other_id, other_type = c["to_id"], c["to_type"]
+            elif c["to_id"] == port_id and c["to_type"] == "port":
+                other_id, other_type = c["from_id"], c["from_type"]
+            else:
+                continue
+            cable = c.get("cable_type", "")
+
+            if other_type == "wall_outlet":
+                if other_id == skip_outlet_id:
+                    continue
+                if any(s["obj_type"] == "wall_outlet" and s["obj_id"] == other_id
+                       for s in steps):
+                    continue
+                _follow_wall_outlet(other_id, cable)
+
+            elif other_type == "endpoint":
+                if any(s["obj_type"] == "endpoint" and s["obj_id"] == other_id
+                       for s in steps):
+                    continue
+                ep = _get_endpoint(data, other_id)
+                if ep:
+                    steps.append(_make_step(
+                        obj_type="endpoint", obj_id=other_id,
+                        label=ep.get("name", "?"),
+                    ))
+
+            elif other_type == "port":
+                if other_id in visited:
+                    continue
+                other_port = _get_port(data, other_id)
+                other_dev  = _get_device(data, other_port["device_id"]) if other_port else None
+                if not other_port or not other_dev:
+                    continue
+                if _is_patchpanel(other_dev):
+                    # PP→PP extra: laat _follow de keten verder afwikkelen
+                    _follow(other_id)
+                else:
+                    # Niet-PP partner = switch-zijde
+                    visited.add(other_id)
+                    step = _make_step(
+                        obj_type   = "port",
+                        obj_id     = other_id,
+                        label      = _port_label_with_context(data, other_port, other_dev),
+                        side       = other_port["side"],
+                        cable_type = cable,
+                        port_name  = other_port.get("name", ""),
+                    )
+                    if skip_outlet_id is None:
+                        prepend_steps.insert(0, step)   # poort-start: switch links
+                    else:
+                        steps.append(step)              # wandpunt-start: switch achteraan
 
     _follow(port_id)
     # 1.6.0 — prepend_steps bevat cross-rack partners die vóór de startpoort horen.

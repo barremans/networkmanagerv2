@@ -2,28 +2,37 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.11.0
+# Version: 1.14.0
 # Author:  Barremans
-# Changes: 1.1.0 — Device types geladen uit settings_storage (configureerbaar)
-#                  ipv import van hardcoded _DEVICE_TYPES uit device_dialog
-#          1.2.0 — Fix: U-positie omzetting voor bottom_up nummering
-#          1.3.0 — Poorten per rij keuze voor alle device types
-#          1.4.0 — SFP poorten veld
-#          1.5.0 — S/N en MAC velden toegevoegd (pariteit met device_dialog)
+# Changes: 1.14.0 — F10: MAC-veld gesplitst in MAC (ETH) en MAC (WiFi), pariteit
+#                   met device_dialog v1.5.0. Bestaande 'mac' wordt bij bewerken
+#                   ingelezen als ETH (migratie). Bij opslaan worden mac_eth +
+#                   mac_wifi bewaard en 'mac' = ETH (of WiFi als ETH leeg) als
+#                   compat-veld voor zoek/rapport/kopieer.
+#          1.13.0 — BUGFIX bottom_up U-positie. (1) Edit-modus toonde de BOVENrand
+#                   i.p.v. de ingevoerde (onderste) U-positie, waardoor een toestel
+#                   bij elke save (height-1) opschoof en valse bezetting-conflicten
+#                   gaf. _populate() rekent nu height-bewust terug naar de onderrand;
+#                   de save-logica was al correct (onderrand-model), dus ongewijzigd.
+#                   (2) "Bezet"-hint en "al bezet"-melding tonen nu de DISPLAY-U
+#                   (zoals zichtbaar in het rack) i.p.v. de interne U-nummers.
+#          1.12.0 — F3: zoekfilter op type toegevoegd boven _ddl_type. QLineEdit
+#                   _type_search filtert _ddl_type live op label; lege zoekbalk
+#                   toont alle types; selectie blijft bewaard indien nog in lijst.
+#          1.11.0 — Uitbreiding ports_per_row: optie 48 voor 48-poort switches.
+#          1.10.0 — B6: edit-modus (slot=... parameter); positie (u_start, height)
+#                   aanpasbaar bij bestaand device; huidig slot uitgesloten uit
+#                   bezettingscontrole.
+#          1.9.0 — Subnetmasker veld toegevoegd (direct na IP adres).
+#          1.8.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters.
 #          1.6.0 — Fix: grenzenvalidatie bij bottom_up nummering
-#                  (u_start > total_u ipv u_start + height - 1 > total_u)
-# Version: 1.12.0
-# Author:  Barremans
-# Changes: 1.12.0 — F3: zoekfilter op type toegevoegd boven _ddl_type.
-#                   QLineEdit _type_search filtert _ddl_type live op label.
-#                   Lege zoekbalk toont alle types. Selectie blijft bewaard
-#                   bij typen als het huidig type nog in gefilterde lijst zit.
-#          1.11.0 — Uitbreiding ports_per_row: optie 48 toegevoegd voor 48-poort switches
-#          1.8.0 — Uppercase invoer: alle tekstvelden automatisch naar hoofdletters
-#          1.9.0 — Subnetmasker veld toegevoegd (direct na IP adres)
-#          1.10.0 — B6: edit-modus toegevoegd (slot=... parameter)
-#                   Positie (u_start, height) aanpasbaar bij bestaand device
-#                   Huidige slot uitgesloten uit bezettingscontrole
+#                  (u_start > total_u ipv u_start + height - 1 > total_u).
+#          1.5.0 — S/N en MAC velden toegevoegd (pariteit met device_dialog).
+#          1.4.0 — SFP poorten veld.
+#          1.3.0 — Poorten per rij keuze voor alle device types.
+#          1.2.0 — Fix: U-positie omzetting voor bottom_up nummering.
+#          1.1.0 — Device types geladen uit settings_storage (configureerbaar)
+#                  ipv hardcoded _DEVICE_TYPES uit device_dialog.
 # =============================================================================
 
 from PySide6.QtWidgets import (
@@ -150,13 +159,14 @@ class PlaceDeviceDialog(QDialog):
         self._ip     = QLineEdit()
         self._subnet = QLineEdit()
         self._subnet.setPlaceholderText("bv. 255.255.255.0  of  /24")
-        self._mac    = QLineEdit()
+        self._mac_eth  = QLineEdit()
+        self._mac_wifi = QLineEdit()
         self._serial = QLineEdit()
         self._notes  = QTextEdit()
         self._notes.setFixedHeight(48)
 
         for field in (self._name, self._brand, self._model,
-                      self._ip, self._mac, self._serial):
+                      self._ip, self._mac_eth, self._mac_wifi, self._serial):
             _bind_uppercase(field)
 
         form.addRow(t("label_name")          + " *:", self._name)
@@ -170,7 +180,8 @@ class PlaceDeviceDialog(QDialog):
         form.addRow(t("label_model")         + ":",   self._model)
         form.addRow(t("label_ip")            + ":",   self._ip)
         form.addRow(t("label_subnet")        + ":",   self._subnet)
-        form.addRow(t("label_mac")           + ":",   self._mac)
+        form.addRow(t("label_mac_eth")       + ":",   self._mac_eth)
+        form.addRow(t("label_mac_wifi")      + ":",   self._mac_wifi)
         form.addRow(t("label_serial")        + ":",   self._serial)
         form.addRow(t("label_notes")         + ":",   self._notes)
         layout.addWidget(grp_dev)
@@ -193,8 +204,10 @@ class PlaceDeviceDialog(QDialog):
             exclude_slot_id=self._slot.get("id") if self._slot else None
         )
         if occupied:
-            occ_str = ", ".join(str(u) for u in sorted(occupied))
-            occ_lbl = QLabel(f"Bezet: U{occ_str}")
+            # Toon DISPLAY-U (zoals zichtbaar in het rack), niet de interne U-nrs.
+            occ_disp = sorted(self._internal_to_display(u) for u in occupied)
+            occ_str  = ", ".join(str(u) for u in occ_disp)
+            occ_lbl  = QLabel(f"Bezet: U{occ_str}")
             occ_lbl.setObjectName("secondary")
             slot_form.addRow("", occ_lbl)
 
@@ -242,15 +255,25 @@ class PlaceDeviceDialog(QDialog):
         self._model.setText(d.get("model", ""))
         self._ip.setText(d.get("ip", ""))
         self._subnet.setText(d.get("subnet", ""))
-        self._mac.setText(d.get("mac", ""))
+        self._mac_eth.setText(d.get("mac_eth", d.get("mac", "")))
+        self._mac_wifi.setText(d.get("mac_wifi", ""))
         self._serial.setText(d.get("serial", ""))
         self._notes.setPlainText(d.get("notes", ""))
 
-        # Slotpositie — omzetten naar display-U
+        # Slotpositie — omzetten naar display-U (height-bewust).
+        # De ingevoerde U-positie is de ONDERSTE (laagste) display-U van het
+        # toestel. In bottom_up komt dat overeen met de grootste interne U
+        # (u_start + height - 1); enkel _internal_to_display(u_start) nemen zou
+        # de bovenrand tonen en het toestel bij elke save laten opschuiven.
         if s:
-            display_u = self._internal_to_display(s.get("u_start", 1))
+            internal_u = s.get("u_start", 1)
+            height     = s.get("height", 1)
+            if self._rack.get("numbering", "top_down") == "bottom_up":
+                display_u = self._internal_to_display(internal_u + height - 1)
+            else:
+                display_u = internal_u
             self._u_start.setValue(display_u)
-            self._height.setValue(s.get("height", 1))
+            self._height.setValue(height)
 
     # ------------------------------------------------------------------
     # Type filter — F3
@@ -345,9 +368,10 @@ class PlaceDeviceDialog(QDialog):
         needed   = set(range(u_start, u_start + height))
         conflict = needed & occupied
         if conflict:
+            conflict_disp = sorted(self._internal_to_display(u) for u in conflict)
             QMessageBox.warning(self, t("label_device"),
                                 f"U-positie(s) al bezet: "
-                                f"{', '.join('U'+str(u) for u in sorted(conflict))}")
+                                f"{', '.join('U'+str(u) for u in conflict_disp)}")
             return
 
         # B6 — bij edit: bewaar bestaande device_id en slot_id
@@ -365,7 +389,9 @@ class PlaceDeviceDialog(QDialog):
                 "model":         self._model.text().strip(),
                 "ip":            self._ip.text().strip(),
                 "subnet":        self._subnet.text().strip(),
-                "mac":           self._mac.text().strip(),
+                "mac_eth":       self._mac_eth.text().strip(),
+                "mac_wifi":      self._mac_wifi.text().strip(),
+                "mac":           self._mac_eth.text().strip() or self._mac_wifi.text().strip(),
                 "serial":        self._serial.text().strip(),
                 "notes":         self._notes.toPlainText().strip(),
                 "ports_per_row": self._ports_per_row.currentData(),

@@ -2,9 +2,14 @@
 # Networkmap_Creator
 # File:    app/gui/rack_view.py
 # Role:    Pure visuele rack weergave widget
-# Version: 1.27.0
+# Version: 1.28.0
 # Author:  Barremans
-# Changes: 1.27.0 — Dupliceren toegevoegd aan device contextmenu (_ACT_DUPLICATE)
+# Changes: 1.28.0 — F7/F8: device-contextmenu uitgebreid met "Detail tonen"
+#                   (opent DeviceInfoDialog via main_window) en veld-gestuurde
+#                   "IP kopiëren" / "MAC kopiëren" (alleen getoond als het veld
+#                   bestaat). Eén MAC-actie tot F9 (ETH/WiFi-split). Acties
+#                   _ACT_DETAIL/_ACT_COPY_IP/_ACT_COPY_MAC via device_context_menu.
+#          1.27.0 — Dupliceren toegevoegd aan device contextmenu (_ACT_DUPLICATE)
 #          1.26.0 — Direct endpoint: poort-widget toont 🖥-label en aparte
 #                   objectName "port-endpoint" voor gele kleur (zelfde als verbonden)
 #                   direct_endpoint_ports set doorgegeven door _populate
@@ -39,6 +44,9 @@ _ACT_EDIT      = "edit"
 _ACT_DELETE    = "delete"
 _ACT_PORTS     = "ports"
 _ACT_DUPLICATE = "duplicate"
+_ACT_DETAIL    = "detail"     # F7 — detail-popup tonen
+_ACT_COPY_IP   = "copy_ip"    # F8 — IP naar klembord
+_ACT_COPY_MAC  = "copy_mac"   # F8 — MAC naar klembord (één veld tot F9)
 
 _OCC_WARN     = 0.75
 _OCC_CRITICAL = 0.90
@@ -391,15 +399,45 @@ class RackView(QWidget):
     # ------------------------------------------------------------------
 
     def _show_device_context_menu(self, device_id: str, global_pos):
+        device = next(
+            (d for d in self._data.get("devices", []) if d.get("id") == device_id),
+            None,
+        )
+        has_ip  = bool((device or {}).get("ip", "").strip()) if device else False
+        has_mac = bool((device or {}).get("mac", "").strip()) if device else False
+
         menu = QMenu(self)
+
+        # F7 — detail-popup (read-only, ook in read-only modus toegestaan)
+        act_detail = menu.addAction(t("ctx_show_detail"))
+
+        # F8 — kopieeracties, alleen tonen als het veld bestaat
+        act_copy_ip = act_copy_mac = None
+        if has_ip or has_mac:
+            menu.addSeparator()
+            if has_ip:
+                act_copy_ip = menu.addAction(t("ctx_copy_ip"))
+            if has_mac:
+                act_copy_mac = menu.addAction(t("ctx_copy_mac"))
+
+        menu.addSeparator()
         act_ports     = menu.addAction(t("ctx_ports_device"))
         menu.addSeparator()
         act_edit      = menu.addAction(t("ctx_edit_device"))
         act_duplicate = menu.addAction(t("ctx_duplicate"))
         menu.addSeparator()
         act_delete    = menu.addAction(t("ctx_delete_device"))
+
         chosen = menu.exec(global_pos)
-        if chosen == act_ports:
+        if chosen is None:
+            return
+        if chosen == act_detail:
+            self.device_context_menu.emit(device_id, _ACT_DETAIL)
+        elif act_copy_ip is not None and chosen == act_copy_ip:
+            self.device_context_menu.emit(device_id, _ACT_COPY_IP)
+        elif act_copy_mac is not None and chosen == act_copy_mac:
+            self.device_context_menu.emit(device_id, _ACT_COPY_MAC)
+        elif chosen == act_ports:
             self.device_context_menu.emit(device_id, _ACT_PORTS)
         elif chosen == act_edit:
             self.device_context_menu.emit(device_id, _ACT_EDIT)

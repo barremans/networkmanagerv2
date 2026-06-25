@@ -3,8 +3,13 @@
 # File:    app/gui/settings_window.py
 # Role:    Instellingen venster — taal, backup, weergave, eindapparaat-types,
 #          device-types, netwerkdata locatie
-# Version: 1.16.0
-# Changes: 1.16.0 — S6b: Azure AD tab: twee groepsvelden (admin + readonly)
+# Version: 1.18.0
+# Changes: 1.18.0 - K-CABLE: tab Kabeltypes + _CableTypeDialog;
+#                   load/save via settings_storage.load/save_cable_types().
+#          1.17.0 — Tenant/Client ID-velden vrijgesteld van de uppercase-filter
+#                   (property "noUppercase"): GUIDs blijven lowercase in beeld.
+#                   Opslag was al lowercase via settings_storage 1.17.0.
+#          1.16.0 — S6b: Azure AD tab: twee groepsvelden (admin + readonly)
 #                   ipv één required_group veld
 #          1.15.0 — S6: Azure AD tab toegevoegd
 #                   Tenant ID, Client ID, vereiste groep, enabled checkbox
@@ -57,6 +62,7 @@ class SettingsWindow(QDialog):
         self._dev_types     = list(settings_storage.load_device_types())
         self._loc_types     = list(settings_storage.load_outlet_locations())
         self._svg_prefixes  = list(settings_storage.load_outlet_label_prefixes())
+        self._cable_types   = list(settings_storage.load_cable_types())
         self.setWindowTitle(t("menu_settings"))
         self.setMinimumWidth(500)
         self.setMinimumHeight(460)
@@ -78,6 +84,7 @@ class SettingsWindow(QDialog):
         tabs.addTab(self._build_display_tab(),    t("settings_tab_display"))
         tabs.addTab(self._build_endpoint_tab(),   t("settings_tab_endpoints"))
         tabs.addTab(self._build_devicetype_tab(), t("settings_tab_device_types"))
+        tabs.addTab(self._build_cabletypes_tab(), t("settings_tab_cable_types"))
         tabs.addTab(self._build_locations_tab(),  t("settings_tab_outlet_locations"))
         tabs.addTab(self._build_svg_labels_tab(), "SVG Labels")
         tabs.addTab(self._build_azure_ad_tab(),   "Azure AD")
@@ -499,6 +506,10 @@ class SettingsWindow(QDialog):
         self._refresh_dt_list()
         self._on_dt_row_changed(-1)
 
+        # Kabeltypes
+        self._refresh_ct_list()
+        self._on_ct_row_changed(-1)
+
         # Wandpunt locaties
         self._refresh_loc_list()
         self._on_loc_row_changed(-1)
@@ -745,6 +756,149 @@ class SettingsWindow(QDialog):
         from app.helpers.settings_storage import _DEFAULT_DEVICE_TYPES
         self._dev_types = list(_DEFAULT_DEVICE_TYPES)
         self._refresh_dt_list(0)
+
+    # ------------------------------------------------------------------
+    # Kabeltypes tab — K-CABLE
+    # ------------------------------------------------------------------
+
+    def _build_cabletypes_tab(self) -> QWidget:
+        tab    = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        hint = QLabel(t("settings_ct_hint"))
+        hint.setObjectName("secondary")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        list_row = QHBoxLayout()
+        self._ct_list = QListWidget()
+        self._ct_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._ct_list.currentRowChanged.connect(self._on_ct_row_changed)
+        list_row.addWidget(self._ct_list, stretch=1)
+
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(4)
+        btn_col.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._btn_ct_add  = QPushButton("＋  " + t("btn_add"))
+        self._btn_ct_edit = QPushButton("✏  " + t("ctx_edit"))
+        self._btn_ct_del  = QPushButton("🗑  " + t("ctx_delete"))
+        self._btn_ct_up   = QPushButton("▲")
+        self._btn_ct_down = QPushButton("▼")
+        for btn in (self._btn_ct_add, self._btn_ct_edit, self._btn_ct_del,
+                    self._btn_ct_up, self._btn_ct_down):
+            btn.setMinimumWidth(110)
+            btn_col.addWidget(btn)
+        self._btn_ct_add.clicked.connect(self._on_ct_add)
+        self._btn_ct_edit.clicked.connect(self._on_ct_edit)
+        self._btn_ct_del.clicked.connect(self._on_ct_delete)
+        self._btn_ct_up.clicked.connect(self._on_ct_move_up)
+        self._btn_ct_down.clicked.connect(self._on_ct_move_down)
+        list_row.addLayout(btn_col)
+        layout.addLayout(list_row)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(sep)
+
+        restore_row = QHBoxLayout()
+        restore_row.addStretch()
+        self._btn_ct_restore = QPushButton("↺  " + t("settings_ct_restore"))
+        self._btn_ct_restore.clicked.connect(self._on_ct_restore)
+        restore_row.addWidget(self._btn_ct_restore)
+        layout.addLayout(restore_row)
+        return tab
+
+    def _refresh_ct_list(self, select_idx: int = -1):
+        lang = self._ddl_lang.currentData() or "nl"
+        self._ct_list.clear()
+        for ct in self._cable_types:
+            lbl   = ct.get(f"label_{lang}", ct.get("label_nl", ct.get("key", "?")))
+            color = ct.get("color", "#7F8C8D")
+            item  = QListWidgetItem(f"●  {lbl}  ({color})")
+            item.setData(Qt.ItemDataRole.UserRole, ct)
+            from PySide6.QtGui import QColor
+            item.setForeground(QColor(color))
+            self._ct_list.addItem(item)
+        if select_idx >= 0 and select_idx < self._ct_list.count():
+            self._ct_list.setCurrentRow(select_idx)
+        self._on_ct_row_changed(self._ct_list.currentRow())
+
+    def _on_ct_row_changed(self, row: int):
+        has = row >= 0
+        self._btn_ct_edit.setEnabled(has)
+        self._btn_ct_del.setEnabled(has)
+        self._btn_ct_up.setEnabled(has and row > 0)
+        self._btn_ct_down.setEnabled(has and row < self._ct_list.count() - 1)
+
+    def _on_ct_add(self):
+        dlg = _CableTypeDialog(parent=self)
+        if dlg.exec():
+            ct = dlg.get_result()
+            if ct:
+                keys = {c.get("key", "") for c in self._cable_types}
+                if ct["key"] in keys:
+                    QMessageBox.warning(self, t("settings_tab_cable_types"),
+                                        t("settings_ep_key_exists"))
+                    return
+                self._cable_types.append(ct)
+                self._refresh_ct_list(len(self._cable_types) - 1)
+
+    def _on_ct_edit(self):
+        row = self._ct_list.currentRow()
+        if row < 0:
+            return
+        dlg = _CableTypeDialog(parent=self, cable_type=self._cable_types[row])
+        if dlg.exec():
+            result = dlg.get_result()
+            if result:
+                self._cable_types[row] = result
+                self._refresh_ct_list(row)
+
+    def _on_ct_delete(self):
+        row = self._ct_list.currentRow()
+        if row < 0:
+            return
+        ct   = self._cable_types[row]
+        name = ct.get("label_nl", ct.get("key", "?"))
+        reply = QMessageBox.question(
+            self, t("menu_delete"),
+            f"{t('msg_confirm_delete')}\n\n{name}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._cable_types.pop(row)
+        self._refresh_ct_list(max(0, row - 1))
+
+    def _on_ct_move_up(self):
+        row = self._ct_list.currentRow()
+        if row <= 0:
+            return
+        self._cable_types[row], self._cable_types[row - 1] = \
+            self._cable_types[row - 1], self._cable_types[row]
+        self._refresh_ct_list(row - 1)
+
+    def _on_ct_move_down(self):
+        row = self._ct_list.currentRow()
+        if row < 0 or row >= len(self._cable_types) - 1:
+            return
+        self._cable_types[row], self._cable_types[row + 1] = \
+            self._cable_types[row + 1], self._cable_types[row]
+        self._refresh_ct_list(row + 1)
+
+    def _on_ct_restore(self):
+        reply = QMessageBox.question(
+            self, t("settings_tab_cable_types"),
+            t("settings_ct_restore_confirm"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from app.helpers.settings_storage import _DEFAULT_CABLE_TYPES
+        self._cable_types = list(_DEFAULT_CABLE_TYPES)
+        self._refresh_ct_list(0)
 
     # ------------------------------------------------------------------
     # Backup handlers
@@ -1254,6 +1408,7 @@ class SettingsWindow(QDialog):
         form.addRow(sep)
 
         self._txt_tenant_id = QLineEdit()
+        self._txt_tenant_id.setProperty("noUppercase", True)   # GUID — niet uppercasen
         self._txt_tenant_id.setPlaceholderText("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
         self._txt_tenant_id.setToolTip(
             "Azure Portal → Azure Active Directory → Overzicht → Tenant-id"
@@ -1261,6 +1416,7 @@ class SettingsWindow(QDialog):
         form.addRow("Tenant ID *:", self._txt_tenant_id)
 
         self._txt_client_id = QLineEdit()
+        self._txt_client_id.setProperty("noUppercase", True)   # GUID — niet uppercasen
         self._txt_client_id.setPlaceholderText("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
         self._txt_client_id.setToolTip(
             "Azure Portal → App-registraties → uw app → Overzicht → Client-id"
@@ -1386,6 +1542,7 @@ class SettingsWindow(QDialog):
         settings_storage.save_device_types(self._dev_types)
         settings_storage.save_outlet_locations(self._loc_types)
         settings_storage.save_outlet_label_prefixes(self._svg_prefixes)
+        settings_storage.save_cable_types(self._cable_types)
 
         if lang_changed:
             i18n.set_language(new_lang)
@@ -1634,6 +1791,99 @@ class _LocationTypeDialog(QDialog):
         if not lbl_en:
             lbl_en = lbl_nl
         self._result = {"key": key, "label_nl": lbl_nl, "label_en": lbl_en}
+        self.accept()
+
+    def get_result(self) -> dict | None:
+        return self._result
+
+class _CableTypeDialog(QDialog):
+    """Dialoogvenster voor toevoegen/bewerken van een kabeltype (K-CABLE)."""
+
+    def __init__(self, parent=None, cable_type: dict = None):
+        super().__init__(parent)
+        self._cable_type = cable_type
+        self._result     = None
+        self.setWindowTitle(
+            t("settings_ct_edit_title") if cable_type else t("settings_ct_new_title")
+        )
+        self.setMinimumWidth(360)
+        self.setModal(True)
+        self._build()
+        if self._cable_type:
+            self._populate()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        form   = QFormLayout()
+        form.setSpacing(8)
+
+        self._key      = QLineEdit()
+        self._key.setPlaceholderText("bijv. utp_cat7")
+        self._label_nl = QLineEdit()
+        self._label_en = QLineEdit()
+        self._color    = QLineEdit()
+        self._color.setPlaceholderText("#4A90D9")
+        self._color.setMaxLength(7)
+
+        is_new = self._cable_type is None
+        self._key.setEnabled(is_new)
+        if not is_new:
+            self._key.setToolTip(t("settings_ep_key_locked"))
+
+        form.addRow(t("settings_ep_key")      + ":", self._key)
+        form.addRow(t("settings_ep_label_nl") + ":", self._label_nl)
+        form.addRow(t("settings_ep_label_en") + ":", self._label_en)
+        form.addRow(t("settings_ct_color")    + ":", self._color)
+
+        hint = QLabel(t("settings_ct_color_hint"))
+        hint.setObjectName("secondary")
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton(t("btn_cancel"))
+        btn_save   = QPushButton(t("btn_save"))
+        btn_save.setDefault(True)
+        btn_cancel.clicked.connect(self.reject)
+        btn_save.clicked.connect(self._on_save)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_save)
+        layout.addLayout(btn_row)
+
+    def _populate(self):
+        self._key.setText(self._cable_type.get("key", ""))
+        self._label_nl.setText(self._cable_type.get("label_nl", ""))
+        self._label_en.setText(self._cable_type.get("label_en", ""))
+        self._color.setText(self._cable_type.get("color", "#7F8C8D"))
+
+    def _on_save(self):
+        import re
+        key    = self._key.text().strip().lower().replace(" ", "_")
+        lbl_nl = self._label_nl.text().strip()
+        lbl_en = self._label_en.text().strip()
+        color  = self._color.text().strip()
+        if not key:
+            QMessageBox.warning(self, "", t("settings_ep_key") + " " + t("err_field_required"))
+            return
+        if not re.match(r'^[a-z0-9_]+$', key):
+            QMessageBox.warning(self, "", t("settings_ep_key_invalid"))
+            return
+        if not lbl_nl:
+            QMessageBox.warning(self, "", t("settings_ep_label_nl") + " " + t("err_field_required"))
+            return
+        if not lbl_en:
+            lbl_en = lbl_nl
+        if not re.match(r'^#[0-9a-fA-F]{6}$', color):
+            color = "#7F8C8D"
+        self._result = {
+            "key":      key,
+            "label_nl": lbl_nl,
+            "label_en": lbl_en,
+            "color":    color,
+        }
         self.accept()
 
     def get_result(self) -> dict | None:

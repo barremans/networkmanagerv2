@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/endpoint_dialog.py
 # Role:    Endpoint aanmaken en bewerken
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.3.0 — S/N (serienummer) veld toegevoegd
+# Changes: 1.6.0 — F10: MAC-veld gesplitst in MAC (ETH) en MAC (WiFi). Bestaande
+#                  'mac' wordt bij bewerken ingelezen als ETH (migratie). Bij opslaan
+#                  worden mac_eth + mac_wifi bewaard én 'mac' = ETH (of WiFi als ETH
+#                  leeg) voor compatibiliteit met zoek/rapport/kopieer.
+#          1.3.0 — S/N (serienummer) veld toegevoegd
 #          1.4.0 — location veld toegevoegd (optioneel, voor direct endpoint)
 #          1.5.0 — url veld toegevoegd (aanklikbare link, opent in browser)
 # =============================================================================
@@ -48,8 +52,9 @@ class EndpointDialog(QDialog):
             label = et.get(f"label_{lang}", et.get("label_nl", key))
             self._ddl_type.addItem(label, key)
 
-        self._ip     = QLineEdit()
-        self._mac    = QLineEdit()
+        self._ip       = QLineEdit()
+        self._mac_eth  = QLineEdit()
+        self._mac_wifi = QLineEdit()
         self._serial = QLineEdit()
         self._brand  = QLineEdit()
         self._model  = QLineEdit()
@@ -74,7 +79,8 @@ class EndpointDialog(QDialog):
         form.addRow(t("label_name")        + " *:", self._name)
         form.addRow(t("label_type")        + ":",   self._ddl_type)
         form.addRow(t("label_ip")          + ":",   self._ip)
-        form.addRow(t("label_mac")         + ":",   self._mac)
+        form.addRow(t("label_mac_eth")     + ":",   self._mac_eth)
+        form.addRow(t("label_mac_wifi")    + ":",   self._mac_wifi)
         form.addRow(t("label_serial")      + ":",   self._serial)
         form.addRow(t("label_brand")       + ":",   self._brand)
         form.addRow(t("label_model")       + ":",   self._model)
@@ -101,7 +107,8 @@ class EndpointDialog(QDialog):
         if idx >= 0:
             self._ddl_type.setCurrentIndex(idx)
         self._ip.setText(self._endpoint.get("ip", ""))
-        self._mac.setText(self._endpoint.get("mac", ""))
+        self._mac_eth.setText(self._endpoint.get("mac_eth", self._endpoint.get("mac", "")))
+        self._mac_wifi.setText(self._endpoint.get("mac_wifi", ""))
         self._serial.setText(self._endpoint.get("serial", ""))
         self._brand.setText(self._endpoint.get("brand", ""))
         self._model.setText(self._endpoint.get("model", ""))
@@ -119,7 +126,9 @@ class EndpointDialog(QDialog):
             "name":     name,
             "type":     self._ddl_type.currentData() or "",
             "ip":       self._ip.text().strip(),
-            "mac":      self._mac.text().strip(),
+            "mac_eth":  self._mac_eth.text().strip(),
+            "mac_wifi": self._mac_wifi.text().strip(),
+            "mac":      self._mac_eth.text().strip() or self._mac_wifi.text().strip(),
             "serial":   self._serial.text().strip(),
             "brand":    self._brand.text().strip(),
             "model":    self._model.text().strip(),

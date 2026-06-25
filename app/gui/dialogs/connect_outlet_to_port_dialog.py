@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_outlet_to_port_dialog.py
 # Role:    Wandpunt koppelen aan een poort — met zoekfunctie
-# Version: 1.4.0
+# Version: 1.5.0
 # Author:  Barremans
-# Changes: 1.4.0 — Auto-suggestie: wist zoekbalk en herlaadt lijst als vrije poort
+# Changes: 1.5.0 — GP-F1: multi-token AND-zoeken. Elk spatie-gescheiden woord
+#                   is een apart filter (AND). Zoektekst verrijkt met VLAN en
+#                   raw side (front/back) -> 'ALANSW01 1', 'VLAN 10', 'SW01 FRONT'
+#                   matchen nu. Nieuwe helper _tokens_match().
+#          1.4.0 — Auto-suggestie: wist zoekbalk en herlaadt lijst als vrije poort
 #                   niet zichtbaar is in gefilterde resultaten (bv. zoek 'SWALAN'
 #                   maar vrije poort is PATCH A2 BACK zonder SWALAN in label)
 #                   company_id filter ook correct bij lege company_id
@@ -43,20 +47,19 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from app.helpers.i18n import t
-from app.helpers.settings_storage import get_all_sites
+from app.helpers.settings_storage import get_all_sites, load_cable_types_for_ddl
 
 _USER_ROLE   = 256
 _IN_USE_ROLE = 257
 
-_CABLE_TYPES = [
-    ("utp_cat5e",  "cable_utp_cat5e"),
-    ("utp_cat6",   "cable_utp_cat6"),
-    ("utp_cat6a",  "cable_utp_cat6a"),
-    ("fiber_sm",   "cable_fiber_sm"),
-    ("fiber_mm",   "cable_fiber_mm"),
-    ("dak",        "cable_dak"),
-    ("other",      "cable_other"),
-]
+
+
+def _tokens_match(query: str, text: str) -> bool:
+    """GP-F1 — multi-token AND-zoeken: elk spatie-gescheiden woord moet
+    voorkomen in text (hoofdletterongevoelig). Lege query -> True.
+    Zo matcht b.v. "ALANSW01 1" zowel de device-naam als poortnummer."""
+    low = text.lower()
+    return all(tok in low for tok in query.lower().split())
 
 
 class ConnectOutletToPortDialog(QDialog):
@@ -168,9 +171,12 @@ class ConnectOutletToPortDialog(QDialog):
         cable_row = QHBoxLayout()
         cable_row.addWidget(QLabel(t("label_cable_type") + ":"))
         self._ddl_cable = QComboBox()
-        for val, key in _CABLE_TYPES:
-            self._ddl_cable.addItem(t(key), val)
-        self._ddl_cable.setCurrentIndex(1)
+        _cable_default_idx = 0
+        for i, (val, lbl) in enumerate(load_cable_types_for_ddl()):
+            self._ddl_cable.addItem(lbl, val)
+            if val == "utp_cat6":
+                _cable_default_idx = i
+        self._ddl_cable.setCurrentIndex(_cable_default_idx)
         cable_row.addWidget(self._ddl_cable)
         cable_row.addStretch()
         root.addLayout(cable_row)
@@ -242,11 +248,16 @@ class ConnectOutletToPortDialog(QDialog):
                             chain = self._port_chain_label.get(pid, "")
                             if in_use and chain:
                                 label = f"{label}  →  {chain}"
+                            vlan   = str(port.get("vlan", "") or "").strip()
+                            search = " ".join(filter(None, [
+                                label, side, f"vlan {vlan}" if vlan else "",
+                            ]))
                             self._all_ports.append({
                                 "label":  label,
                                 "id":     pid,
                                 "in_use": in_use,
                                 "chain":  chain,
+                                "search": search,
                             })
 
         self._filter_ports()
@@ -257,7 +268,7 @@ class ConnectOutletToPortDialog(QDialog):
         free   = [p for p in self._all_ports if not p["in_use"]]
         in_use = [p for p in self._all_ports if     p["in_use"]]
         for item_data in free + in_use:
-            if q and q not in item_data["label"].lower():
+            if q and not _tokens_match(q, item_data.get("search", item_data["label"])):
                 continue
             suffix = f"  ({t('lbl_already_connected')})" if item_data["in_use"] else ""
             item   = QListWidgetItem(item_data["label"] + suffix)

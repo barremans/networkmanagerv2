@@ -2,40 +2,51 @@
 # Networkmap_Creator
 # File:    app/services/search_service.py
 # Role:    Zoekfunctie over alle objecten — GEEN Qt imports
-# Version: 2.3.1
+# Version: 2.7.0
 # Author:  Barremans
-# Changes: 2.3.1 -- F1: get_all_sites() voor v2 JSON
+# Changes: 2.7.0 — F12-b: min querylengte 1 voor filter_type="port".
+#                  De interne _MIN_QUERY_LEN=2 check respecteert nu filter_type
+#                  zodat zoeken op 1 teken werkt in de poort-tab van SearchWindow.
+#          2.6.0 — Ranking: resultaten gesorteerd op relevantiescore (_score()).
+#                  Exacte naammatch scoort het hoogst, begin-van-woord daarna,
+#                  haystack-match het laagst. Bij gelijke score: naamlengte
+#                  (kortere naam = specifieker = hogere prioriteit).
+#                  Poort-label (device — poort) gescoord op beide delen.
+#          2.5.0 — F12: zoeklogica uitgebreid/genormaliseerd.
+#                  (1) MAC separator-/case-ongevoelig: query en opgeslagen waarde
+#                      worden tot hex genormaliseerd vóór vergelijking, zodat
+#                      'bc:f1:05:4f:58:1c', 'bc-f1-..' en 'bcf1054f581c' allemaal
+#                      matchen. (helper _mac_match / _norm_hex)
+#                  (2) MAC-zoeken over mac_eth + mac_wifi + compat 'mac' (F10).
+#                  (3) Multi-token AND: elk spatie-gescheiden woord moet matchen
+#                      ('SWITCH 3', 'VLAN 10', 'ROBIN HP' werken, volgorde vrij).
+#                      Generieke helper _match_tokens(); naam blijft begin-van-woord,
+#                      overige velden (type/label, IP, VLAN, side, locatie, S/N,
+#                      model, merk, notes) via een per-object 'haystack'.
+#                  Site/ruimte/rack blijven naam-only (geen ruis); device/endpoint/
+#                  poort/wandpunt-in-'Alles' blijven breed. Snelle filters (V7)
+#                  vallen buiten dit punt.
+#          2.4.0 -- F9: zoekvelden uitgebreid. Device- en eindapparaat-tab zoeken
+#                  nu net zo breed als 'Alles' (IP/MAC/serienummer/model/merk).
+#                  Objecttype doorzoekbaar (raw + vertaald label). Poort-tab matcht
+#                  ook VLAN-nummer (incl. 'vlan 10') en side.
+#          2.3.1 -- F1: get_all_sites() voor v2 JSON
 #          2.3.0 — Orphan devices uitgesloten van zoekresultaten:
 #                   Devices zonder rack-slot EN zonder verbonden poorten
 #                   worden niet getoond (zijn onnavigeerbaar en vervuilen resultaten)
-#                   _build_device_loc_map uitgebreid met set van "navigeerbare" device IDs
-#          2.2.0 — Poort zoeklogica uitgebreid:
-#                   Specifieke tab zoekt ook op device naam ("switch 3" matcht Port 3 van SWITCH)
-#                   Geen minimumlengte voor poorten (1 teken volstaat)
-#                   Zoekterm gesplitst: elke component matcht onafhankelijk op poort + device
-#          2.1.0 — Zoeklogica verfijnd:
-#                   Minimaal 2 tekens vereist
-#                   Tab "Alles": begin-van-woord matching op alle velden
-#                   Specifieke tab: enkel naam-matching (IP/MAC/S/N = toekomstige uitbreiding)
-#                   Poort: notes/vlan/side toegevoegd aan match
-#                   _match_name(): begin-van-woord match op primaire naam
-#                   _match_extra(): substring match op exacte velden (IP, MAC, S/N)
-#                   _word_start_match(): query matcht begin van enig woord in tekst
+#          2.2.0 — Poort zoeklogica uitgebreid (device-naam + poortnaam)
+#          2.1.0 — Zoeklogica verfijnd (begin-van-woord matching)
 #          2.0.0 — Extra velden: IP, MAC, serienummer, model, brand in resultaat
-#                   "extra" veld voor weergave in zoekvenster
-#                   Wandpunt locatielabel ipv raw key
-#                   Verbindingsstatus in resultaat (in_use)
-#                   _room_id / _site_id / _rack_id altijd aanwezig
 #          1.1.0 — Initiële versie
 # =============================================================================
 
 import re
 
-from app.helpers.i18n import get_language
+from app.helpers.i18n import get_language, t
 from app.helpers.settings_storage import get_outlet_location_label
 from app.helpers.settings_storage import get_all_sites
 
-# Minimale querylengte
+# Minimale querylengte (op de volledige zoekterm)
 _MIN_QUERY_LEN = 2
 
 
@@ -44,21 +55,27 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
     Zoekt over alle objecten.
 
     filter_type:
-      "all"         — begin-van-woord matching op naam + alle extra velden
-      "device"      — enkel naam-matching op devices
-      "wall_outlet" — enkel naam-matching op wandpunten
-      "endpoint"    — enkel naam-matching op eindapparaten
-      "port"        — enkel naam-matching op poorten
-      "rack"        — enkel naam-matching op racks/ruimtes/sites
+      "all"         — breed: naam (begin-van-woord) + type/IP/MAC/VLAN/locatie/...
+      "device"      — devices, breed (zoals 'all')
+      "wall_outlet" — wandpunten, naam-only
+      "endpoint"    — eindapparaten, breed (zoals 'all')
+      "port"        — poorten, breed (poort- + device-naam + VLAN/side)
+      "rack"        — racks/ruimtes/sites, naam-only
 
+    Matching is multi-token (AND): elk spatie-gescheiden woord moet matchen.
     Resultaat: lijst van dicts met type, id, label, location, extra.
     """
     if not query or not query.strip():
         return []
 
     q = query.strip().lower()
+    # F12-b — poort-tab: min 1 teken; alle andere: min 2 tekens
+    _min_len = 1 if filter_type == "port" else _MIN_QUERY_LEN
+    if len(q) < _min_len:
+        return []
 
-    if len(q) < _MIN_QUERY_LEN:
+    tokens = q.split()          # F12 — multi-token AND
+    if not tokens:
         return []
 
     results = []
@@ -92,7 +109,7 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
 
         # ── Site ─────────────────────────────────────────────────────
         if search_sites:
-            if _name_match(q, site_name, filter_type):
+            if _match_tokens(tokens, site_name, broad=False):
                 results.append({
                     "type":     "site",
                     "id":       site_id,
@@ -111,7 +128,7 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
 
             # ── Ruimte ───────────────────────────────────────────────
             if search_rooms:
-                if _name_match(q, room_name, filter_type):
+                if _match_tokens(tokens, room_name, broad=False):
                     results.append({
                         "type":     "room",
                         "id":       room_id,
@@ -128,7 +145,7 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
                 for rack in room.get("racks", []):
                     rack_name = rack.get("name", "")
                     rack_id   = rack["id"]
-                    if _name_match(q, rack_name, filter_type):
+                    if _match_tokens(tokens, rack_name, broad=False):
                         results.append({
                             "type":     "rack",
                             "id":       rack_id,
@@ -154,18 +171,10 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
                         if ep_obj:
                             ep_name = ep_obj.get("name", "")
 
-                    # Tab "Alles": naam + locatie + endpoint naam
-                    # Specifieke tab: alleen wandpunt naam
-                    if filter_type == "all":
-                        match = _word_start_match(q, wo_name) or \
-                                _word_start_match(q, loc_label) or \
-                                _word_start_match(q, loc_key) or \
-                                _word_start_match(q, ep_name) or \
-                                _word_start_match(q, wo.get("notes", ""))
-                    else:
-                        match = _word_start_match(q, wo_name)
-
-                    if not match:
+                    # Tab "Alles": breed (locatie/endpoint/notes); specifieke tab: naam-only
+                    broad = (filter_type == "all")
+                    hay   = _hay(loc_label, loc_key, ep_name, wo.get("notes", ""))
+                    if not _match_tokens(tokens, wo_name, hay, broad=broad):
                         continue
 
                     extra_parts = []
@@ -205,7 +214,6 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
         for dev in data.get("devices", []):
             dev_name = dev.get("name", "")
             ip       = dev.get("ip", "")
-            mac      = dev.get("mac", "")
             serial   = dev.get("serial", "")
             model    = dev.get("model", "")
             brand    = dev.get("brand", "")
@@ -214,20 +222,13 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
             if dev["id"] not in slotted_devids:
                 continue
 
-            if filter_type == "all":
-                match = _word_start_match(q, dev_name) or \
-                        _word_start_match(q, model) or \
-                        _word_start_match(q, brand) or \
-                        _exact_match(q, ip) or \
-                        _exact_match(q, mac) or \
-                        _exact_match(q, serial) or \
-                        _word_start_match(q, dev.get("notes", ""))
-            else:
-                # Specifieke tab: enkel naam
-                # TODO: v2.4 — ook IP/MAC/S/N bij device-tab
-                match = _word_start_match(q, dev_name)
+            dev_type       = dev.get("type", "other")
+            dev_type_label = t(f"device_{dev_type}")
 
-            if not match:
+            # F12 — breed: naam (begin-van-woord) + haystack + genormaliseerde MAC's
+            hay  = _hay(model, brand, ip, serial, dev_type, dev_type_label, dev.get("notes", ""))
+            macs = (dev.get("mac", ""), dev.get("mac_eth", ""), dev.get("mac_wifi", ""))
+            if not _match_tokens(tokens, dev_name, hay, macs=macs, broad=True):
                 continue
 
             loc_info    = dev_loc_map.get(dev["id"], {})
@@ -263,19 +264,10 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
             if port["device_id"] not in slotted_devids:
                 continue
 
-            if filter_type == "all":
-                match = _word_start_match(q, port_name) or \
-                        _word_start_match(q, dev_label) or \
-                        _word_start_match(q, notes) or \
-                        _exact_match(q, str(vlan) if vlan else "")
-            else:
-                # 2.2.0 — Poort tab: zoek op poortnaam EN device naam
-                # Ook multi-word queries ondersteunen:
-                # "switch 3" → matcht port_name "Port 3" + dev_label "SWITCH ..."
-                # "patchpanel 13" → matcht port_name "Port 13" + dev_label "PATCHPANEL ..."
-                match = _port_query_match(q, port_name, dev_label)
-
-            if not match:
+            # F12 — naam-velden: poortnaam + device-naam; haystack: VLAN + side + notes
+            vlan_str = str(vlan).strip() if vlan not in (None, "") else ""
+            hay = _hay(f"vlan {vlan_str}" if vlan_str else "", vlan_str, side_str, notes)
+            if not _match_tokens(tokens, (port_name, dev_label), hay, broad=True):
                 continue
 
             extra_parts = [side_str.upper()] if side_str else []
@@ -298,26 +290,18 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
         for ep in data.get("endpoints", []):
             ep_name = ep.get("name", "")
             ip      = ep.get("ip", "")
-            mac     = ep.get("mac", "")
             model   = ep.get("model", "")
             brand   = ep.get("brand", "")
             serial  = ep.get("serial", "")
 
-            if filter_type == "all":
-                match = _word_start_match(q, ep_name) or \
-                        _word_start_match(q, model) or \
-                        _word_start_match(q, brand) or \
-                        _word_start_match(q, ep.get("location", "")) or \
-                        _exact_match(q, ip) or \
-                        _exact_match(q, mac) or \
-                        _exact_match(q, serial) or \
-                        _word_start_match(q, ep.get("notes", ""))
-            else:
-                # Specifieke tab: enkel naam
-                # TODO: v2.2 — ook IP/MAC/S/N bij endpoint-tab
-                match = _word_start_match(q, ep_name)
+            ep_type       = ep.get("type", "other")
+            ep_type_label = t(f"endpoint_{ep_type}")
 
-            if not match:
+            # F12 — breed: naam (begin-van-woord) + haystack + genormaliseerde MAC's
+            hay  = _hay(model, brand, ep.get("location", ""), ip, serial,
+                        ep_type, ep_type_label, ep.get("notes", ""))
+            macs = (ep.get("mac", ""), ep.get("mac_eth", ""), ep.get("mac_wifi", ""))
+            if not _match_tokens(tokens, ep_name, hay, macs=macs, broad=True):
                 continue
 
             # Zoek via wandpunt
@@ -351,6 +335,8 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
                 "_rack_id": "",
             })
 
+    # 2.6.0 — Sorteer op relevantiescore (hoog = beter), daarna naamlengte (kort = specifieker)
+    results.sort(key=lambda r: (-_score(tokens, r), len(r.get("label", ""))))
     return results
 
 
@@ -358,74 +344,106 @@ def search(data: dict, query: str, filter_type: str = "all") -> list:
 # Matchhulpfuncties
 # ------------------------------------------------------------------
 
-def _port_query_match(query: str, port_name: str, dev_name: str) -> bool:
+def _match_tokens(tokens, names, haystack: str = "", macs=(), broad: bool = True) -> bool:
     """
-    2.2.0 — Slimme poort-matching die werkt voor zowel:
-    - poortnaam alleen:    "13"           → matcht "Port 13"
-    - device alleen:       "switch"       → matcht alle poorten van SWITCH
-    - combinatie:          "switch 3"     → matcht Port 3 van SWITCH
-    - combinatie:          "patchpanel 13"→ matcht Port 13 van PATCHPANEL A/B/...
-
-    Strategie: splits query op spaties. Als er meerdere delen zijn,
-    dan moet elk deel matchen op port_name OF dev_name (in combinatie).
-    Bij één deel: normale word_start_match op beide velden.
+    F12 — multi-token AND. Elk token moet matchen op:
+      - de naam/namen via begin-van-woord (_word_start_match), of
+      - (alleen breed) een substring van de 'haystack', of
+      - (alleen breed) een genormaliseerde MAC-match.
+    `names` mag een string of een tuple van strings zijn.
     """
-    if not query:
-        return False
-    parts = query.lower().split()
-    if len(parts) == 1:
-        # Eén woord — matcht op poortnaam of device naam
-        return _word_start_match(query, port_name) or _word_start_match(query, dev_name)
-    # Meerdere woorden — elk deel moet matchen op port_name of dev_name
-    # Voorbeeld: ["switch", "3"] → "switch" matcht dev, "3" matcht port
-    for part in parts:
-        if not (_word_start_match(part, port_name) or _word_start_match(part, dev_name)):
+    if isinstance(names, str):
+        names = (names,)
+    for tok in tokens:
+        hit = any(_word_start_match(tok, n) for n in names)
+        if not hit and broad:
+            hit = (tok in haystack) or _mac_match(tok, *macs)
+        if not hit:
             return False
     return True
+
+
+def _hay(*parts) -> str:
+    """Bouw een lowercase 'haystack' string uit niet-lege velden."""
+    return " ".join(str(p).lower() for p in parts if p not in (None, ""))
+
+
+def _norm_hex(s) -> str:
+    """Strip alles behalve hex-tekens en zet om naar lowercase (voor MAC-vergelijking)."""
+    return re.sub(r"[^0-9a-f]", "", str(s).lower())
+
+
+def _mac_match(query: str, *macs) -> bool:
+    """
+    F12 — separator-/case-ongevoelige MAC-match. Normaliseert zowel de query als
+    elke opgeslagen MAC tot louter hex en vergelijkt als substring.
+    Token korter dan 2 hex-tekens wordt genegeerd (voorkomt ruis op '1', 'ip', ...).
+    """
+    qn = _norm_hex(query)
+    if len(qn) < 2:
+        return False
+    for m in macs:
+        mn = _norm_hex(m)
+        if mn and qn in mn:
+            return True
+    return False
 
 
 def _word_start_match(query: str, text: str) -> bool:
     """
     True als query matcht aan het begin van enig woord in text.
-    Woorden worden gescheiden door spatie, koppelteken, underscore, punt, cijfer-letter-overgang.
+    Woorden gescheiden door spatie, koppelteken, underscore, punt, etc.
     Case-insensitief.
     """
     if not query or not text:
         return False
-    t = text.lower()
-    q = query.lower()
-    # Direct prefix van de hele string
-    if t.startswith(q):
+    t_low = text.lower()
+    q_low = query.lower()
+    if t_low.startswith(q_low):
         return True
-    # Begin van een woord (na niet-alfanumeriek teken)
-    pattern = r'(?<![a-z0-9])' + re.escape(q)
-    return bool(re.search(pattern, t))
+    pattern = r'(?<![a-z0-9])' + re.escape(q_low)
+    return bool(re.search(pattern, t_low))
 
 
-def _exact_match(query: str, text: str) -> bool:
+
+
+def _score(tokens: list[str], result: dict) -> int:
     """
-    Exacte substring match — voor IP, MAC, serienummer.
-    Case-insensitief.
+    2.6.0 — Relevantiescore voor een zoekresultaat. Hogere score = beter.
+
+    Per token:
+      +40  exacte naammatch  (volledige label == token)
+      +30  begin-van-naam    (label start met token)
+      +20  begin-van-woord   (woord in label start met token, via _word_start_match)
+      +10  haystack-match    (token gevonden in extra of location)
+       +5  typematch         (poort: device-naam deel matcht begin-van-woord)
+
+    Score = som over alle tokens. Gelijke score → kortere naam wint (buiten deze fn).
     """
-    if not query or not text:
-        return False
-    return query.lower() in text.lower()
+    label    = result.get("label", "").lower()
+    extra    = result.get("extra", "").lower()
+    location = result.get("location", "").lower()
+    hay      = f"{extra} {location}"
 
-
-def _name_match(query: str, name: str, filter_type: str) -> bool:
-    """
-    Naam-matching: altijd begin-van-woord.
-    """
-    return _word_start_match(query, name)
-
-
-# ------------------------------------------------------------------
-# Legacy wrapper — compatibiliteit met bestaande aanroepen zonder filter_type
-# ------------------------------------------------------------------
-
-def _match(query: str, *fields) -> bool:
-    """Legacy — niet meer primair gebruikt, behouden voor achterwaartse compat."""
-    return any(query in str(f).lower() for f in fields if f)
+    score = 0
+    for tok in tokens:
+        t_low = tok.lower()
+        if label == t_low:
+            score += 40
+        elif label.startswith(t_low):
+            score += 30
+        elif _word_start_match(t_low, label):
+            score += 20
+        elif t_low in hay:
+            score += 10
+        # Poort: label is "device — poort"; check ook device-deel apart
+        if result.get("type") == "port" and "  —  " in label:
+            dev_part, port_part = label.split("  —  ", 1)
+            if _word_start_match(t_low, port_part) and score < 20:
+                score += 20
+            elif _word_start_match(t_low, dev_part) and score < 5:
+                score += 5
+    return score
 
 
 def _build_device_loc_map(data: dict) -> dict:

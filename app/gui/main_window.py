@@ -2,8 +2,26 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.78.0
+# Version: 1.85.1
 # Author:  Barremans
+# Changes: 1.81.0 — F8-wandpunt: rechtsklik op wandpunt in de boom toont nu
+#                   kopieeracties (naam, locatie, en IP/MAC van het gekoppelde
+#                   eindapparaat indien aanwezig). Veld-gestuurd: enkel acties
+#                   voor bestaande waarden. Leesactie: ook in read-only modus.
+#                   Nieuwe helper _outlet_copy_fields(); MAC via normalize_mac().
+# Changes: 1.80.0 — F7/F8: _on_device_context_menu handelt nu "detail" (opent
+#                   DeviceInfoDialog via _on_device_double_clicked) en "copy_ip"/
+#                   "copy_mac" af vóór de read-only guard (leesacties altijd
+#                   toegestaan). Nieuwe helper _copy_to_clipboard() + statusmelding.
+#                   MAC genormaliseerd via normalize_mac(). Dubbelklik blijft
+#                   navigatie (1.58.1 ongewijzigd).
+# Changes: 1.79.0 — Workflow A: wandpunt koppelen aan een patchpanel-poort die
+#                   AL een port→port verbinding (naar switch) heeft. Nieuwe
+#                   menu-actie in _on_port_context_menu (act_connect_outlet_pp)
+#                   + handler _on_connect_outlet_extra(): voegt een tweede
+#                   (wall_outlet) verbinding toe ZONDER de port→port te wissen.
+#                   Loskoppelen bij 2 verbindingen op één poort: per verbinding
+#                   een aparte "verwijderen"-actie met doel-label.
 # Changes: 1.78.0 — B9: expanded-state boom ook op rack-niveau bewaren/herstellen.
 #                   _populate_tree(): rack-IDs toegevoegd aan expanded-set (4e niveau).
 #                   Herstel ook rack-items na _populate_tree() zodat rack niet
@@ -194,6 +212,23 @@
 #          G1+G2 — PNG/JPG + PDF export via QPainter renderer
 #          G3 — Word rapport export via python-docx
 #          H1 — Help menu (sneltoetsen, gebruiksaanwijzing, versie-info)
+#          1.85.1 — K3-fix: old/new diff in device ACTION_EDIT log_change.
+#          1.85.0 — K3: changelog_service import vervolledigd (was Taak2-stub);
+#                Help-menu item “Wijzigingslog”; backup_service.create_backup
+#                krijgt changelog_path mee; ChangelogViewerDialog.
+#          1.84.0 — I18N-REVIEW: menu_action_review via t() (was hardcoded NL).
+#                K1: app_version + exported_by doorgeven aan export_to_dir
+#                en export_company_to_dir.
+#          H1d - REVIEW-AP stap 2: reviewvenster (ActionReviewWindow) via menu
+#                Actiepunten reviewen. Goedkeuren/heropenen -> approvals ->
+#                _save_and_backup(); navigate_requested -> _on_search_result;
+#                current_user uit Azure AD (get_cached_user) + OS-fallback;
+#                read-only = view-only.
+#          H1c — Verbinding bewerken nu ook via rechtsklik op een verbonden
+#                 poort in het rack (act_edit_conn / edit_map → _on_edit_connection).
+#                 Eén verbinding: 'Verbinding bewerken' bij verplaatsen/loskoppelen;
+#                 meerdere verbindingen: per verbinding een bewerk-actie.
+#                 _on_edit_connection ververst nu ook de RackView.
 #          H1b — Verbinding bewerken (label, kabeltype, notitie)
 #          H1c — Rack bezettingsgraad in boom + auto-open na export
 #          Taak2 — log_change() aanroepen voor devices en verbindingen
@@ -247,6 +282,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QBrush, QShortcut
 
 from app.helpers import settings_storage
+from app.helpers.formatting import normalize_mac          # F8 — MAC-normalisatie
 from app.helpers.settings_storage import get_all_sites
 from app.helpers.settings_storage import (
     get_last_folder, set_last_folder,
@@ -261,6 +297,8 @@ from app.gui.unused_outlet_overview_widget import UnusedOutletOverviewWidget
 from app.gui.outlet_locator_view import OutletLocatorView
 from app.gui.wire_detail_view import WireDetailView
 from app.gui.search_window import SearchWindow
+from app.gui.action_review_window import ActionReviewWindow
+from app.gui.changelog_viewer_dialog import ChangelogViewerDialog
 from app.gui.settings_window import SettingsWindow
 from app.gui.help_window import HelpWindow
 from app.gui.dialogs.connection_dialog import ConnectionDialog
@@ -302,10 +340,12 @@ from app.gui.dialogs.port_dialog import PortDialog
 from app.services import vlan_service
 from app.gui.dialogs.vlan_propagation_dialog import VlanPropagationDialog
 from app.gui.github_cases_dialog import GithubCasesDialog
-from app.services.changelog_service import (   # Taak2
+from app.services.changelog_service import (
     log_change,
-    ENTITY_DEVICE, ENTITY_CONNECTION,
-    ACTION_ADD, ACTION_EDIT, ACTION_DELETE
+    ENTITY_DEVICE, ENTITY_CONNECTION, ENTITY_ENDPOINT, ENTITY_WALL_OUTLET,
+    ENTITY_PORT, ENTITY_SITE, ENTITY_ROOM, ENTITY_RACK, ENTITY_COMPANY,
+    ENTITY_VLAN, ENTITY_APPROVAL,
+    ACTION_ADD, ACTION_EDIT, ACTION_DELETE, ACTION_APPROVE, ACTION_REOPEN,
 )
 
 try:
@@ -559,6 +599,10 @@ class MainWindow(QMainWindow):
         act_word_report.setShortcut("Ctrl+Shift+R")  # v1.70.0
         act_word_report.triggered.connect(self._on_export_report)
 
+        # H1d - Reviewvenster voor rapport-actiepunten
+        act_action_review = self._menu_report.addAction("📋  Actiepunten reviewen")
+        act_action_review.triggered.connect(self._on_action_review)
+
         act_md_export = self._menu_report.addAction(t("menu_export_rack_md"))
         act_md_export.triggered.connect(self._on_export_rack_md)
 
@@ -610,6 +654,9 @@ class MainWindow(QMainWindow):
         act_help = self._menu_help.addAction(t("help_title"))
         act_help.setShortcut("F1")
         act_help.triggered.connect(self._on_help)
+
+        act_changelog = self._menu_help.addAction(t("menu_changelog"))
+        act_changelog.triggered.connect(self._on_changelog)
 
         self._menu_help.addSeparator()
 
@@ -1549,6 +1596,38 @@ class MainWindow(QMainWindow):
                     f"{site.get('location', '')}"
                 )
 
+    def _outlet_copy_fields(self, data: dict) -> tuple[str, str, str, str]:
+        """
+        F8-wandpunt — verzamel kopieerbare velden voor een wandpunt-item uit de
+        boom. Returns (naam, locatie, ip, mac); lege velden komen terug als "".
+        IP/MAC komen van het gekoppelde eindapparaat (indien aanwezig).
+        """
+        room = self._find_room(data.get("room_id", ""))
+        wo = None
+        if room:
+            wo = next((w for w in room.get("wall_outlets", [])
+                       if w.get("id") == data.get("id")), None)
+        if not wo:
+            return "", "", "", ""
+
+        name = (wo.get("name") or "").strip()
+
+        loc_key  = wo.get("location_description", "")
+        location = settings_storage.get_outlet_location_label(
+            loc_key, self._settings.get("language", "nl")
+        ) if loc_key else ""
+        location = (location or "").strip()
+
+        ip = mac = ""
+        ep_id = wo.get("endpoint_id")
+        if ep_id:
+            ep = next((e for e in self._data.get("endpoints", [])
+                       if e.get("id") == ep_id), None)
+            if ep:
+                ip  = (ep.get("ip", "")  or "").strip()
+                mac = (ep.get("mac", "") or "").strip()
+        return name, location, ip, mac
+
     def _on_tree_context_menu(self, pos):
         """Rechtermuisklik op boom — toont context menu op basis van item type."""
         from PySide6.QtWidgets import QMenu
@@ -1628,7 +1707,23 @@ class MainWindow(QMainWindow):
             )
 
         elif item_type == _TYPE_OUTLET:
+            # F8-wandpunt — kopieeracties (leesactie: ook in read-only modus)
+            wo_name, wo_loc, wo_ip, wo_mac = self._outlet_copy_fields(data)
+            if wo_name:
+                menu.addAction(t("ctx_copy_name"),
+                               lambda v=wo_name: self._copy_to_clipboard(v))
+            if wo_loc:
+                menu.addAction(t("ctx_copy_location"),
+                               lambda v=wo_loc: self._copy_to_clipboard(v))
+            if wo_ip:
+                menu.addAction(t("ctx_copy_ip"),
+                               lambda v=wo_ip: self._copy_to_clipboard(v))
+            if wo_mac:
+                menu.addAction(t("ctx_copy_mac"),
+                               lambda v=wo_mac: self._copy_to_clipboard(normalize_mac(v)))
             if not read_only:                              # F5
+                if not menu.isEmpty():
+                    menu.addSeparator()
                 menu.addAction(t("ctx_edit_outlet"),
                                lambda: self._edit_wall_outlet(data))
                 menu.addSeparator()
@@ -2045,6 +2140,22 @@ class MainWindow(QMainWindow):
 
     def _on_device_context_menu(self, device_id: str, action: str):
         """Dispatcher voor device context menu acties vanuit rack_view."""
+        device = next((d for d in self._data.get("devices", [])
+                       if d["id"] == device_id), None)
+        if not device:
+            return
+
+        # F7/F8 — leesacties: altijd toegestaan, ook in read-only modus
+        if action == "detail":
+            self._on_device_double_clicked(device_id)
+            return
+        if action == "copy_ip":
+            self._copy_to_clipboard(device.get("ip", ""))
+            return
+        if action == "copy_mac":
+            self._copy_to_clipboard(normalize_mac(device.get("mac", "")))
+            return
+
         if settings_storage.get_read_only_mode():          # F5
             return
         rack_data = None
@@ -2060,11 +2171,6 @@ class MainWindow(QMainWindow):
                                 "site_id": site["id"],
                             }
                             break
-
-        device = next((d for d in self._data.get("devices", [])
-                       if d["id"] == device_id), None)
-        if not device:
-            return
 
         if action == "edit":
             # B6 — PlaceDeviceDialog in edit-modus: device + positie aanpasbaar
@@ -2089,6 +2195,9 @@ class MainWindow(QMainWindow):
             )
             if dlg.exec() and dlg.get_result():
                 result = dlg.get_result()
+                # Snapshot oude waarden vóór update (K3 changelog)
+                _TRACK = ["name", "type", "ip", "location", "notes", "front_ports", "sfp_ports"]
+                _old_dev = {k: device.get(k, "") for k in _TRACK}
                 # Device velden bijwerken
                 device.update(result["device"])
                 # Slotpositie bijwerken
@@ -2113,11 +2222,15 @@ class MainWindow(QMainWindow):
                             "number":    sfp_num,
                         })
                 self._save_and_backup()
+                _new_dev = {k: device.get(k, "") for k in _TRACK}
+                _diff = {k: {"van": _old_dev[k], "naar": _new_dev[k]}
+                         for k in _TRACK if _old_dev[k] != _new_dev[k]}
                 log_change(
                     action=ACTION_EDIT,
                     entity=ENTITY_DEVICE,
                     entity_id=device["id"],
-                    label=f"{device['type']} — {device['name']}"
+                    label=f"{device['type']} — {device['name']}",
+                    details=_diff or None,
                 )
                 if isinstance(self._current_view, RackView):
                     self._current_view.refresh(self._data)
@@ -2609,6 +2722,8 @@ class MainWindow(QMainWindow):
         )
 
         self._wire_detail.refresh_info(self._data)
+        if isinstance(self._current_view, RackView):
+            self._current_view.refresh(self._data)
         self.set_status(f"✓  {t('msg_connection_updated')}")
 
     def _resolve_port_label(self, obj_id: str, obj_type: str) -> str:
@@ -2684,6 +2799,47 @@ class MainWindow(QMainWindow):
 
         port_label = f"{dev.get('name', '')} — {port.get('name', '')} ({port.get('side','').upper()})"
 
+        # 1.79.0 — Alle verbindingen van deze poort (een PP-poort mag er twee
+        # hebben: port→port naar switch ÉN wall_outlet naar wandpunt).
+        port_conns = [
+            c for c in self._data.get("connections", [])
+            if c.get("from_id") == port_id or c.get("to_id") == port_id
+        ]
+
+        def _conn_other(c):
+            """Geeft (other_id, other_type) van een verbinding t.o.v. deze poort."""
+            if c.get("from_id") == port_id:
+                return c.get("to_id"), c.get("to_type")
+            return c.get("from_id"), c.get("from_type")
+
+        def _conn_other_label(c):
+            oid, otype = _conn_other(c)
+            if otype == "wall_outlet":
+                wo = next(
+                    (w for s in get_all_sites(self._data)
+                     for r in s.get("rooms", [])
+                     for w in r.get("wall_outlets", [])
+                     if w["id"] == oid), None)
+                return f"🌐 {wo['name']}" if wo else "🌐 ?"
+            if otype == "endpoint":
+                ep = next((e for e in self._data.get("endpoints", [])
+                           if e["id"] == oid), None)
+                return f"🖥 {ep.get('name', '?')}" if ep else "🖥 ?"
+            if otype == "port":
+                op = next((p for p in self._data.get("ports", [])
+                           if p["id"] == oid), None)
+                od = next((d for d in self._data.get("devices", [])
+                           if d["id"] == op.get("device_id")), None) if op else None
+                if op and od:
+                    return (f"🔌 {od.get('name', '?')} — "
+                            f"{op.get('name', '?')} ({op.get('side', '').upper()})")
+                return "🔌 ?"
+            return "?"
+
+        is_patchpanel  = dev.get("type") in ("patch_panel", "patchpanel")
+        has_outlet_conn = any(_conn_other(c)[1] == "wall_outlet" for c in port_conns)
+        has_p2p_conn    = any(_conn_other(c)[1] == "port"        for c in port_conns)
+
         menu = QMenu(self)
 
         # Koppelen — één actie, opent SmartDialog met tabs
@@ -2691,6 +2847,12 @@ class MainWindow(QMainWindow):
         act_port_to_port  = None   # behouden voor backwards compat
         if not is_connected:
             act_connect_smart = menu.addAction(t("ctx_connect_to_outlet"))
+
+        # 1.79.0 — Workflow A: PP-poort al gepatcht naar switch (port→port),
+        # maar nog GEEN wandpunt → wandpunt koppelen toestaan (tweede verbinding).
+        act_connect_outlet_pp = None
+        if is_patchpanel and has_p2p_conn and not has_outlet_conn:
+            act_connect_outlet_pp = menu.addAction(t("ctx_connect_to_outlet"))
 
         # Direct endpoint: koppelen (vrij) of loskoppelen + bewerken + detail (al direct endpoint)
         act_endpoint_direct = None
@@ -2705,10 +2867,29 @@ class MainWindow(QMainWindow):
 
         act_disconnect = None
         act_move_conn  = None
+        act_edit_conn  = None
+        disconnect_map = {}   # 1.79.0 — actie → verbinding (bij 2+ verbindingen)
+        edit_map       = {}   # H1c — actie → verbinding (bewerken bij 2+ verbindingen)
         if is_connected and not is_direct_endpoint:
             menu.addSeparator()
-            act_move_conn  = menu.addAction(t("ctx_move_port_connection"))
-            act_disconnect = menu.addAction(t("ctx_disconnect_port"))
+            if len(port_conns) <= 1:
+                # H1c — kabeltype/label/notitie van de bestaande verbinding wijzigen
+                act_edit_conn  = menu.addAction("✏  " + t("title_edit_connection"))
+                act_move_conn  = menu.addAction(t("ctx_move_port_connection"))
+                act_disconnect = menu.addAction(t("ctx_disconnect_port"))
+            else:
+                # 1.79.0 — Poort heeft meerdere verbindingen: per verbinding
+                # een aparte verwijder-actie zodat de juiste gewist wordt.
+                # Verplaatsen is hier dubbelzinnig en wordt weggelaten.
+                # H1c — ook bewerken per verbinding (kabeltype/label/notitie).
+                for c in port_conns:
+                    ae = menu.addAction(
+                        f"✏  {t('title_edit_connection')}: {_conn_other_label(c)}")
+                    edit_map[ae] = c
+                for c in port_conns:
+                    a = menu.addAction(
+                        f"{t('ctx_disconnect_port')}: {_conn_other_label(c)}")
+                    disconnect_map[a] = c
 
         # 1.60.0 — RV-NEW-1: eindapparaat detail via trace (ook voor PP-back / switch-poort)
         # Enkel toevoegen als niet-direct-endpoint maar trace WEL een eindapparaat bereikt.
@@ -2728,6 +2909,18 @@ class MainWindow(QMainWindow):
 
         if act_connect_smart and chosen == act_connect_smart:
             self._on_connect_smart(port_id, port_label)
+
+        elif act_connect_outlet_pp and chosen == act_connect_outlet_pp:
+            # 1.79.0 — Wandpunt koppelen aan reeds-gepatchte PP-poort
+            self._on_connect_outlet_extra(port_id, port_label)
+
+        elif chosen in edit_map:
+            # H1c — Specifieke verbinding bewerken (poort met 2+ verbindingen)
+            self._on_edit_connection(edit_map[chosen]["id"])
+
+        elif chosen in disconnect_map:
+            # 1.79.0 — Specifieke verbinding loskoppelen (poort met 2+ verbindingen)
+            self._on_delete_connection(disconnect_map[chosen]["id"])
 
         elif act_port_to_port and chosen == act_port_to_port:
             self._on_connect_port_to_port(port_id, port_label)
@@ -2758,6 +2951,11 @@ class MainWindow(QMainWindow):
                      if existing_conn.get("to_type") == "endpoint"
                      else existing_conn["from_id"])
             self._on_endpoint_edit_requested(ep_id)
+
+        elif act_edit_conn and chosen == act_edit_conn:
+            # H1c — Bestaande verbinding bewerken (kabeltype/label/notitie)
+            if existing_conn:
+                self._on_edit_connection(existing_conn["id"])
 
         elif act_move_conn and chosen == act_move_conn:
             if existing_conn:
@@ -2874,6 +3072,68 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, _do_highlight)
 
         self.set_status(f"✓  {port_label}  ►  {icon}  {target_label}")
+
+    # ------------------------------------------------------------------
+    # Wandpunt koppelen aan een reeds-gepatchte patchpanel-poort (Workflow A)
+    # ------------------------------------------------------------------
+
+    def _on_connect_outlet_extra(self, port_id: str, port_label: str):
+        """
+        1.79.0 — Koppel een wandpunt aan een patchpanel-poort die AL een
+        port→port verbinding (naar de switch) heeft. De bestaande verbinding
+        blijft behouden; er wordt een TWEEDE verbinding (wall_outlet) toegevoegd.
+        Gebruikt de bestaande ConnectToOutletDialog (poort staat vast, enkel
+        het wandpunt wordt gekozen).
+        """
+        if settings_storage.get_read_only_mode():
+            return
+
+        dlg = ConnectToOutletDialog(self._data, port_id, port_label, parent=self)
+        if not dlg.exec() or not dlg.get_result():
+            return
+
+        conn = dlg.get_result()
+        self._data.setdefault("connections", []).append(conn)
+        self._save_and_backup()
+
+        # Doel-label voor status + logging
+        to_id  = conn["to_id"]
+        target = next(
+            (wo for s in get_all_sites(self._data)
+             for r in s.get("rooms", [])
+             for wo in r.get("wall_outlets", [])
+             if wo["id"] == to_id),
+            None,
+        )
+        target_label = target["name"] if target else to_id
+
+        log_change(
+            action=ACTION_ADD,
+            entity=ENTITY_CONNECTION,
+            entity_id=conn["id"],
+            label=f"{port_label} → 🌐 {target_label}",
+            details={"cable_type": conn["cable_type"]},
+        )
+
+        if isinstance(self._current_view, RackView):
+            self._current_view.refresh(self._data)
+
+        steps = tracing.trace_from_port(self._data, port_id)
+        self._wire_detail.set_trace(steps, port_label, data=self._data)
+
+        # B9 — highlight_trace na koppelen (zelfde patroon als _on_connect_smart)
+        if isinstance(self._current_view, RackView):
+            trace_port_ids  = [s["obj_id"] for s in steps if s["obj_type"] == "port"]
+            current_rack_id = self._current_view._rack.get("id", "")
+            local_port_ids  = self._get_port_ids_in_rack(trace_port_ids, current_rack_id)
+            if local_port_ids:
+                from PySide6.QtCore import QTimer
+                view = self._current_view
+                def _do_highlight(pids=list(local_port_ids)):
+                    view.highlight_trace(pids)
+                QTimer.singleShot(0, _do_highlight)
+
+        self.set_status(f"✓  {port_label}  ►  🌐  {target_label}")
 
     # ------------------------------------------------------------------
     # Direct endpoint koppelen aan poort
@@ -3805,6 +4065,8 @@ class MainWindow(QMainWindow):
 
         dlg = DeviceDialog(parent=self, device=device)
         if dlg.exec() and dlg.get_result():
+            _TRACK = ["name", "type", "ip", "location", "notes", "front_ports", "sfp_ports"]
+            _old_dev = {k: device.get(k, "") for k in _TRACK}
             device.update(dlg.get_result())
             new_front = device.get("front_ports", 0)
             new_sfp   = device.get("sfp_ports",   0)
@@ -3825,11 +4087,15 @@ class MainWindow(QMainWindow):
                     })
 
             self._save_and_backup()
+            _new_dev = {k: device.get(k, "") for k in _TRACK}
+            _diff = {k: {"van": _old_dev[k], "naar": _new_dev[k]}
+                     for k in _TRACK if _old_dev[k] != _new_dev[k]}
             log_change(
                 action=ACTION_EDIT,
                 entity=ENTITY_DEVICE,
                 entity_id=device["id"],
-                label=f"{device['type']} — {device['name']}"
+                label=f"{device['type']} — {device['name']}",
+                details=_diff or None,
             )
             if isinstance(self._current_view, RackView):
                 self._current_view.refresh(self._data)
@@ -4082,6 +4348,18 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Help — H1
     # ------------------------------------------------------------------
+
+    def _copy_to_clipboard(self, value: str):
+        """
+        F8 — kopieer een (reeds genormaliseerde) waarde naar het klembord.
+        Leesactie: ook toegestaan in read-only modus. Lege waarde → niets.
+        """
+        value = (value or "").strip()
+        if not value:
+            return
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(value)
+        self.set_status(f"📋  {t('status_copied')}: {value}")
 
     def _on_device_double_clicked(self, device_id: str):
         """
@@ -4403,6 +4681,16 @@ class MainWindow(QMainWindow):
         dlg.set_tab(2)
         dlg.exec()
 
+    def _on_changelog(self):
+        """K3 — Toon de wijzigingslog in een niet-modaal venster."""
+        if not hasattr(self, "_changelog_win") or not self._changelog_win:
+            self._changelog_win = ChangelogViewerDialog(parent=self)
+        else:
+            self._changelog_win.refresh()
+        self._changelog_win.show()
+        self._changelog_win.raise_()
+        self._changelog_win.activateWindow()
+
     # ------------------------------------------------------------------
     # Instellingen
     # ------------------------------------------------------------------
@@ -4450,10 +4738,18 @@ class MainWindow(QMainWindow):
         suggested  = import_export_service.suggested_dirname(company_name)
         export_dir = os.path.join(dest, suggested)
 
+        _ver_str = _APP_VERSION
+        _user_str = self._current_user_name()
         if company_id:
-            ok, err = import_export_service.export_company_to_dir(export_dir, company_id)
+            ok, err = import_export_service.export_company_to_dir(
+                export_dir, company_id,
+                app_version=_ver_str, exported_by=_user_str,
+            )
         else:
-            ok, err = import_export_service.export_to_dir(export_dir)
+            ok, err = import_export_service.export_to_dir(
+                export_dir,
+                app_version=_ver_str, exported_by=_user_str,
+            )
 
         if ok:
             set_last_folder("export_json", dest)
@@ -4814,6 +5110,49 @@ class MainWindow(QMainWindow):
         self._search_win.raise_()
         self._search_win.activateWindow()
 
+    # ------------------------------------------------------------------
+    # H1d - Reviewvenster voor rapport-actiepunten
+    # ------------------------------------------------------------------
+
+    def _current_user_name(self) -> str:
+        # Naam voor 'door' bij goedkeuringen: Azure AD-gebruiker, anders
+        # de Windows-gebruiker, anders leeg.
+        try:
+            from app.security.permissions_networkmap import get_cached_user
+            u = get_cached_user() or {}
+            name = (u.get("displayName") or u.get("userPrincipalName") or "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
+        try:
+            import getpass
+            return getpass.getuser()
+        except Exception:
+            return ""
+
+    def _on_action_review(self):
+        if not hasattr(self, "_review_win") or not self._review_win:
+            self._review_win = ActionReviewWindow(
+                self._data,
+                current_user=self._current_user_name(),
+                read_only=settings_storage.get_read_only_mode(),
+                parent=self,
+            )
+            self._review_win.approvals_changed.connect(self._on_approvals_changed)
+            self._review_win.navigate_requested.connect(self._on_search_result)
+        else:
+            self._review_win.update_data(self._data)
+        self._review_win.show()
+        self._review_win.raise_()
+        self._review_win.activateWindow()
+
+    def _on_approvals_changed(self):
+        # Goedkeuring gewijzigd: data['approvals'] is al aangepast in het
+        # venster; opslaan + status. Word-rapport gebruikt dezelfde bron.
+        self._save_and_backup()
+        self.set_status("✓  Goedkeuringen opgeslagen")
+
     def _on_search_detail_requested(self, result_type: str, result_id: str):
         """
         1.59.0 — Rechtsklik "Detail tonen" in zoekvenster.
@@ -5107,6 +5446,7 @@ class MainWindow(QMainWindow):
                 floorplans_path=settings_storage.get_floorplans_path(),
                 floorplans_dir=settings_storage.get_floorplans_dir(),
                 vlan_path=_get_vlan_path(),
+                changelog_path=settings_storage.get_changelog_path(),
             )
             if ok:
                 log_info(f"Backup aangemaakt naar: {network_path}")

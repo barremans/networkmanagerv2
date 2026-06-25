@@ -15,17 +15,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.helpers.i18n import t
+from app.helpers.settings_storage import load_cable_types_for_ddl
 
-# Kabeltype opties — (interne waarde, i18n sleutel)
-_CABLE_TYPES = [
-    ("utp_cat5e",  "cable_utp_cat5e"),
-    ("utp_cat6",   "cable_utp_cat6"),
-    ("utp_cat6a",  "cable_utp_cat6a"),
-    ("fiber_sm",   "cable_fiber_sm"),
-    ("fiber_mm",   "cable_fiber_mm"),
-    ("dak",        "cable_dak"),
-    ("other",      "cable_other"),
-]
 
 
 class ConnectionEditDialog(QDialog):
@@ -88,8 +79,8 @@ class ConnectionEditDialog(QDialog):
 
         # Kabeltype
         self._fld_cable = QComboBox()
-        for val, i18n_key in _CABLE_TYPES:
-            self._fld_cable.addItem(t(i18n_key), userData=val)
+        for val, lbl in load_cable_types_for_ddl():
+            self._fld_cable.addItem(lbl, userData=val)
         form.addRow(t("label_cable_type") + ":", self._fld_cable)
 
         # Notitie

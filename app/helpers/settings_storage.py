@@ -2,9 +2,17 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.16.0
+# Version: 1.19.0
 # Author:  Barremans
-# Changes: 1.16.0 — S6b migratie fix: required_group → group_admin wordt
+# Changes: 1.19.0 - K-CABLE: _DEFAULT_CABLE_TYPES, load/save/get_cable_type_label.
+#          1.18.0 — K3: get_changelog_path() toegevoegd.
+#          1.17.0 — GUID-normalisatie: tenant_id/client_id worden lowercase
+#                   bewaard én gelezen. MSAL valideert de aud-claim
+#                   hoofdlettergevoelig tegen client_id; een uppercase GUID
+#                   (bv. via de globale uppercase-filter) brak de login.
+#                   Auto-heal: afwijkend opgeslagen waarden worden eenmalig
+#                   genormaliseerd teruggeschreven.
+#          1.16.0 — S6b migratie fix: required_group → group_admin wordt
 #                   eenmalig weggeschreven naar settings.json zodat bestaande
 #                   installaties (CGK-APP-L6 als required_group) correct
 #                   migreren zonder herstart-probleem.
@@ -116,6 +124,7 @@ _SETTINGS_FILE   = os.path.join(_DATA_DIR, "settings.json")
 _NETWORK_FILE    = os.path.join(_DATA_DIR, "network_data.json")
 _FLOORPLANS_FILE = os.path.join(_DATA_DIR, "floorplans.json")
 _FLOORPLANS_DIR  = os.path.join(_DATA_DIR, "floorplans")
+_CHANGELOG_FILE  = os.path.join(_DATA_DIR, "changelog.jsonl")
 
 # Verplichte sleutels voor validatie — v1 én v2 worden ondersteund
 _REQUIRED_SETTINGS_KEYS    = ["app_version", "language", "backup", "ui", "last_folders"]
@@ -184,6 +193,17 @@ _DEFAULT_DEVICE_TYPES = [
 ]
 
 # Ingebouwde wandpunt locatie types — configureerbaar
+# Ingebouwde kabeltypes -- configureerbaar (K-CABLE)
+_DEFAULT_CABLE_TYPES = [
+    {"key": "utp_cat5e", "label_nl": "UTP Cat5e", "label_en": "UTP Cat5e", "color": "#95A5A6"},
+    {"key": "utp_cat6",  "label_nl": "UTP Cat6",  "label_en": "UTP Cat6",  "color": "#4A90D9"},
+    {"key": "utp_cat6a", "label_nl": "UTP Cat6a", "label_en": "UTP Cat6a", "color": "#27AE60"},
+    {"key": "fiber_sm",  "label_nl": "Fiber SM",  "label_en": "Fiber SM",  "color": "#F39C12"},
+    {"key": "fiber_mm",  "label_nl": "Fiber MM",  "label_en": "Fiber MM",  "color": "#E67E22"},
+    {"key": "dak",       "label_nl": "DAK",       "label_en": "DAK",       "color": "#8E44AD"},
+    {"key": "other",     "label_nl": "Ander",     "label_en": "Other",     "color": "#7F8C8D"},
+]
+
 _DEFAULT_OUTLET_LOCATIONS = [
     {"key": "links",    "label_nl": "Links",    "label_en": "Left"},
     {"key": "rechts",   "label_nl": "Rechts",   "label_en": "Right"},
@@ -449,6 +469,54 @@ def get_device_type_defaults(key: str) -> tuple[int, int]:
 
 
 # ---------------------------------------------------------------------------
+# Kabeltypes (configureerbaar) — K-CABLE
+# ---------------------------------------------------------------------------
+
+def load_cable_types() -> list:
+    """
+    Geeft de geconfigureerde kabeltypes terug.
+    Elk item: {"key": str, "label_nl": str, "label_en": str, "color": str}
+    Valt terug op _DEFAULT_CABLE_TYPES als de instelling leeg of ongeldig is.
+    """
+    settings = load_settings()
+    types = settings.get("cable_types")
+    if not isinstance(types, list) or len(types) == 0:
+        return list(_DEFAULT_CABLE_TYPES)
+    return types
+
+
+def save_cable_types(types: list) -> bool:
+    return save_setting("cable_types", types)
+
+
+def get_cable_type_label(key: str, lang: str = "nl") -> str:
+    """Geeft het label voor een kabeltype-key terug in de opgegeven taal."""
+    for ct in load_cable_types():
+        if ct.get("key") == key:
+            return ct.get(f"label_{lang}", ct.get("label_nl", key))
+    return key
+
+
+def get_cable_type_color(key: str) -> str:
+    """Geeft de kleurcode (#rrggbb) voor een kabeltype-key terug."""
+    for ct in load_cable_types():
+        if ct.get("key") == key:
+            return ct.get("color", "#7F8C8D")
+    return "#7F8C8D"
+
+
+def load_cable_types_for_ddl(lang: str = "nl") -> list[tuple[str, str]]:
+    """
+    Hulpfunctie voor DDL-populatie in verbindingsdialogen.
+    Geeft lijst van (key, label) tuples terug in de juiste taal.
+    """
+    return [
+        (ct["key"], ct.get(f"label_{lang}", ct.get("label_nl", ct["key"])))
+        for ct in load_cable_types()
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Netwerkdata pad — F3
 # ---------------------------------------------------------------------------
 
@@ -534,6 +602,16 @@ def get_vlan_config_path() -> str:
         os.path.dirname(get_network_data_path()),
         "vlan_config.json"
     )
+
+
+def get_changelog_path() -> str:
+    """
+    Geeft het pad naar changelog.jsonl terug (K3).
+    Staat altijd in de lokale data-map (_DATA_DIR), ook bij netwerkdata.
+    De log is installatie-specifiek — niet gedeeld via netwerk-pad.
+    """
+    _ensure_data_dir()
+    return _CHANGELOG_FILE
 
 
 # ---------------------------------------------------------------------------
@@ -746,28 +824,57 @@ _DEFAULT_AZURE_AD = {
 
 def get_azure_ad_config() -> dict:
     """
-    Geeft de Azure AD-configuratie terug.
-    Vult ontbrekende sleutels aan met defaults.
-    Backward compatible: 'required_group' (S6) migreert eenmalig naar 'group_admin'
-    en schrijft de nieuwe structuur terug naar settings.json.
+    Geeft de Azure AD-configuratie terug. Vult ontbrekende sleutels aan.
+
+    GUID-velden (tenant_id, client_id) worden naar lowercase genormaliseerd:
+    MSAL valideert de 'aud'-claim hoofdlettergevoelig tegen client_id, en Azure
+    levert GUIDs altijd lowercase. Zonder normalisatie faalt de tokenvalidatie
+    ("aud claim must contain this client's client_id, case-sensitively") als de
+    waarde ooit in hoofdletters is opgeslagen (bv. door de globale uppercase-
+    filter in het instellingenvenster).
+
+    Auto-heal: afwijkend opgeslagen waarden (uppercase GUIDs of de oude sleutel
+    'required_group') worden eenmalig genormaliseerd teruggeschreven.
     """
     cfg    = load_settings().get("azure_ad", {})
     result = dict(_DEFAULT_AZURE_AD)
     result.update(cfg)
+
+    # GUIDs altijd lowercase
+    result["tenant_id"] = str(result.get("tenant_id", "")).strip().lower()
+    result["client_id"] = str(result.get("client_id", "")).strip().lower()
+
+    migrated = False
     # Eenmalige migratie: oude 'required_group' → group_admin
     if "required_group" in cfg and not result.get("group_admin"):
         result["group_admin"] = cfg["required_group"]
-        del result["required_group"]
-        save_setting("azure_ad", result)   # wegschrijven zodat migratie niet herhaald wordt
+        result.pop("required_group", None)
+        migrated = True
+
+    # Eenmalig terugschrijven als de opgeslagen waarden afwijken
+    # (uppercase GUIDs of oude sleutel), zodat dit niet elke start herhaalt.
+    need_write = migrated or (
+        bool(cfg) and (
+            str(cfg.get("tenant_id", "")) != result["tenant_id"]
+            or str(cfg.get("client_id", "")) != result["client_id"]
+        )
+    )
+    if need_write:
+        save_setting("azure_ad", result)
+
     return result
 
 
 def save_azure_ad_config(config: dict) -> bool:
-    """Slaat de Azure AD-configuratie op. Geeft True bij succes."""
+    """
+    Slaat de Azure AD-configuratie op. Geeft True bij succes.
+    GUID-velden (tenant_id, client_id) worden lowercase bewaard; groepsnamen
+    blijven ongewijzigd (de groepsvergelijking is al hoofdletter-ongevoelig).
+    """
     return save_setting("azure_ad", {
         "enabled":        bool(config.get("enabled", True)),
-        "tenant_id":      str(config.get("tenant_id",      "")).strip(),
-        "client_id":      str(config.get("client_id",      "")).strip(),
+        "tenant_id":      str(config.get("tenant_id",      "")).strip().lower(),
+        "client_id":      str(config.get("client_id",      "")).strip().lower(),
         "group_admin":    str(config.get("group_admin",    "")).strip(),
         "group_readonly": str(config.get("group_readonly", "")).strip(),
     })

@@ -2,9 +2,18 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_smart_dialog.py
 # Role:    Poort koppelen aan wandpunt, eindapparaat of poort — met zoekfunctie
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
+# Changes: 1.6.0 — Zoekfix: _tokens_match gebruikt begin-van-woord matching
+#                  (zoals search_service) i.p.v. simpele substring. Voorkomt
+#                  dat korte tokens zoals "M" matchen op "room", "from", etc.
+#                  load_cable_types_for_ddl() i.p.v. hardcoded _CABLE_TYPES.
+#          1.5.0 — GP-F1: multi-token AND-zoeken in alle drie de tabs.
+#                   Elk spatie-gescheiden woord is een apart filter (AND).
+#                   Poort-zoektekst verrijkt met VLAN en raw side (front/back)
+#                   zodat 'ALANSW01 1', 'VLAN 10' en 'SW01 FRONT' matchen.
+#                   Nieuwe helper _tokens_match().
+#          1.0.0 — Initiële versie
 #                   3 tabs: Wandpunt / Eindapparaat / Poort
 #                   Zoekbalk per tab, in-gebruik items grijs maar selecteerbaar
 #          1.1.0 — "⊕ Nieuw wandpunt" knop in wandpunt-tab
@@ -44,25 +53,37 @@ from app.helpers.settings_storage import (
     get_outlet_location_label,
     get_all_sites,
     get_company_for_site,
+    load_cable_types_for_ddl,
 )
 
 _USER_ROLE  = 256   # Qt.UserRole  — item id
 _IN_USE_ROLE = 257  # bool — al verbonden
 
-_CABLE_TYPES = [
-    ("utp_cat5e",  "cable_utp_cat5e"),
-    ("utp_cat6",   "cable_utp_cat6"),
-    ("utp_cat6a",  "cable_utp_cat6a"),
-    ("fiber_sm",   "cable_fiber_sm"),
-    ("fiber_mm",   "cable_fiber_mm"),
-    ("dak",        "cable_dak"),
-    ("other",      "cable_other"),
-]
-
 # Tab indices — ook geëxporteerd zodat main_window ze kan gebruiken
 _TAB_OUTLET   = 0
 _TAB_ENDPOINT = 1
 _TAB_PORT     = 2
+
+
+def _tokens_match(query: str, text: str) -> bool:
+    """
+    1.6.0 — multi-token AND-zoeken met begin-van-woord matching.
+    Elk spatie-gescheiden token moet matchen aan het begin van een woord
+    in text (hoofdletterongevoelig). Woorden gescheiden door spatie,
+    koppelteken, punt, haakje, underscore, etc.
+    Lege query → True.
+
+    Voorbeeld: "PATCHPANEL M" matcht "Patchpanel M · Port 4" maar NIET
+    "room" of "from" voor het token "m".
+    """
+    import re
+    low = text.lower()
+    for tok in query.lower().split():
+        # Probeer begin-van-woord: token staat aan begin van tekst of na niet-alfanumeriek
+        pattern = r'(?<![a-z0-9])' + re.escape(tok)
+        if not re.search(pattern, low):
+            return False
+    return True
 
 
 class ConnectSmartDialog(QDialog):
@@ -239,9 +260,14 @@ class ConnectSmartDialog(QDialog):
         cable_row = QHBoxLayout()
         cable_row.addWidget(QLabel(t("label_cable_type") + ":"))
         self._ddl_cable = QComboBox()
-        for val, key in _CABLE_TYPES:
-            self._ddl_cable.addItem(t(key), val)
-        self._ddl_cable.setCurrentIndex(1)  # standaard UTP Cat6
+        for val, label in load_cable_types_for_ddl():
+            self._ddl_cable.addItem(label, val)
+        # Standaard utp_cat6 selecteren (veilig bij gewijzigde volgorde)
+        idx_cat6 = next(
+            (i for i in range(self._ddl_cable.count())
+             if self._ddl_cable.itemData(i) == "utp_cat6"), 1
+        )
+        self._ddl_cable.setCurrentIndex(idx_cat6)
         cable_row.addWidget(self._ddl_cable)
         cable_row.addStretch()
         root.addLayout(cable_row)
@@ -326,7 +352,7 @@ class ConnectSmartDialog(QDialog):
         self._list_outlet.clear()
         q = (text if text != "" else self._search_outlet.text()).strip().lower()
         for item_data in self._all_outlets:
-            if q and q not in item_data["label"].lower():
+            if q and not _tokens_match(q, item_data.get("search", item_data["label"])):
                 continue
             suffix = f"  ({t('lbl_already_connected')})" if item_data["in_use"] else ""
             item = self._make_list_item(
@@ -404,7 +430,7 @@ class ConnectSmartDialog(QDialog):
         self._list_endpoint.clear()
         q = (text if text != "" else self._search_endpoint.text()).strip().lower()
         for item_data in self._all_endpoints:
-            if q and q not in item_data["label"].lower():
+            if q and not _tokens_match(q, item_data.get("search", item_data["label"])):
                 continue
             suffix = f"  ({t('lbl_already_connected')})" if item_data["in_use"] else ""
             item = self._make_list_item(
@@ -459,10 +485,15 @@ class ConnectSmartDialog(QDialog):
                             )
                             label  = f"{dev_label}  ·  {pname}  ({side_lbl})"
                             in_use = pid in self._connected_ports
+                            vlan   = str(port.get("vlan", "") or "").strip()
+                            search = " ".join(filter(None, [
+                                label, side, f"vlan {vlan}" if vlan else "",
+                            ]))
                             self._all_ports.append({
                                 "label":  label,
                                 "id":     pid,
                                 "in_use": in_use,
+                                "search": search,
                             })
 
         self._filter_ports()
@@ -473,7 +504,7 @@ class ConnectSmartDialog(QDialog):
         free   = [p for p in self._all_ports if not p["in_use"]]
         in_use = [p for p in self._all_ports if     p["in_use"]]
         for item_data in free + in_use:
-            if q and q not in item_data["label"].lower():
+            if q and not _tokens_match(q, item_data.get("search", item_data["label"])):
                 continue
             suffix = f"  ({t('lbl_already_connected')})" if item_data["in_use"] else ""
             item = self._make_list_item(

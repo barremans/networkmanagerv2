@@ -2,9 +2,21 @@
 # Networkmap_Creator
 # File:    app/main.py
 # Role:    Entry point — QApplication, QSS laden, taal instellen, MainWindow
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
-# Changes: 1.6.0 — S6 update-fix: _run_security_gate() controleert eerst of
+# Changes: 1.7.0 — S6c: security gate faalt niet langer "open".
+#                  Oud gedrag (1.6.0): enabled=True maar tenant/client leeg
+#                  → stille volledige schrijftoegang. Dat is een lek: een
+#                  niet-gemigreerde settings.json gaf iedereen read/write.
+#                  Nieuw gedrag:
+#                    - enabled=False                → volledige toegang
+#                      (bewuste keuze van de beheerder).
+#                    - enabled=True + geconfigureerd → normale AD-gate.
+#                    - enabled=True + NIET volledig geconfigureerd
+#                      (tenant_id of client_id leeg) → GEEN volledige toegang;
+#                      offline poweruser login → read-only. Annuleren = geen
+#                      toegang.
+#          1.6.0 — S6 update-fix: _run_security_gate() controleert eerst of
 #                  AD geconfigureerd is (tenant_id + client_id gevuld).
 #                  Als niet geconfigureerd → directe toegang, geen popup.
 #                  Voorkomt offline login popup na update op bestaande machines.
@@ -157,12 +169,20 @@ def _run_security_gate() -> tuple[bool, bool]:
 
     Returns:
         (toegang_verleend, read_only)
-        - (True,  False) → online, admin-groep of AD niet geconfigureerd → volledige toegang
-        - (True,  True)  → online, readonly-groep of offline poweruser → read-only
+        - (True,  False) → AD uitgeschakeld OF online admin → volledige toegang
+        - (True,  True)  → online readonly-groep, offline poweruser, of
+                           AD ingeschakeld-maar-niet-geconfigureerd → read-only
         - (False, False) → geen toegang, app mag niet starten
+
+    Beleid (S6c):
+        AD bewust uitgeschakeld (enabled=False) is een expliciete keuze van de
+        beheerder en geeft volledige toegang. AD ingeschakeld maar niet
+        geconfigureerd (tenant_id/client_id leeg) geeft NOOIT stil volledige
+        toegang — dat is een lek. In dat geval volgt offline poweruser login
+        met read-only als hoogst haalbare niveau.
     """
     from app.security.permissions_networkmap import get_access_level, get_cached_user
-    from app.security.offline_auth import log_ad_login, log_app_start
+    from app.security.offline_auth import log_ad_login, log_app_start, log_offline_login
     from app.gui.dialogs.no_access_dialog import NoAccessDialog
     from app.gui.dialogs.offline_login_dialog import OfflineLoginDialog
     from app.helpers.settings_storage import get_azure_ad_config
@@ -173,13 +193,34 @@ def _run_security_gate() -> tuple[bool, bool]:
     tenant_id   = cfg.get("tenant_id", "").strip()
     client_id   = cfg.get("client_id", "").strip()
 
-    if not ad_enabled or not tenant_id or not client_id:
-        # AD niet geconfigureerd (bv. na update zonder settings-migratie)
-        # → volledige toegang, geen popup
-        log_app_start("onbekend (AD niet geconfigureerd)", mode="readwrite")
-        print("[SECURITY] AD niet geconfigureerd — directe toegang verleend.")
+    # 1) AD bewust uitgeschakeld door de beheerder → volledige toegang.
+    if not ad_enabled:
+        log_app_start("onbekend (AD uitgeschakeld)", mode="readwrite")
+        print("[SECURITY] AD uitgeschakeld in settings — volledige toegang.")
         return True, False
 
+    # 2) AD ingeschakeld maar NIET volledig geconfigureerd.
+    #    Geen stille volledige toegang meer (was het lek in 1.6.0).
+    #    Veilige fallback: offline poweruser login → read-only.
+    if not tenant_id or not client_id:
+        print("[SECURITY] AD ingeschakeld maar niet geconfigureerd "
+              "(tenant_id/client_id leeg) — offline login vereist.")
+        log_offline_login(
+            "AD ingeschakeld zonder configuratie",
+            success=False,
+            reason="tenant_id/client_id ontbreken in settings",
+        )
+        dlg = OfflineLoginDialog()
+        if dlg.exec() == OfflineLoginDialog.DialogCode.Accepted:
+            username = dlg.get_username()
+            log_app_start(username, mode="readonly")
+            print(f"[SECURITY] Offline read-only toegang voor '{username}' "
+                  f"(AD niet geconfigureerd).")
+            return True, True
+        print("[SECURITY] Offline login geannuleerd — geen toegang.")
+        return False, False
+
+    # 3) AD ingeschakeld én geconfigureerd → normale gate.
     print("[SECURITY] Azure AD login starten...")
     ad_ok = _try_azure_login(timeout_sec=60)
 

@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/gui/search_window.py
 # Role:    Unified zoekvenster — devices, wandpunten, eindapparaten, poorten
-# Version: 2.3.0
+# Version: 2.4.0
 # Author:  Barremans
-# Changes: 2.3.0 — Contextmenu uitgebreid:
+# Changes: 2.4.0 — F9: placeholder verduidelijkt (naam, IP, MAC, type, VLAN).
+#                   Brede matching zit in search_service v2.4.0.
+#          2.3.0 — Contextmenu uitgebreid:
 #                   Endpoint: 'Detail tonen' toegevoegd (opent _EndpointDetailDialog)
 #                   detail_requested signaal ook voor endpoint
 #          2.2.0 — Gedrag tab wisselen en dubbelklik herzien:
@@ -108,7 +110,7 @@ class SearchWindow(QDialog):
         # ── Zoekveld + sluitknop ─────────────────────────────────────
         search_row = QHBoxLayout()
         self._input = QLineEdit()
-        self._input.setPlaceholderText("🔍  " + t("menu_search") + "  —  naam, IP, MAC, serienummer...")
+        self._input.setPlaceholderText("🔍  " + t("menu_search") + "  —  naam, IP, MAC, type, VLAN...")
         self._input.textChanged.connect(self._on_text_changed)
         self._input.returnPressed.connect(self._activate_first)
         search_row.addWidget(self._input)

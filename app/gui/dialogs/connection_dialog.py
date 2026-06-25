@@ -14,18 +14,8 @@ from PySide6.QtCore import Qt
 
 from app.helpers.i18n import t
 from app.helpers import settings_storage
-from app.helpers.settings_storage import get_all_sites
+from app.helpers.settings_storage import get_all_sites, load_cable_types_for_ddl
 
-# Kabeltype DDL waarden
-_CABLE_TYPES = [
-    ("utp_cat5e",  "cable_utp_cat5e"),
-    ("utp_cat6",   "cable_utp_cat6"),
-    ("utp_cat6a",  "cable_utp_cat6a"),
-    ("fiber_sm",   "cable_fiber_sm"),
-    ("fiber_mm",   "cable_fiber_mm"),
-    ("dak",        "cable_dak"),
-    ("other",      "cable_other"),
-]
 
 
 class ConnectionDialog(QDialog):
@@ -71,9 +61,12 @@ class ConnectionDialog(QDialog):
         cable_layout = QHBoxLayout()
         cable_layout.addWidget(QLabel(t("label_cable_type") + ":"))
         self._ddl_cable = QComboBox()
-        for val, key in _CABLE_TYPES:
-            self._ddl_cable.addItem(t(key), val)
-        self._ddl_cable.setCurrentIndex(1)   # standaard UTP Cat6
+        _cable_default_idx = 0
+        for i, (val, lbl) in enumerate(load_cable_types_for_ddl()):
+            self._ddl_cable.addItem(lbl, val)
+            if val == "utp_cat6":
+                _cable_default_idx = i
+        self._ddl_cable.setCurrentIndex(_cable_default_idx)
         cable_layout.addWidget(self._ddl_cable)
         cable_layout.addStretch()
         layout.addLayout(cable_layout)

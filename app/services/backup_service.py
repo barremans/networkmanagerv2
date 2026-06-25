@@ -2,9 +2,11 @@
 # Networkmap_Creator
 # File:    app/services/backup_service.py
 # Role:    Backup beheer — GEEN Qt imports
-# Version: 1.9.0
+# Version: 1.10.0
 # Author:  Barremans
-# Changes: 1.9.0 — Bedrijfslogica:
+# Changes: 1.10.0 — K3: changelog_path parameter in create_backup();
+#                   alle changelog-bestanden (rotaties) worden meegenomen.
+#          1.9.0 — Bedrijfslogica:
 #                  create_backup_company(): backup van 1 bedrijf
 #                  Gefilterde network_data + eigen floorplans submap
 #                  History-bestand krijgt bedrijfsnaam in bestandsnaam
@@ -278,6 +280,7 @@ def create_backup(
     floorplans_path: str | None = None,
     floorplans_dir: str | None = None,
     vlan_path: str | None = None,
+    changelog_path: str | None = None,
 ) -> tuple[bool, str]:
     """
     Maakt een backup van network_data.json naar de geconfigureerde netwerkmap.
@@ -289,6 +292,8 @@ def create_backup(
         floorplans_path — optioneel: pad naar floorplans.json
         floorplans_dir  — optioneel: pad naar SVG bestanden map
         vlan_path       — optioneel: pad naar vlan_config.json
+        changelog_path  — optioneel: pad naar changelog.jsonl (K3); alle
+                          rotaties (.1.jsonl, .2.jsonl) worden meegenomen
 
     Returns:
         (True,  "")           bij succes
@@ -349,6 +354,19 @@ def create_backup(
                 if not ok:
                     return False, f"vlan_config.json backup mislukt: {err}"
             # Niet aanwezig → overslaan
+
+        # K3 — changelog.jsonl + rotaties meekopieren indien opgegeven
+        if changelog_path:
+            from pathlib import Path as _P
+            _cl_base = _P(changelog_path)
+            _cl_slots = [_cl_base] + [
+                _cl_base.with_suffix(f".{i}.jsonl") for i in range(1, 3)
+            ]
+            for _cl in _cl_slots:
+                if _cl.exists():
+                    _ok, _err = _copy_with_retry(str(_cl), dest_dir / _cl.name)
+                    if not _ok:
+                        pass  # changelog backup mislukken is niet fataal
 
         # History backup met timestamp
         if config.get("keep_history", True):

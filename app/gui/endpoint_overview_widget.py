@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/gui/endpoint_overview_widget.py
 # Role:    Eindapparaten overzicht — zoeken en filteren per site
-# Version: 1.3.3
+# Version: 1.4.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
+# Changes: 1.4.0 — F8: rechtsklik-menu uitgebreid met "IP kopiëren" / "MAC
+#                   kopiëren" (veld-gestuurd, alleen als waarde bestaat). MAC
+#                   genormaliseerd via normalize_mac(). Leesactie: werkt ook in
+#                   read-only modus.
+#          1.0.0 — Initiële versie
 #          1.1.0 — MAC-kolom verwijderd
 #          1.2.0 — navigate_to_rack geeft nu ook ep_id mee voor poort-highlight
 #          1.3.0 — navigate_to_floorplan geeft target_val mee voor wandpunt-selectie
@@ -20,13 +24,14 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QMenu,
+    QAbstractItemView, QMenu, QApplication,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 
 from app.helpers.i18n import t, get_language
 from app.helpers import settings_storage
+from app.helpers.formatting import normalize_mac
 
 # Kolom-indices (geen MAC meer)
 _COL_NAME   = 0
@@ -357,8 +362,26 @@ class EndpointOverviewWidget(QWidget):
             return
         ep_id, rack_id, loc_key, outlet_id = self._row_data(row)
 
+        # Endpoint-object opzoeken voor IP/MAC (veld-gestuurd menu)
+        ep = next(
+            (e for e in self._data.get("endpoints", []) if e.get("id") == ep_id),
+            None,
+        ) or {}
+        ip_val  = (ep.get("ip", "")  or "").strip()
+        mac_val = (ep.get("mac", "") or "").strip()
+
         menu = QMenu(self)
         act_edit     = menu.addAction("✏  " + t("ctx_edit"))
+
+        # F8 — kopieeracties (leesactie: ook in read-only modus)
+        act_copy_ip = act_copy_mac = None
+        if ip_val or mac_val:
+            menu.addSeparator()
+            if ip_val:
+                act_copy_ip = menu.addAction(t("ctx_copy_ip"))
+            if mac_val:
+                act_copy_mac = menu.addAction(t("ctx_copy_mac"))
+
         menu.addSeparator()
         act_rack     = menu.addAction("🗄  " + (
             t("ctx_open_rack") if t("ctx_open_rack") != "ctx_open_rack"
@@ -374,8 +397,14 @@ class EndpointOverviewWidget(QWidget):
         act_floorplan.setEnabled(bool(loc_key))
 
         action = menu.exec(QCursor.pos())
+        if action is None:
+            return
         if action == act_edit:
             self._open_edit(row)
+        elif act_copy_ip is not None and action == act_copy_ip:
+            QApplication.clipboard().setText(ip_val)
+        elif act_copy_mac is not None and action == act_copy_mac:
+            QApplication.clipboard().setText(normalize_mac(mac_val))
         elif action == act_rack and rack_id:
             self.navigate_to_rack.emit(rack_id, ep_id or "")
         elif action == act_floorplan and loc_key:

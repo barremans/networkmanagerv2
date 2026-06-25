@@ -2,8 +2,24 @@
 # Networkmap_Creator
 # File:    app/gui/wall_outlet_view.py
 # Role:    Wandpunten overzicht — per ruimte of per site
-# Version: 1.27.3
+# Version: 1.29.0
 # Author:  Barremans
+# Changes: 1.29.0 — V7: VLAN-filter in titelregel (site-modus).
+#                   _VlanPickerDialog: doorzoekbare popup met VLANs die voorkomen
+#                   in de huidige selectie (na ruimte-/locatiefilter).
+#                   _vlan_filter (int|None) + _btn_vlan in WallOutletView.
+#                   _on_vlan_picker_clicked(), _collect_vlans_for_picker().
+#                   _collect_site_outlets() filtert op _vlan_filter.
+#                   Reset-keten: ruimtewissel → locatie + VLAN reset;
+#                   locatiewissel → VLAN reset.
+#                   Direct-verbonden sectie verborgen bij actieve VLAN-filter.
+#                   4 nieuwe i18n-sleutels (v i18n.py v1.43.0).
+# Changes: 1.28.0 — F8: per-veld kopiëren in de detailpopups. _OutletDetailDialog
+#                   (Wandpunt + Eindapparaat) en _EndpointDetailDialog tonen nu per
+#                   waarde-regel rechtsklik → "Kopiëren". MAC genormaliseerd via
+#                   normalize_mac() (AA:BB:CC:DD:EE:FF). Gedeelde helpers
+#                   _copyable_value_label() / _show_copy_menu(). Leesactie, ook in
+#                   read-only modus. Geen menu op lege "—"-velden.
 # Changes: 1.27.3 -- F1: get_all_sites() voor v2 JSON
 #          1.27.2 — Bugfix: dubbel 🌐 icoon op locatiefilter knop —
 #                   settings_tab_outlet_locations bevat al emoji, strip voor gebruik
@@ -98,6 +114,7 @@ import re
 from app.helpers.i18n import t, get_language
 from app.helpers.settings_storage import get_outlet_location_label
 from app.helpers.settings_storage import get_all_sites, load_outlet_locations, get_all_sites
+from app.helpers.formatting import normalize_mac          # F8 — MAC-normalisatie
 from app.services import tracing
 
 # 1.18.0 — minimale kaartbreedte voor col_count berekening
@@ -125,6 +142,39 @@ def _name_prefix(name: str) -> str:
     """
     m = re.match(r"^([A-Za-z]+)", name or "")
     return m.group(1).upper() if m else "__num__"
+
+
+# =============================================================================
+# F8 — kopieer-helpers voor de read-only detailpopups
+# =============================================================================
+
+def _show_copy_menu(widget: QLabel, pos, value: str):
+    """Toont een 'Kopiëren'-menu en plaatst de waarde op het klembord."""
+    from PySide6.QtWidgets import QApplication
+    menu = QMenu(widget)
+    act_copy = menu.addAction(t("ctx_copy"))
+    if menu.exec(widget.mapToGlobal(pos)) == act_copy:
+        QApplication.clipboard().setText(value)
+
+
+def _copyable_value_label(text: str, copy_value: str = None) -> QLabel:
+    """
+    Waarde-label dat selecteerbaar is en — als de kopieerwaarde gevuld is —
+    via rechtsklik een 'Kopiëren'-menu toont. Geen menu op lege '—'-waarde.
+    Leesactie: ook beschikbaar in read-only modus.
+    """
+    lbl = QLabel(text)
+    lbl.setWordWrap(True)
+    lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+    cv = (copy_value if copy_value is not None else text)
+    cv = (cv or "").strip()
+    if cv and cv != "—":
+        lbl.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        lbl.customContextMenuRequested.connect(
+            lambda pos, w=lbl, v=cv: _show_copy_menu(w, pos, v)
+        )
+    return lbl
 
 
 # =============================================================================
@@ -329,6 +379,114 @@ class _LocationPickerDialog(QDialog):
         return self._selected_label
 
 
+# =============================================================================
+# _VlanPickerDialog — V7
+# Popup om een VLAN te kiezen uit de VLANs die effectief voorkomen in de
+# huidige selectie (na ruimte- en locatiefilter).
+# =============================================================================
+
+class _VlanPickerDialog(QDialog):
+    """
+    V7 — Doorzoekbare VLAN-keuzepopup.
+
+    Parameters
+    ----------
+    vlans  : list[tuple[int, str]]  — (vlan_id, vlan_label) tuples,
+             alleen VLANs die voorkomen in de huidige wandpuntenselectie.
+    parent : QWidget
+    """
+
+    def __init__(self, vlans: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("vlan_filter_picker_title"))
+        self.setModal(True)
+        self.setMinimumWidth(320)
+        self.setMinimumHeight(300)
+
+        self._selected_id    = None   # int | None
+        self._selected_label = ""
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(f"🔍  {t('vlan_filter_btn')}...")
+        self._search.setClearButtonEnabled(True)
+        layout.addWidget(self._search)
+
+        self._list = QListWidget()
+        from PySide6.QtWidgets import QListWidgetItem
+        # Eerste item = "alle VLANs" (reset)
+        all_item = QListWidgetItem(t("vlan_filter_all"))
+        all_item.setData(Qt.ItemDataRole.UserRole, (None, ""))
+        self._list.addItem(all_item)
+        for vlan_id, vlan_lbl in vlans:
+            item = QListWidgetItem(vlan_lbl)
+            item.setData(Qt.ItemDataRole.UserRole, (vlan_id, vlan_lbl))
+            self._list.addItem(item)
+        layout.addWidget(self._list)
+
+        self._lbl_empty = QLabel(t("vlan_filter_no_vlans"))
+        self._lbl_empty.setObjectName("secondary")
+        self._lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_empty.setVisible(False)
+        layout.addWidget(self._lbl_empty)
+
+        self._buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        layout.addWidget(self._buttons)
+
+        self._list.setCurrentRow(0)
+        self._search.textChanged.connect(self._filter)
+        self._list.itemDoubleClicked.connect(self._on_double_click)
+        self._buttons.accepted.connect(self._on_ok)
+        self._buttons.rejected.connect(self.reject)
+
+    def _filter(self, text: str):
+        needle  = text.strip().lower()
+        visible = 0
+        first   = None
+        for i in range(self._list.count()):
+            item  = self._list.item(i)
+            # "Alle VLANs" item altijd zichtbaar
+            if i == 0:
+                item.setHidden(False)
+                visible += 1
+                first = 0
+                continue
+            match = (not needle) or (needle in item.text().lower())
+            item.setHidden(not match)
+            if match:
+                visible += 1
+                if first is None:
+                    first = i
+        self._lbl_empty.setVisible(visible == 0)
+        if first is not None:
+            self._list.setCurrentRow(first)
+
+    def _on_double_click(self, item):
+        vlan_id, vlan_lbl = item.data(Qt.ItemDataRole.UserRole)
+        self._selected_id    = vlan_id
+        self._selected_label = vlan_lbl
+        self.accept()
+
+    def _on_ok(self):
+        item = self._list.currentItem()
+        if item and not item.isHidden():
+            vlan_id, vlan_lbl = item.data(Qt.ItemDataRole.UserRole)
+            self._selected_id    = vlan_id
+            self._selected_label = vlan_lbl
+        self.accept()
+
+    def selected_id(self) -> int | None:
+        return self._selected_id
+
+    def selected_label(self) -> str:
+        return self._selected_label
+
+
 class WallOutletView(QWidget):
     """
     Toont wandpunten als klikbare kaartjes.
@@ -342,6 +500,7 @@ class WallOutletView(QWidget):
       - Ruimtenaam (alleen in site-modus)
       - Eindapparaat indien gekoppeld
       - Korte trace-samenvatting: wandpunt → ... → switch/eindpunt
+
 
     Signaal:
       outlet_clicked(outlet_id)  — klik op een wandpunt
@@ -391,6 +550,7 @@ class WallOutletView(QWidget):
         self._search_text    = ""  # 1.20.0 — actieve zoekterm
         self._room_filter        = ""  # 1.25.0 — ruimtefilter (site-modus only)
         self._location_filter    = ""  # 1.27.0 — wandpunt locatiefilter (site-modus only)
+        self._vlan_filter: int | None = None  # V7 — VLAN-filter (site-modus only)
         # 1.18.0 — debounce timer: rebuild pas na 150ms stilstand resize
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
@@ -520,14 +680,28 @@ class WallOutletView(QWidget):
                 self._btn_location.setMinimumWidth(160)
                 self._btn_location.clicked.connect(self._on_location_picker_clicked)
                 title_layout.addWidget(self._btn_location)
+                title_layout.addSpacing(4)
+
+                # V7 — VLAN-filter knop
+                _vlan_btn_label = t("vlan_filter_btn")
+                if self._vlan_filter is not None:
+                    from app.services.vlan_service import vlan_label as _vlan_label
+                    _vlan_btn_label = _vlan_label(self._vlan_filter)
+                self._btn_vlan = QPushButton(f"🔀  {_vlan_btn_label}")
+                self._btn_vlan.setFixedHeight(26)
+                self._btn_vlan.setMinimumWidth(120)
+                self._btn_vlan.clicked.connect(self._on_vlan_picker_clicked)
+                title_layout.addWidget(self._btn_vlan)
                 title_layout.addSpacing(8)
             else:
                 self._btn_room     = None
                 self._btn_location = None
+                self._btn_vlan     = None
         else:
             self._search_bar   = None
             self._btn_room     = None
             self._btn_location = None
+            self._btn_vlan     = None
 
         title_layout.addWidget(count_lbl)
         outer.addWidget(title_bar)
@@ -608,7 +782,8 @@ class WallOutletView(QWidget):
 
         # 1.8.0 — Direct verbonden endpoints sectie
         # 1.27.0 — Verborgen bij actieve locatie- of ruimtefilter (niet relevant)
-        if self._mode != "site" or (not self._room_filter and not self._location_filter):
+        # V7     — ook verborgen bij actieve VLAN-filter
+        if self._mode != "site" or (not self._room_filter and not self._location_filter and self._vlan_filter is None):
             self._build_direct_endpoints_section(body_layout)
 
         body_layout.addStretch()
@@ -688,7 +863,8 @@ class WallOutletView(QWidget):
                         grid_col, grid_row = 0, grid_row + 1
 
         # 1.27.0 — Verborgen bij actieve locatie- of ruimtefilter
-        if self._mode != "site" or (not self._room_filter and not self._location_filter):
+        # V7     — ook verborgen bij actieve VLAN-filter
+        if self._mode != "site" or (not self._room_filter and not self._location_filter and self._vlan_filter is None):
             self._build_direct_endpoints_section(body_layout)
         body_layout.addStretch()
         scroll.setWidget(body)
@@ -710,6 +886,10 @@ class WallOutletView(QWidget):
             _raw = t("settings_tab_outlet_locations").strip()
             _lbl = _raw.lstrip("🌐 ").strip() if _raw.startswith("🌐") else _raw
             self._btn_location.setText(f"🌐  {_lbl}")
+        # V7 — VLAN-filter ook resetten
+        self._vlan_filter = None
+        if self._btn_vlan:
+            self._btn_vlan.setText(f"🔀  {t('vlan_filter_btn')}")
         if self._search_bar and self._search_text:
             self._search_bar.blockSignals(True)
             self._search_bar.clear()
@@ -747,6 +927,11 @@ class WallOutletView(QWidget):
                 lbl  = _raw.lstrip("🌐 ").strip() if _raw.startswith("🌐") else _raw
             self._btn_location.setText(f"🌐  {lbl}")
 
+        # V7 — VLAN-filter resetten: bij nieuwe locatie kan VLAN-keuze ongeldig zijn
+        self._vlan_filter = None
+        if self._btn_vlan:
+            self._btn_vlan.setText(f"🔀  {t('vlan_filter_btn')}")
+
         if self._search_bar and self._search_text:
             self._search_bar.blockSignals(True)
             self._search_bar.clear()
@@ -766,6 +951,51 @@ class WallOutletView(QWidget):
                     for wo in room.get("wall_outlets", []):
                         result.append((room, wo))
         return result
+
+    def _collect_vlans_for_picker(self) -> list[tuple[int, str]]:
+        """
+        V7 — Verzamel alle unieke VLANs die voorkomen in de huidige selectie
+        (na ruimte- en locatiefilter, NIET na VLAN-filter zelf).
+        Geeft gesorteerde lijst van (vlan_id, vlan_label) tuples terug.
+        """
+        from app.services.vlan_service import vlan_label as _vlan_label
+        outlets = self._collect_site_outlets_unfiltered_location()
+        # Als locatiefilter actief: gebruik de gefilterde set op locatie maar niet op VLAN
+        if self._location_filter:
+            outlets = [
+                (room, wo) for room, wo in outlets
+                if wo.get("location_description", "").strip() == self._location_filter
+            ]
+        seen: dict[int, str] = {}
+        for _room, wo in outlets:
+            vlan_raw = wo.get("vlan")
+            if vlan_raw not in (None, ""):
+                try:
+                    vid = int(vlan_raw)
+                    if vid not in seen:
+                        seen[vid] = _vlan_label(vid)
+                except (ValueError, TypeError):
+                    pass
+        return sorted(seen.items())  # gesorteerd op vlan_id
+
+    def _on_vlan_picker_clicked(self):
+        """V7 — VLAN-filter knop geklikt — open _VlanPickerDialog."""
+        vlans = self._collect_vlans_for_picker()
+        dlg   = _VlanPickerDialog(vlans, parent=self)
+        if not dlg.exec():
+            return
+        self._vlan_filter = dlg.selected_id()  # None = alle VLANs
+        if self._btn_vlan:
+            if self._vlan_filter is not None:
+                self._btn_vlan.setText(f"🔀  {dlg.selected_label()}")
+            else:
+                self._btn_vlan.setText(f"🔀  {t('vlan_filter_btn')}")
+        if self._search_bar and self._search_text:
+            self._search_bar.blockSignals(True)
+            self._search_bar.clear()
+            self._search_bar.blockSignals(False)
+            self._search_text = ""
+        self._rebuild_scroll()
 
     def _rebuild_scroll(self):
         """1.27.0 — Gemeenschappelijke scroll-rebuild na filter- of zoekaanpassing."""
@@ -828,7 +1058,8 @@ class WallOutletView(QWidget):
                         grid_col, grid_row = 0, grid_row + 1
 
         # 1.27.0 — Verborgen bij actieve locatie- of ruimtefilter
-        if self._mode != "site" or (not self._room_filter and not self._location_filter):
+        # V7     — ook verborgen bij actieve VLAN-filter
+        if self._mode != "site" or (not self._room_filter and not self._location_filter and self._vlan_filter is None):
             self._build_direct_endpoints_section(body_layout)
         body_layout.addStretch()
         scroll.setWidget(body)
@@ -1066,7 +1297,8 @@ class WallOutletView(QWidget):
     def _collect_site_outlets(self) -> list[tuple[dict, dict]]:
         """Verzamel alle (room, outlet) tuples voor de huidige site.
         1.25.0 — filtert op _room_filter indien ingesteld.
-        1.27.0 — filtert ook op _location_filter indien ingesteld."""
+        1.27.0 — filtert ook op _location_filter indien ingesteld.
+        V7     — filtert ook op _vlan_filter indien ingesteld."""
         result = []
         for site in get_all_sites(self._data):
             if site["id"] == self._site["id"]:
@@ -1077,6 +1309,13 @@ class WallOutletView(QWidget):
                         if self._location_filter:
                             wo_loc = wo.get("location_description", "").strip()
                             if wo_loc != self._location_filter:
+                                continue
+                        if self._vlan_filter is not None:
+                            try:
+                                wo_vlan = int(wo.get("vlan") or 0)
+                            except (ValueError, TypeError):
+                                wo_vlan = 0
+                            if wo_vlan != self._vlan_filter:
                                 continue
                         result.append((room, wo))
         return result
@@ -1579,10 +1818,10 @@ class _OutletDetailDialog(QDialog):
 
         notes = self._outlet.get("notes", "") or "—"
 
-        form_outlet.addRow(t("label_name")     + ":", QLabel(self._outlet.get("name", "—")))
-        form_outlet.addRow(t("label_location") + ":", QLabel(loc_lbl))
-        form_outlet.addRow("VLAN:",                   QLabel(vlan_str))
-        form_outlet.addRow(t("label_notes")    + ":", QLabel(notes))
+        form_outlet.addRow(t("label_name")     + ":", _copyable_value_label(self._outlet.get("name", "—")))
+        form_outlet.addRow(t("label_location") + ":", _copyable_value_label(loc_lbl))
+        form_outlet.addRow("VLAN:",                   _copyable_value_label(vlan_str))
+        form_outlet.addRow(t("label_notes")    + ":", _copyable_value_label(notes))
         layout.addWidget(grp_outlet)
 
         # ── Eindapparaat info ──────────────────────────────────────────
@@ -1607,9 +1846,11 @@ class _OutletDetailDialog(QDialog):
             ]:
                 if key is None:
                     val = ep_type_lbl
+                    copy_val = None
                 else:
                     val = self._endpoint.get(key, "") or "—"
-                form_ep.addRow(lbl + ":", QLabel(val))
+                    copy_val = normalize_mac(val) if key == "mac" else None
+                form_ep.addRow(lbl + ":", _copyable_value_label(val, copy_val))
         else:
             form_ep.addRow("", QLabel("— " + t("tree_no_endpoint") + " —"))
 
@@ -1709,11 +1950,10 @@ class _EndpointDetailDialog(QDialog):
             lbl.setStyleSheet("font-weight: bold; margin-top: 4px;")
             return lbl
 
-        def _row(label: str, value: str):
+        def _row(label: str, value: str, copy_value: str = None):
             lbl = QLabel(f"<b>{label}</b>")
             lbl.setFixedWidth(110)
-            val = QLabel(value or "—")
-            val.setWordWrap(True)
+            val = _copyable_value_label(value or "—", copy_value)
             row = QHBoxLayout()
             row.addWidget(lbl)
             row.addWidget(val, 1)
@@ -1730,7 +1970,8 @@ class _EndpointDetailDialog(QDialog):
         if ep.get("ip"):
             root.addLayout(_row("IP adres:",     ep.get("ip", "")))
         if ep.get("mac"):
-            root.addLayout(_row("MAC adres:",    ep.get("mac", "")))
+            root.addLayout(_row("MAC adres:",    ep.get("mac", ""),
+                                normalize_mac(ep.get("mac", ""))))
         if ep.get("serial"):
             root.addLayout(_row("Serienummer:",  ep.get("serial", "")))
         if ep.get("brand") or ep.get("model"):
