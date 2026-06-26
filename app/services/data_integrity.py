@@ -2,8 +2,16 @@
 # Networkmap_Creator
 # File:    app/services/data_integrity.py
 # Role:    Data validatie en automatische reparatie — GEEN Qt imports
-# Version: 1.0.1
+# Version: 1.2.0
 # Author:  Barremans
+# Changes: 1.2.0 — VAL-1 focus_ids: validate_before_save() accepteert optionele
+#                  focus_ids set — enkel waarschuwingen tonen waarbij het
+#                  bewerkte/nieuwe object betrokken is. Voorkomt dat ongerelateerde
+#                  bestaande problemen getoond worden bij aanmaken/bewerken.
+# Changes: 1.1.0 — VAL-1: validate_before_save() toegevoegd.
+#                  Controles: duplicate IP, duplicate MAC ETH, ongeldig IP-formaat
+#                  over alle endpoints en devices. Retourneert lijst van
+#                  waarschuwingsstrings (leeg = geen problemen). Geen Qt-imports.
 # =============================================================================
 #
 # Wordt aangeroepen bij elke data-load vanuit MainWindow.
@@ -21,7 +29,103 @@
 # =============================================================================
 
 from collections import Counter
+import re
 from app.helpers.settings_storage import get_all_sites
+
+# ---------------------------------------------------------------------------
+# VAL-1 — Regex voor geldig IPv4-adres
+# ---------------------------------------------------------------------------
+
+_IPV4_RE = re.compile(
+    r'^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}'
+    r'(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$'
+)
+
+
+# ---------------------------------------------------------------------------
+# VAL-1 — Validatie vóór opslaan (soft warnings, geen reparatie)
+# ---------------------------------------------------------------------------
+
+def validate_before_save(data: dict,
+                         focus_ids: set[str] | None = None) -> list[str]:
+    """
+    VAL-1 — Controleer data op inhoudelijke problemen vóór opslaan.
+
+    Controles (over alle endpoints + devices):
+      - Duplicate IP-adressen
+      - Duplicate MAC ETH-adressen
+      - Ongeldig IPv4-formaat (als IP aanwezig is)
+
+    focus_ids : optionele set van object-IDs (device of endpoint).
+      Als opgegeven, worden enkel waarschuwingen getoond waarbij minstens
+      één van de focus-objecten betrokken is. Gebruik dit bij aanmaken of
+      bewerken van één enkel object zodat de gebruiker geen ongerelateerde
+      bestaande problemen te zien krijgt.
+      None = volledige dataset (standaard).
+
+    Retourneert een lijst van waarschuwingsstrings.
+    Lege lijst = geen problemen gevonden.
+    Geen Qt-imports, geen reparatie.
+    """
+    warnings: list[str] = []
+
+    # Verzamel alle objecten met id + naam + IP + MAC
+    objects: list[dict] = []
+    for dev in data.get("devices", []):
+        objects.append({
+            "id":    dev.get("id", ""),
+            "label": f"Device '{dev.get('name', dev.get('id', '?'))}'",
+            "ip":    (dev.get("ip", "") or "").strip(),
+            "mac":   (dev.get("mac_eth", dev.get("mac", "")) or "").strip().upper(),
+        })
+    for ep in data.get("endpoints", []):
+        objects.append({
+            "id":    ep.get("id", ""),
+            "label": f"Eindapparaat '{ep.get('name', ep.get('id', '?'))}'",
+            "ip":    (ep.get("ip", "") or "").strip(),
+            "mac":   (ep.get("mac_eth", ep.get("mac", "")) or "").strip().upper(),
+        })
+
+    def _focus_match(involved_ids: set[str]) -> bool:
+        """True als focus_ids None is (alles tonen) of minstens één match."""
+        if focus_ids is None:
+            return True
+        return bool(focus_ids & involved_ids)
+
+    # — Ongeldig IP-formaat —
+    for obj in objects:
+        ip = obj["ip"]
+        if ip and not _IPV4_RE.match(ip):
+            if _focus_match({obj["id"]}):
+                warnings.append(f"Ongeldig IP-adres: {ip}  ({obj['label']})")
+
+    # — Duplicate IP —
+    ip_counter: dict[str, list[tuple[str, str]]] = {}  # ip → [(id, label)]
+    for obj in objects:
+        ip = obj["ip"]
+        if ip:
+            ip_counter.setdefault(ip, []).append((obj["id"], obj["label"]))
+    for ip, entries in ip_counter.items():
+        if len(entries) > 1:
+            involved = {e[0] for e in entries}
+            if _focus_match(involved):
+                labels = ",  ".join(e[1] for e in entries)
+                warnings.append(f"Dubbel IP-adres {ip}: {labels}")
+
+    # — Duplicate MAC ETH —
+    mac_counter: dict[str, list[tuple[str, str]]] = {}  # mac → [(id, label)]
+    for obj in objects:
+        mac = obj["mac"]
+        if mac:
+            mac_counter.setdefault(mac, []).append((obj["id"], obj["label"]))
+    for mac, entries in mac_counter.items():
+        if len(entries) > 1:
+            involved = {e[0] for e in entries}
+            if _focus_match(involved):
+                labels = ",  ".join(e[1] for e in entries)
+                warnings.append(f"Dubbel MAC-adres {mac}: {labels}")
+
+    return warnings
 
 
 # ---------------------------------------------------------------------------

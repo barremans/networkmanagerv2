@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_outlet_to_port_dialog.py
 # Role:    Wandpunt koppelen aan een poort — met zoekfunctie
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.5.0 — GP-F1: multi-token AND-zoeken. Elk spatie-gescheiden woord
+# Changes: 1.6.0 — UI-1: setMinimumWidth verhoogd naar 680px
+#          1.5.0 — GP-F1: multi-token AND-zoeken. Elk spatie-gescheiden woord
 #                   is een apart filter (AND). Zoektekst verrijkt met VLAN en
 #                   raw side (front/back) -> 'ALANSW01 1', 'VLAN 10', 'SW01 FRONT'
 #                   matchen nu. Nieuwe helper _tokens_match().
@@ -113,7 +114,7 @@ class ConnectOutletToPortDialog(QDialog):
         self._all_ports: list[dict] = []
 
         self.setWindowTitle(t("dlg_connect_outlet_to_port_title"))
-        self.setMinimumWidth(580)
+        self.setMinimumWidth(680)
         self.setMinimumHeight(460)
         self.setModal(True)
         self._build_ui()

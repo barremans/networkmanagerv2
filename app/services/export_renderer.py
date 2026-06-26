@@ -4,9 +4,14 @@
 # Role:    G1/G2 — QPainter renderer voor rack + wandpunten export
 #          Genereert QImage (PNG/JPG) en PDF volledig vanuit data,
 #          onafhankelijk van de UI / schermweergave.
-# Version: 1.5.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.5.0 — Kaartjes gebruiken setPointSize() ipv setPixelSize()
+# Changes: 1.6.0 — FloorplanRenderer respecteert SVG-oriëntatie.
+#                  _IMG_W/_IMG_H zijn nu instantievariabelen berekend via
+#                  de SVG viewBox. Portret-SVG → portret PNG (1754×2480px);
+#                  landscape-SVG → landscape PNG (2480×1754px, ongewijzigd).
+#                  _SVG_MAX_H aangepast voor portret.
+#          1.5.0 — Kaartjes gebruiken setPointSize() ipv setPixelSize()
 #                   _fp_font_pt() + _fp_draw_pt() toegevoegd voor geschaald canvas
 #                   Fontgroottes: labels 9pt, data 10pt, badge 13pt, secties 9pt
 #          1.4.0 — Kaartjes volledige A4-breedte, 1 per rij
@@ -820,15 +825,47 @@ class FloorplanRenderer:
         self._site      = site
         self._data      = data
 
+        # 1.6.0 — Oriëntatie bepalen via SVG viewBox
+        # Portret-SVG (h > w) → portret canvas; landscape → landscape (ongewijzigd)
+        self._IMG_W, self._IMG_H, self._SVG_MAX_H = self._calc_canvas_dims()
+
         # Gemapte SVG punten: {svg_point: mapped_val}
         self._mappings: dict[str, str] = floorplan.get("mappings", {})
 
         # Gecachede lookups
-        self._outlet_map: dict[str, dict] = {}   # outlet_id → outlet
-        self._device_map: dict[str, dict] = {}   # device_id → device
-        self._port_map:   dict[str, dict] = {}   # port_id   → port
-        self._ep_map:     dict[str, dict] = {}   # ep_id     → endpoint
+        self._outlet_map: dict[str, dict] = {}
+        self._device_map: dict[str, dict] = {}
+        self._port_map:   dict[str, dict] = {}
+        self._ep_map:     dict[str, dict] = {}
         self._build_maps()
+
+    def _calc_canvas_dims(self) -> tuple[int, int, int]:
+        """
+        1.6.0 — Bereken canvas-afmetingen op basis van SVG-oriëntatie.
+        Portret (ratio < 1): breedte en hoogte omgewisseld t.o.v. landscape.
+        """
+        try:
+            import xml.etree.ElementTree as ET
+            from app.services import floorplan_service as _fps
+            svg_path = _fps.get_svg_path(self._floorplan)
+            if svg_path.exists():
+                tree = ET.parse(str(svg_path))
+                root = tree.getroot()
+                vb = root.get("viewBox") or ""
+                if vb:
+                    parts = vb.replace(",", " ").split()
+                    if len(parts) == 4:
+                        svg_w, svg_h = float(parts[2]), float(parts[3])
+                        if svg_h > 0 and svg_w / svg_h < 1.0:
+                            # Portret — wissel breedte en hoogte om
+                            img_w    = self.__class__._IMG_H   # 1754 * _SCALE
+                            img_h    = self.__class__._IMG_W   # 2480 * _SCALE
+                            svg_maxh = int(img_h * 0.85)
+                            return img_w, img_h, svg_maxh
+        except Exception:
+            pass
+        # Landscape (standaard)
+        return self.__class__._IMG_W, self.__class__._IMG_H, self.__class__._SVG_MAX_H
 
     # ------------------------------------------------------------------
     # Cache opbouwen
@@ -921,14 +958,19 @@ class FloorplanRenderer:
                        "⚠  SVG kon niet worden geladen", _C_OL_UNMAPPED, size=10)
             return y + 60 * _SCALE
 
-        # Beschikbare ruimte: boven y, onder legenda + marge
-        avail_h = self._IMG_H - self._LEGEND_H - _MARGIN - y - _MARGIN
+        # Beschikbare ruimte: vanaf y tot onderaan pagina, min legenda + marges
+        # 1.6.0 — correctie: avail_h is de ruimte die de SVG mag innemen,
+        # zodat SVG + header + legenda altijd binnen _IMG_H passen.
+        avail_h = self._IMG_H - y - self._LEGEND_H - 2 * _MARGIN
         avail_h = max(avail_h, 100 * _SCALE)
 
         src_w = svg_img.width()
         src_h = svg_img.height()
         max_w = self._IMG_W - 2 * _MARGIN
+        # Schaal zodat SVG past binnen (max_w × avail_h) — aspect ratio bewaard
         scale = min(max_w / max(src_w, 1), avail_h / max(src_h, 1))
+        # Nooit opschalen voorbij de beschikbare breedte
+        scale = min(scale, max_w / max(src_w, 1))
         dst_w = int(src_w * scale)
         dst_h = int(src_h * scale)
         dst_x = _MARGIN + (max_w - dst_w) // 2

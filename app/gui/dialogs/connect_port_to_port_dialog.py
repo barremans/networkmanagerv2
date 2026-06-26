@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_port_to_port_dialog.py
 # Role:    Poort ↔ Poort verbinding aanmaken (cross-rack / cross-ruimte)
-# Version: 1.1.0
+# Version: 1.2.0
 # Author:  Barremans
-# Changes: 1.1.0 -- F1: get_all_sites() voor v2 JSON
+# Changes: 1.2.0 — UI-1: setMinimumWidth verhoogd naar 600px
+#          1.1.0 -- F1: get_all_sites() voor v2 JSON
 #          1.0.0 — Initiële versie
 #                  Trapgewijze selectie: Site → Ruimte → Rack → Device → Poort
 #                  Alleen vrije poorten tonen als doelpoort
@@ -75,7 +76,7 @@ class ConnectPortToPortDialog(QDialog):
         self._src_device_id = src_port["device_id"] if src_port else ""
 
         self.setWindowTitle(t("dlg_connect_port_title"))
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(600)
         self.setModal(True)
         self._build()
 

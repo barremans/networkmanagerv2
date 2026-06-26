@@ -2,8 +2,50 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.85.1
+# Version: 1.93.0
 # Author:  Barremans
+# Changes: 1.93.0 — ARW-1.4.0: twee nieuwe signals van ActionReviewWindow gekoppeld:
+#                   device_changed → _on_review_device_changed (opslaan + boom refresh,
+#                   zelfde patroon als _on_review_endpoint_changed maar met ENTITY_DEVICE
+#                   geen extra changelog hier — ActionReviewWindow logt niet, MW doet dat
+#                   niet bij device_changed om dubbele log te vermijden; DeviceDialog in
+#                   ARW schrijft niet naar changelog — acceptabel want MAC Review context).
+#                   exclusions_changed → _on_review_exclusions_changed (opslaan zonder
+#                   validatie, geen boom refresh nodig).
+# Changes: 1.92.0 — VAL-1: outlet_endpoint_edit_requested signal (wall_outlet_view
+#                   v1.24.0) was nooit gekoppeld in main_window. Nieuwe handler
+#                   _on_outlet_endpoint_edit_requested toegevoegd: opent
+#                   EndpointDialog met focus_ids={ep_id} validatie. Signal
+#                   gekoppeld in _show_wall_outlet_view, _show_site_outlets_view,
+#                   _show_direct_endpoints_view en _show_outlet_locator.
+# Changes: 1.91.0 — VAL-1 focus_ids fix: _on_outlet_endpoint_requested haalt
+#                   ep_id vóór de dialoog op (zelfde patroon als _edit_wall_outlet)
+#                   zodat wo.update() het endpoint_id niet kan overschrijven
+#                   vóór de focus_ids bepaald wordt.
+# Changes: 1.90.0 — VAL-1 focus_ids: _edit_wall_outlet gebruikt nu
+#                   _save_validated(focus_ids={endpoint_id}) zodat ook
+#                   bewerken via "Alle wandpunten → Wandpunt bewerken"
+#                   enkel relevante waarschuwingen toont.
+# Changes: 1.89.0 — VAL-1 focus_ids fix: _on_endpoint_overview_changed ontvangt
+#                   nu ep_id van EndpointOverviewWidget (signal uitgebreid naar
+#                   Signal(str)) en geeft focus_ids={ep_id} door aan
+#                   _save_validated(). Enkel relevante waarschuwingen getoond.
+# Changes: 1.88.0 — VAL-1 focus_ids: _save_validated() accepteert optionele
+#                   focus_ids set. Handlers geven het ID mee van het bewerkte/
+#                   nieuwe object zodat enkel relevante waarschuwingen getoond
+#                   worden. _on_review_endpoint_changed blijft focus_ids=None
+#                   (volledige check, consistent met MAC Review context).
+# Changes: 1.87.0 — VAL-1: _save_validated() wrapper toegevoegd. Roept
+#                   data_integrity.validate_before_save() aan vóór opslaan;
+#                   bij waarschuwingen QMessageBox met "Toch opslaan /
+#                   Annuleren". Gebruikt in _on_endpoint_edit_requested,
+#                   _on_outlet_endpoint_requested, _on_connect_endpoint_direct,
+#                   _on_review_endpoint_changed, _on_endpoint_overview_changed,
+#                   _on_edit_device, _new_device_in_rack.
+# Changes: 1.86.0 — MW-1: endpoint_changed signal van ActionReviewWindow gekoppeld
+#                   aan _on_review_endpoint_changed → opslaan + boom refresh na
+#                   EP-bewerking via MAC Review tab. Signal gekoppeld bij aanmaken
+#                   van het venster in _on_action_review().
 # Changes: 1.81.0 — F8-wandpunt: rechtsklik op wandpunt in de boom toont nu
 #                   kopieeracties (naam, locatie, en IP/MAC van het gekoppelde
 #                   eindapparaat indien aanwezig). Veld-gestuurd: enkel acties
@@ -347,6 +389,7 @@ from app.services.changelog_service import (
     ENTITY_VLAN, ENTITY_APPROVAL,
     ACTION_ADD, ACTION_EDIT, ACTION_DELETE, ACTION_APPROVE, ACTION_REOPEN,
 )
+from app.services.data_integrity import validate_before_save as _validate_before_save
 
 try:
     from app import version as _ver
@@ -1312,9 +1355,10 @@ class MainWindow(QMainWindow):
             from PySide6.QtCore import QTimer
             QTimer.singleShot(50, lambda: view.select_by_target_val(target_val))
 
-    def _on_endpoint_overview_changed(self):
+    def _on_endpoint_overview_changed(self, ep_id: str = ""):
         """Na bewerken eindapparaat vanuit overzicht: opslaan + tree refresh."""
-        self._save_and_backup()
+        focus = {ep_id} if ep_id else None
+        self._save_validated(focus_ids=focus)
         self._populate_tree()
 
     # --- Ongebruikte wandpunten (1.63.0) -----------------------------------
@@ -1743,6 +1787,8 @@ class MainWindow(QMainWindow):
         if not wo:
             return
         endpoints = self._data.get("endpoints", [])
+        # VAL-1 — ep_id vóór dialoog ophalen (wo kan na update endpoint_id kwijt zijn)
+        _ep_id_before = wo.get("endpoint_id", "")
         dlg = WallOutletDialog(parent=self, room_id=data["room_id"],
                                endpoints=endpoints, outlet=wo,
                                existing_outlets=room.get("wall_outlets", []),
@@ -1750,6 +1796,8 @@ class MainWindow(QMainWindow):
         if dlg.exec() and dlg.get_result():
             self._data["endpoints"] = dlg.get_endpoints_result()
             result = dlg.get_result()
+            # endpoint_id: voorkeur aan resultaat, anders de waarde vóór de dialoog
+            _ep_id = result.get("endpoint_id", "") or _ep_id_before
             new_room_id = result.get("room_id", data["room_id"])
             if new_room_id != data["room_id"]:
                 # Verplaatsen: verwijder uit oude ruimte, voeg toe aan nieuwe
@@ -1760,7 +1808,7 @@ class MainWindow(QMainWindow):
                     new_room.setdefault("wall_outlets", []).append(wo)
             else:
                 wo.update(result)
-            self._save_and_backup()
+            self._save_validated(focus_ids={_ep_id} if _ep_id else None)
             self._populate_tree()
             # B1 — refresh de WallOutletView als die actief is na bewerken wandpunt
             if isinstance(self._current_view, WallOutletView):
@@ -1949,6 +1997,7 @@ class MainWindow(QMainWindow):
                 for wo in room.get("wall_outlets", []):
                     if wo["id"] == outlet_id:
                         endpoints = self._data.get("endpoints", [])
+                        _ep_id_before = wo.get("endpoint_id", "")
                         dlg = WallOutletDialog(
                             parent=self,
                             room_id=room["id"],
@@ -1960,7 +2009,10 @@ class MainWindow(QMainWindow):
                         if dlg.exec() and dlg.get_result():
                             self._data["endpoints"] = dlg.get_endpoints_result()
                             wo.update(dlg.get_result())
-                            self._save_and_backup()
+                            _ep_id = wo.get("endpoint_id", "") or _ep_id_before
+                            self._save_validated(
+                                focus_ids={_ep_id} if _ep_id else None
+                            )
                             self._populate_tree()
                             if isinstance(self._current_view, WallOutletView):
                                 self._current_view.refresh(self._data)
@@ -1968,6 +2020,36 @@ class MainWindow(QMainWindow):
                                 f"✓  {t('label_wall_outlet')} '{wo['name']}' bijgewerkt."
                             )
                         return
+
+    def _on_outlet_endpoint_edit_requested(self, outlet_id: str):
+        """
+        VAL-1 / 1.24.0 — Eindapparaat direct bewerken vanuit wandpuntkaartje
+        (rechtsklik → Eindapparaat bewerken). Emitteert outlet_endpoint_edit_requested
+        vanuit WallOutletView met outlet_id. Opent EndpointDialog met validatie.
+        """
+        if settings_storage.get_read_only_mode():
+            return
+        # EP-id ophalen vanuit wandpunt
+        ep_id = ""
+        for site in get_all_sites(self._data):
+            for room in site.get("rooms", []):
+                for wo in room.get("wall_outlets", []):
+                    if wo["id"] == outlet_id:
+                        ep_id = wo.get("endpoint_id", "")
+                        break
+        if not ep_id:
+            return
+        ep = next((e for e in self._data.get("endpoints", []) if e["id"] == ep_id), None)
+        if not ep:
+            return
+        dlg = EndpointDialog(parent=self, endpoint=ep)
+        if dlg.exec() and dlg.get_result():
+            result = dlg.get_result()
+            ep.update(result)
+            self._save_validated(focus_ids={ep_id})
+            if isinstance(self._current_view, WallOutletView):
+                self._current_view.refresh(self._data)
+            self.set_status(f"✓  🖥  '{ep.get('name', '')}' bijgewerkt.")
 
     def _on_outlet_connect_port_requested(self, outlet_id: str):
         """
@@ -2060,7 +2142,7 @@ class MainWindow(QMainWindow):
         if dlg.exec() and dlg.get_result():
             result = dlg.get_result()
             ep.update(result)
-            self._save_and_backup()
+            self._save_validated(focus_ids={ep_id})
             if isinstance(self._current_view, WallOutletView):
                 self._current_view.refresh(self._data)
             self.set_status(f"✓  🖥  '{ep.get('name', '')}' bijgewerkt.")
@@ -2388,6 +2470,7 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        outlet_view.outlet_endpoint_edit_requested.connect(self._on_outlet_endpoint_edit_requested)
         outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
         outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)  # 1.71.10
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
@@ -2409,6 +2492,7 @@ class MainWindow(QMainWindow):
                                      mode="direct", parent=self._mid_frame,
                                      rack_id=rack_id, rack_name=rack_name)
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
+        outlet_view.outlet_endpoint_edit_requested.connect(self._on_outlet_endpoint_edit_requested)
         outlet_view.endpoint_delete_requested.connect(self._on_endpoint_delete_requested)
         outlet_view.endpoint_double_clicked.connect(self._on_endpoint_detail)  # 1.59.0
         self._mid_layout.addWidget(outlet_view)
@@ -2429,6 +2513,7 @@ class MainWindow(QMainWindow):
         outlet_view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
         outlet_view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         outlet_view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        outlet_view.outlet_endpoint_edit_requested.connect(self._on_outlet_endpoint_edit_requested)
         outlet_view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
         outlet_view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)  # 1.71.10
         outlet_view.endpoint_edit_requested.connect(self._on_endpoint_edit_requested)
@@ -3246,7 +3331,7 @@ class MainWindow(QMainWindow):
             "notes":     "",
         }
         self._data.setdefault("connections", []).append(conn)
-        self._save_and_backup()
+        self._save_validated()
 
         ep = next((e for e in self._data.get("endpoints", []) if e["id"] == ep_id), None)
         ep_name = ep.get("name", ep_id) if ep else ep_id
@@ -3863,7 +3948,11 @@ class MainWindow(QMainWindow):
             new_ep = dlg.get_result()
             new_ep["id"] = self._gen_id("ep")
             self._data.setdefault("endpoints", []).append(new_ep)
-            self._save_and_backup()
+            if not self._save_validated(focus_ids={new_ep["id"]}):
+                self._data["endpoints"] = [
+                    e for e in self._data.get("endpoints", []) if e["id"] != new_ep["id"]
+                ]
+                return
             self._populate_tree()
             self.set_status(f"✓  {t('label_endpoint')} '{new_ep['name']}' aangemaakt.")
         data = self._selected_tree_data()
@@ -4086,7 +4175,8 @@ class MainWindow(QMainWindow):
                         "number":    sfp_num,
                     })
 
-            self._save_and_backup()
+            if not self._save_validated(focus_ids={dev_id}):
+                return
             _new_dev = {k: device.get(k, "") for k in _TRACK}
             _diff = {k: {"van": _old_dev[k], "naar": _new_dev[k]}
                      for k in _TRACK if _old_dev[k] != _new_dev[k]}
@@ -4209,7 +4299,18 @@ class MainWindow(QMainWindow):
             self._generate_ports(device)
             rack.setdefault("slots", []).append(slot)
 
-            self._save_and_backup()
+            if not self._save_validated(focus_ids={device["id"]}):
+                # Gebruiker annuleerde — device + ports + slot terugdraaien
+                self._data["devices"] = [
+                    d for d in self._data.get("devices", []) if d["id"] != device["id"]
+                ]
+                self._data["ports"] = [
+                    p for p in self._data.get("ports", []) if p.get("device_id") != device["id"]
+                ]
+                rack["slots"] = [
+                    s for s in rack.get("slots", []) if s.get("device_id") != device["id"]
+                ]
+                return
             log_change(
                 action=ACTION_ADD,
                 entity=ENTITY_DEVICE,
@@ -5141,11 +5242,30 @@ class MainWindow(QMainWindow):
             )
             self._review_win.approvals_changed.connect(self._on_approvals_changed)
             self._review_win.navigate_requested.connect(self._on_search_result)
+            self._review_win.endpoint_changed.connect(self._on_review_endpoint_changed)
+            # ARW-1.4.0 — device bewerken + uitsluiten via MAC Review
+            self._review_win.device_changed.connect(self._on_review_device_changed)
+            self._review_win.exclusions_changed.connect(self._on_review_exclusions_changed)
         else:
             self._review_win.update_data(self._data)
         self._review_win.show()
         self._review_win.raise_()
         self._review_win.activateWindow()
+
+    def _on_review_endpoint_changed(self):
+        """MW-1 -- Na bewerken eindapparaat via MAC Review tab: opslaan + boom refresh."""
+        self._save_validated()
+        self._populate_tree()
+
+    def _on_review_device_changed(self):
+        """ARW-1.4.0 -- Na bewerken device via MAC Review tab: opslaan + boom refresh."""
+        self._save_validated()
+        self._populate_tree()
+
+    def _on_review_exclusions_changed(self):
+        """ARW-1.4.0 -- Na uitsluiten/opheffen via MAC Review: opslaan (geen validatie nodig)."""
+        self._save_and_backup()
+        self.set_status("  MAC Review uitsluitingen opgeslagen")
 
     def _on_approvals_changed(self):
         # Goedkeuring gewijzigd: data['approvals'] is al aangepast in het
@@ -5188,6 +5308,7 @@ class MainWindow(QMainWindow):
         view.outlet_delete_requested.connect(self._on_outlet_delete_requested)
         view.outlet_duplicate_requested.connect(self._on_outlet_duplicate_requested)
         view.outlet_endpoint_requested.connect(self._on_outlet_endpoint_requested)
+        view.outlet_endpoint_edit_requested.connect(self._on_outlet_endpoint_edit_requested)
         view.outlet_connect_port_requested.connect(self._on_outlet_connect_port_requested)
         view.outlet_disconnect_requested.connect(self._on_outlet_disconnect_requested)  # 1.71.10
         self._mid_layout.addWidget(view)
@@ -5410,6 +5531,38 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Opslaan + Backup
     # ------------------------------------------------------------------
+
+    def _save_validated(self, focus_ids: set | None = None) -> bool:
+        """
+        VAL-1 — Valideer data vóór opslaan. Bij waarschuwingen: toon dialoog
+        met de problemen en vraag bevestiging. Bij OK of geen waarschuwingen:
+        roep _save_and_backup() aan en retourneer True.
+        Retourneert False als de gebruiker annuleert.
+
+        focus_ids : optionele set van object-IDs — enkel waarschuwingen tonen
+          waarbij het betreffende object betrokken is. None = volledige dataset.
+        """
+        from PySide6.QtWidgets import QMessageBox
+        try:
+            warnings = _validate_before_save(self._data, focus_ids=focus_ids)
+        except Exception:
+            warnings = []
+
+        if warnings:
+            msg = "\n".join(f"• {w}" for w in warnings)
+            reply = QMessageBox.warning(
+                self,
+                "Validatiewaarschuwingen",
+                f"De volgende problemen zijn gevonden:\n\n{msg}\n\n"
+                f"Toch opslaan?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QMessageBox.StandardButton.Save:
+                return False
+
+        self._save_and_backup()
+        return True
 
     def _save_and_backup(self):
         try:

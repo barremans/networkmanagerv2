@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_smart_dialog.py
 # Role:    Poort koppelen aan wandpunt, eindapparaat of poort — met zoekfunctie
-# Version: 1.6.0
+# Version: 1.7.0
 # Author:  Barremans
-# Changes: 1.6.0 — Zoekfix: _tokens_match gebruikt begin-van-woord matching
+# Changes: 1.7.0 — UI-1: setMinimumWidth verhoogd naar 680px
+#          1.6.0 — Zoekfix: _tokens_match gebruikt begin-van-woord matching
 #                  (zoals search_service) i.p.v. simpele substring. Voorkomt
 #                  dat korte tokens zoals "M" matchen op "room", "from", etc.
 #                  load_cable_types_for_ddl() i.p.v. hardcoded _CABLE_TYPES.
@@ -156,7 +157,7 @@ class ConnectSmartDialog(QDialog):
         self._all_ports:     list[dict] = []
 
         self.setWindowTitle(t("dlg_connect_smart_title"))
-        self.setMinimumWidth(580)
+        self.setMinimumWidth(680)
         self.setMinimumHeight(500)
         self.setModal(True)
 

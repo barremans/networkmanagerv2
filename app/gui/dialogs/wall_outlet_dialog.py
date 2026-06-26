@@ -2,9 +2,15 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/wall_outlet_dialog.py
 # Role:    Wandpunt aanmaken en bewerken — incl. eindapparaat beheer
-# Version: 1.12.0
+# Version: 1.14.0
 # Author:  Barremans
-# Changes: 1.12.0 -- F1: get_all_sites() voor v2 JSON
+# Changes: 1.14.0 — VAL-1: _on_edit_endpoint valideert na bewerken via
+#                   validate_before_save() met focus_ids={ep_id}. Bouwt tijdelijke
+#                   data-dict met self._endpoints_data + devices uit self._data.
+#                   Bij waarschuwingen: QMessageBox "Toch opslaan / Annuleren".
+#                   Bij annuleren: ep-wijziging teruggedraaid.
+# Changes: 1.13.0 — UI-1: setMinimumWidth verhoogd naar 560px
+#          1.12.0 -- F1: get_all_sites() voor v2 JSON
 #          1.11.0 — Locatie en VLAN: QComboBox vervangen door QLineEdit +
 #                   QListWidget met real-time zoekfilter
 #          1.10.0 — Eindapparaat DDL vervangen door zoekbalk + QListWidget
@@ -29,6 +35,7 @@ from app.services.vlan_service import load_vlans
 from app.gui.dialogs.device_dialog import _bind_uppercase
 from app.helpers.settings_storage import load_outlet_locations
 from app.helpers.settings_storage import get_all_sites, get_all_sites
+from app.services.data_integrity import validate_before_save as _validate_before_save
 
 
 class WallOutletDialog(QDialog):
@@ -50,7 +57,7 @@ class WallOutletDialog(QDialog):
         self.setWindowTitle(
             t("title_edit_outlet") if self._outlet else t("title_new_outlet")
         )
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(560)
         self.setModal(True)
         self._build()
         if self._outlet:
@@ -334,9 +341,33 @@ class WallOutletDialog(QDialog):
         ep = next((e for e in self._endpoints_data if e.get("id") == ep_id), None)
         if not ep:
             return
+        ep_backup = dict(ep)
         dlg = EndpointDialog(parent=self, endpoint=ep)
         if dlg.exec() and dlg.get_result():
             ep.update(dlg.get_result())
+            # VAL-1 — valideer na bewerken
+            tmp_data = {
+                "devices":   self._data.get("devices", []),
+                "endpoints": self._endpoints_data,
+            }
+            try:
+                warnings = _validate_before_save(tmp_data, focus_ids={ep_id})
+            except Exception:
+                warnings = []
+            if warnings:
+                msg = "\n".join(f"• {w}" for w in warnings)
+                reply = QMessageBox.warning(
+                    self,
+                    "Validatiewaarschuwingen",
+                    f"De volgende problemen zijn gevonden:\n\n{msg}\n\n"
+                    f"Toch opslaan?",
+                    QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if reply != QMessageBox.StandardButton.Save:
+                    # Terugdraaien
+                    ep.update(ep_backup)
+                    return
             self._refresh_ddl(select_id=ep_id)
 
     def _on_delete_endpoint(self):

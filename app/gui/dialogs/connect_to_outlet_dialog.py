@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/connect_to_outlet_dialog.py
 # Role:    Poort ↔ Wandpunt verbinding aanmaken
-# Version: 1.3.0
+# Version: 1.4.0
 # Author:  Barremans
-# Changes: 1.0.0 — Initiële versie
+# Changes: 1.4.0 — UI-1: setMinimumWidth verhoogd naar 560px
+#          1.3.0 — (zie eerder)
 #          1.1.0 — Ruimtestap verwijderd, alle wandpunten van site direct zichtbaar
 #          1.2.0 — Fix: locatie key vertaald via get_outlet_location_label()
 #                  ipv raw key tonen (bv. containerd_a → Container D (A))
@@ -52,7 +53,7 @@ class ConnectToOutletDialog(QDialog):
         self._result     = None
 
         self.setWindowTitle(t("dlg_connect_outlet_title"))
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(560)
         self.setModal(True)
         self._build()
 

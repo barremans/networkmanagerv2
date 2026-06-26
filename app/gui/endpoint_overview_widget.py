@@ -2,9 +2,19 @@
 # Networkmap_Creator
 # File:    app/gui/endpoint_overview_widget.py
 # Role:    Eindapparaten overzicht — zoeken en filteren per site
-# Version: 1.4.0
+# Version: 1.6.0
 # Author:  Barremans
-# Changes: 1.4.0 — F8: rechtsklik-menu uitgebreid met "IP kopiëren" / "MAC
+# Changes: 1.6.0 — VAL-1: endpoint_changed signal uitgebreid met ep_id (str)
+#                  zodat main_window focus_ids kan meegeven aan _save_validated().
+#                  _open_edit emitteert endpoint_changed(ep_id) i.p.v. endpoint_changed().
+# Changes: 1.5.0 — EP-2: twee extra kolommen toegevoegd:
+#                   "PP-poort" (eerste patchpanel-poort in de trace) en
+#                   "Switch / Poort" (laatste niet-PP poort in de trace).
+#                   Trace berekend via tracing.trace_from_wall_outlet() per
+#                   eindapparaat; gecached per sessie (dict ep_id→trace_info)
+#                   zodat grote datasets niet vertragen. Eindapparaten zonder
+#                   wandpunt worden overgeslagen voor de trace (geen extra poging).
+#          1.4.0 — F8: rechtsklik-menu uitgebreid met "IP kopiëren" / "MAC
 #                   kopiëren" (veld-gestuurd, alleen als waarde bestaat). MAC
 #                   genormaliseerd via normalize_mac(). Leesactie: werkt ook in
 #                   read-only modus.
@@ -32,8 +42,9 @@ from PySide6.QtGui import QCursor
 from app.helpers.i18n import t, get_language
 from app.helpers import settings_storage
 from app.helpers.formatting import normalize_mac
+from app.services import tracing as _tracing
 
-# Kolom-indices (geen MAC meer)
+# Kolom-indices
 _COL_NAME   = 0
 _COL_TYPE   = 1
 _COL_IP     = 2
@@ -43,7 +54,9 @@ _COL_MODEL  = 5
 _COL_OUTLET = 6
 _COL_ROOM   = 7
 _COL_RACK   = 8
-_COLS = 9
+_COL_PP     = 9   # EP-2: patchpanel-poort
+_COL_SW     = 10  # EP-2: switch + switchpoort
+_COLS = 11
 
 _EP_ID_ROLE   = Qt.ItemDataRole.UserRole
 _RACK_ID_ROLE    = Qt.ItemDataRole.UserRole + 1
@@ -58,7 +71,7 @@ class EndpointOverviewWidget(QWidget):
     Rechtsklik → Open rack / Open grondplan.
     """
 
-    endpoint_changed      = Signal()           # na opslaan
+    endpoint_changed      = Signal(str)        # ep_id — na opslaan
     navigate_to_rack      = Signal(str, str)   # rack_id, ep_id
     navigate_to_floorplan = Signal(str, str, str)  # site_id, loc_key, target_val (ep:id of outlet_id)
 
@@ -117,6 +130,8 @@ class EndpointOverviewWidget(QWidget):
             t("label_wall_outlet"),
             t("label_room"),
             t("label_rack"),
+            "PP-poort",
+            "Switch / Poort",
         ])
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -129,6 +144,9 @@ class EndpointOverviewWidget(QWidget):
         self._table.setColumnWidth(_COL_MODEL,  180)
         self._table.setColumnWidth(_COL_OUTLET,  80)
         self._table.setColumnWidth(_COL_ROOM,   140)
+        self._table.setColumnWidth(_COL_RACK,   100)
+        self._table.setColumnWidth(_COL_PP,     160)
+        # _COL_SW = stretchLastSection
 
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -226,6 +244,38 @@ class EndpointOverviewWidget(QWidget):
                             break
 
         self._all_rows = []
+
+        # EP-2 — trace-cache: per outlet_id de PP-poort en Switch/Poort berekenen.
+        # Eén keer per _populate() berekend en gecached in _trace_cache.
+        # Sleutel: outlet_id  →  {"pp_port": str, "sw_port": str}
+        self._trace_cache: dict[str, dict] = {}
+        for room in self._site.get("rooms", []):
+            for wo in room.get("wall_outlets", []):
+                outlet_id = wo.get("id", "")
+                if not outlet_id or outlet_id in self._trace_cache:
+                    continue
+                try:
+                    steps = _tracing.trace_from_wall_outlet(self._data, outlet_id)
+                except Exception:
+                    steps = []
+                pp_port = ""
+                sw_port = ""
+                # PP-poort: eerste port-stap waarvan het device een patchpanel is
+                # Switch/Poort: laatste port-stap waarvan het device geen PP is
+                for step in steps:
+                    if step.get("obj_type") != "port":
+                        continue
+                    port = _tracing._get_port(self._data, step["obj_id"])
+                    dev  = _tracing._get_device(self._data, port["device_id"]) if port else None
+                    if not dev:
+                        continue
+                    if _tracing._is_patchpanel(dev):
+                        if not pp_port:
+                            pp_port = f"{dev.get('name', '')} — {step.get('port_name', '')} ({step.get('side', '').upper()})"
+                    else:
+                        sw_port = f"{dev.get('name', '')} — {step.get('port_name', '')}"
+                self._trace_cache[outlet_id] = {"pp_port": pp_port, "sw_port": sw_port}
+
         for ep in self._data.get("endpoints", []):
             ep_id = ep.get("id", "")
             if ep_id not in site_ep_ids:
@@ -242,6 +292,12 @@ class EndpointOverviewWidget(QWidget):
                 rack_room = rack_info[1]   # (rack, room) tuple
                 loc_key = rack_room.get("outlet_location_key", "")
 
+            # EP-2 — trace-info ophalen uit cache
+            outlet_id_for_trace = wo_info.get("outlet_id", "")
+            trace_info = self._trace_cache.get(outlet_id_for_trace, {})
+            pp_port = trace_info.get("pp_port", "")
+            sw_port = trace_info.get("sw_port", "")
+
             self._all_rows.append({
                 "id":          ep_id,
                 "name":        ep.get("name", ""),
@@ -257,6 +313,8 @@ class EndpointOverviewWidget(QWidget):
                 "rack_id":     rack_id,
                 "loc_key":     loc_key,
                 "outlet_id":   wo_info.get("outlet_id", ""),
+                "pp_port":     pp_port,
+                "sw_port":     sw_port,
                 "_search": " ".join([
                     ep.get("name",   ""),
                     type_label,
@@ -267,6 +325,8 @@ class EndpointOverviewWidget(QWidget):
                     wo_info.get("outlet_name", ""),
                     wo_info.get("room_name",   ""),
                     rack_name,
+                    pp_port,
+                    sw_port,
                 ]).lower(),
             })
 
@@ -323,6 +383,8 @@ class EndpointOverviewWidget(QWidget):
             self._table.setItem(row_idx, _COL_OUTLET, _item(row["outlet_name"]))
             self._table.setItem(row_idx, _COL_ROOM,   _item(row["room_name"]))
             self._table.setItem(row_idx, _COL_RACK,   _item(row["rack_name"]))
+            self._table.setItem(row_idx, _COL_PP,     _item(row["pp_port"]))
+            self._table.setItem(row_idx, _COL_SW,     _item(row["sw_port"]))
 
             # Extra data op naam-cel
             name_item = self._table.item(row_idx, _COL_NAME)
@@ -435,7 +497,7 @@ class EndpointOverviewWidget(QWidget):
                     self._data["endpoints"][i] = result
                     break
             self._populate()
-            self.endpoint_changed.emit()
+            self.endpoint_changed.emit(ep_id)
 
     # ------------------------------------------------------------------
     # Publiek

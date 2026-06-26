@@ -4,9 +4,14 @@
 # Role:    G-OPEN-8 — Grondplan export als Word-document (.docx)
 #          Pure Python via python-docx — geen Node.js of externe runtime nodig.
 #          Vereiste: pip install python-docx
-# Version: 2.17.0
+# Version: 2.18.0
 # Author:  Barremans
-# Changes: 2.17.0 — GP-F2: pagina-oriëntatie van de grondplanpagina volgt nu
+# Changes: 2.18.0 — GP-F2 fix: SVG-oriëntatie correct bij ontbrekende PNG.
+#                   Nieuwe helper _svg_ratio(svg_path) leest viewBox/width/height
+#                   uit de SVG. _build_document en _build_all_document gebruiken
+#                   _svg_ratio() als fallback wanneer geen png_path beschikbaar is.
+#                   Zo worden portret-SVGs correct op portret A4 geplaatst.
+#          2.17.0 — GP-F2: pagina-oriëntatie van de grondplanpagina volgt nu
 #                   de afbeelding. Portret-afbeelding (hoogte > breedte) -> portret
 #                   A4-pagina met portret-maxima; landscape blijft landscape.
 #                   Header-tabstop volgt de sectiebreedte. Afmetingen via nieuwe
@@ -247,7 +252,11 @@ def _build_document(floorplan: dict, site: dict, data: dict,
 
     # ── Pagina 1: grondplan PNG ──────────────────────────────────────────
     # GP-F2: pagina-oriëntatie van de grondplanpagina volgt de afbeelding
-    _fp_ratio = _image_ratio(png_path) if (png_path and Path(png_path).exists()) else 1.41
+    # 2.18.0 — Oriëntatie altijd op basis van SVG viewBox (ground truth).
+    # De PNG van FloorplanRenderer is altijd landscape (vaste _IMG_W/_IMG_H)
+    # en mag de oriëntatiebepaling niet overschrijven.
+    from app.services import floorplan_service as _fps
+    _fp_ratio   = _svg_ratio(_fps.get_svg_path(floorplan))
     _fp_portrait = _fp_ratio < 1.0
     sec0 = doc.sections[0]
     if _fp_portrait:
@@ -267,11 +276,11 @@ def _build_document(floorplan: dict, site: dict, data: dict,
     _add_page_numbers(sec0)
 
     if png_path and Path(png_path).exists():
-        # Geen page_break_after — de sectie-paragraaf hieronder zorgt zelf
-        # voor de pagina-wissel. page_break_after=True hier zou een lege
-        # pagina veroorzaken (dubbele break).
+        # Pagina-oriëntatie via SVG-ratio (correct), maar PNG-ratio voor schaling
+        # want de PNG bevat header + legenda en heeft andere aspect-ratio dan SVG
+        _png_ratio = _image_ratio(png_path)
         _add_floorplan_image(doc, png_path, page_break_after=False,
-                             ratio=_fp_ratio, portrait=_fp_portrait)
+                             ratio=_png_ratio, portrait=_fp_portrait)
     else:
         p = doc.add_paragraph()
         p.add_run("(Grondplan afbeelding niet beschikbaar)").italic = True
@@ -383,6 +392,58 @@ def _image_ratio(png_path: str) -> float:
     return 1.41
 
 
+def _svg_ratio(svg_path) -> float:
+    """
+    2.18.0 — Lees breedte/hoogte-verhouding (w/h) uit een SVG-bestand via viewBox
+    of width/height-attributen op het root <svg>-element.
+    Fallback 1.41 (A4 landscape) als de afmetingen niet leesbaar zijn.
+
+    Ondersteund:
+      viewBox="0 0 W H"   → ratio = W / H
+      width="Wpx" height="Hpx"  (of pt, mm, zonder eenheid)
+    """
+    try:
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(str(svg_path))
+        root = tree.getroot()
+        # Namespace-agnostisch: strip {ns}
+        tag = root.tag
+        if "}" in tag:
+            ns = tag.split("}")[0] + "}"
+        else:
+            ns = ""
+
+        # Probeer viewBox eerst (meest betrouwbaar)
+        vb = root.get("viewBox") or root.get(f"{ns}viewBox") or ""
+        if vb:
+            parts = vb.replace(",", " ").split()
+            if len(parts) == 4:
+                w, h = float(parts[2]), float(parts[3])
+                if h > 0:
+                    return w / h
+
+        # Fallback: width/height attributen
+        def _parse_dim(val: str) -> float:
+            if not val:
+                return 0.0
+            val = val.strip().lower()
+            for unit in ("px", "pt", "mm", "cm", "in", "%"):
+                val = val.replace(unit, "")
+            try:
+                return float(val.strip())
+            except ValueError:
+                return 0.0
+
+        w = _parse_dim(root.get("width", ""))
+        h = _parse_dim(root.get("height", ""))
+        if w > 0 and h > 0:
+            return w / h
+
+    except Exception:
+        pass
+    return 1.41
+
+
 def _add_floorplan_image(doc, png_path: str, page_break_after: bool = False,
                          ratio: float | None = None, portrait: bool = False):
     """
@@ -401,7 +462,7 @@ def _add_floorplan_image(doc, png_path: str, page_break_after: bool = False,
     # Beschikbare ruimte na marges en header, afhankelijk van oriëntatie (GP-F2)
     if portrait:
         MAX_W_CM = 19.0   # 21cm - 2cm marges
-        MAX_H_CM = 25.0   # 29.7cm - marges - header - buffer
+        MAX_H_CM = 20.5   # 29.7cm - marges - header - footer - buffer
     else:
         MAX_W_CM = 27.0
         MAX_H_CM = 17.0   # conservatief: 21cm - 2.2cm marges - 1.5cm header - 0.3cm buffer
@@ -1065,9 +1126,12 @@ def _build_all_document(floorplans: list, site: dict, data: dict,
 
         # PNG — page_break_after=False: de break naar de kaartjespagina
         # volgt hieronder via één expliciete _add_page_break.
+        # 2.18.0 — Oriëntatie altijd op basis van SVG (PNG is altijd landscape)
         png = png_paths.get(fp.get("id", ""))
+        from app.services import floorplan_service as _fps2
+        _fp_ratio = _svg_ratio(_fps2.get_svg_path(fp))
         if png and Path(png).exists():
-            _add_floorplan_image(doc, png, page_break_after=False)
+            _add_floorplan_image(doc, png, page_break_after=False, ratio=_fp_ratio)
         _add_page_break(doc)
 
         # Kaartjes

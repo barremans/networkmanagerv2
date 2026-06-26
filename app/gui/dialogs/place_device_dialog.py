@@ -2,9 +2,10 @@
 # Networkmap_Creator
 # File:    app/gui/dialogs/place_device_dialog.py
 # Role:    Device aanmaken + plaatsen in rack (U-positie kiezen)
-# Version: 1.14.0
+# Version: 1.15.0
 # Author:  Barremans
-# Changes: 1.14.0 — F10: MAC-veld gesplitst in MAC (ETH) en MAC (WiFi), pariteit
+# Changes: 1.15.0 — UI-1: setMinimumWidth verhoogd naar 560px
+#          1.14.0 — F10: MAC-veld gesplitst in MAC (ETH) en MAC (WiFi), pariteit
 #                   met device_dialog v1.5.0. Bestaande 'mac' wordt bij bewerken
 #                   ingelezen als ETH (migratie). Bij opslaan worden mac_eth +
 #                   mac_wifi bewaard en 'mac' = ETH (of WiFi als ETH leeg) als
@@ -80,7 +81,7 @@ class PlaceDeviceDialog(QDialog):
             self.setWindowTitle(
                 f"{t('label_device')} — {rack.get('name', '')} toevoegen"
             )
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(560)
         self.setModal(True)
         self._build()
         if self._edit_mode:
