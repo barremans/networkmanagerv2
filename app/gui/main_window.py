@@ -2,8 +2,46 @@
 # Networkmap_Creator
 # File:    app/gui/main_window.py
 # Role:    Hoofdvenster — orkestratie, 3-zone layout, toolbar
-# Version: 1.93.0
+# Version: 1.99.0
 # Author:  Barremans
+# Changes: 1.99.0 — LCK-1: _save_and_backup() vangt LockError op uit
+#                   settings_storage.save_network_data(). Toont leesbare
+#                   foutmelding via QMessageBox (geen crash). Schrijfactie
+#                   wordt afgebroken; backup wordt niet uitgevoerd.
+# Changes: 1.98.0 — IMP-1: CSV template downloaden. Menu-item "CSV eindapparaten
+#                   template downloaden" toegevoegd naast import-item. Handler
+#                   _on_download_endpoints_csv_template(): SaveFileDialog +
+#                   schrijft endpoints_template.csv met kolomkoppen en 2
+#                   voorbeeldrijen. Beschikbaar ook in read-only modus (lezen).
+# Changes: 1.97.0 — IMP-1: bulk CSV-import eindapparaten. Menu-item "CSV
+#                   eindapparaten importeren" toegevoegd in In/Ex-port menu
+#                   (na separator). Handler _on_import_endpoints_csv():
+#                   opent CSV-bestandskiezer, roept
+#                   import_export_service.import_endpoints_from_csv() aan,
+#                   zet _gen_id per endpoint, _save_validated() + changelog
+#                   per aangemaakt eindapparaat, boom refresh, statusmelding
+#                   met toegevoegd/overgeslagen tellers. Waarschuwingen uit
+#                   CSV-parsing worden getoond via QMessageBox (niet-blokkerend
+#                   bij gedeeltelijke import). Read-only modus geblokkeerd.
+# Changes: 1.96.0 — ARW-1.6.0: endpoint_deleted en device_deleted signals gekoppeld.
+#                   _on_review_endpoint_deleted: opslaan (geen validatie) + boom refresh.
+#                   _on_review_device_deleted: zelfde patroon.
+# Changes: 1.95.0 — ARW-1.5.0: focus_ids fix voor MAC Review bewerken.
+#                   _on_review_endpoint_changed en _on_review_device_changed
+#                   ontvangen nu het ID via Signal(str) en geven focus_ids={id}
+#                   door aan _save_validated(). Vermijdt niet-gerelateerde
+#                   validatiewaarschuwingen bij bewerken via MAC Review tab.
+# Changes: 1.94.0 — LOG-1: log_change() consequent aanroepen bij alle CRUD-acties.
+#                   Toegevoegd aan: _edit_wall_outlet, _delete_wall_outlet,
+#                   _on_outlet_duplicate_requested, _on_outlet_endpoint_requested,
+#                   _on_outlet_endpoint_edit_requested, _on_endpoint_edit_requested,
+#                   _on_endpoint_delete_requested, _new_site, _new_company,
+#                   _edit_company, _delete_company, _new_room, _new_rack,
+#                   _new_wall_outlet, _on_edit (site + room branch),
+#                   _on_new_endpoint_global, _edit_rack_direct, _on_delete
+#                   (site + room + outlet branch). Entities: ENTITY_SITE,
+#                   ENTITY_ROOM, ENTITY_RACK, ENTITY_WALL_OUTLET, ENTITY_ENDPOINT,
+#                   ENTITY_COMPANY. Bestaande logs (devices, connections) ongewijzigd.
 # Changes: 1.93.0 — ARW-1.4.0: twee nieuwe signals van ActionReviewWindow gekoppeld:
 #                   device_changed → _on_review_device_changed (opslaan + boom refresh,
 #                   zelfde patroon als _on_review_endpoint_changed maar met ENTITY_DEVICE
@@ -631,6 +669,12 @@ class MainWindow(QMainWindow):
 
         self._menu_inex.addSeparator()
 
+        # IMP-1 -- Bulk CSV-import eindapparaten
+        self._act_import_csv = self._menu_inex.addAction("CSV eindapparaten importeren")
+        self._act_import_csv.triggered.connect(self._on_import_endpoints_csv)
+        self._act_csv_template = self._menu_inex.addAction("CSV eindapparaten — template downloaden")
+        self._act_csv_template.triggered.connect(self._on_download_endpoints_csv_template)
+
         # F1 — Exporteer Afbeelding verwijderd uit menu (v1.69.0)
         # act_export_image = self._menu_inex.addAction(t("menu_export_image"))
         # act_export_image.triggered.connect(self._on_export_image)
@@ -971,6 +1015,7 @@ class MainWindow(QMainWindow):
         # self._act_duplicate.setEnabled(not read_only)
         # self._act_connect.setEnabled(not read_only)
         self._act_import.setEnabled(not read_only)
+        self._act_import_csv.setEnabled(not read_only)
 
         # In read-only mogen exports nog wel
         # (export = lezen, geen datawijziging)
@@ -1809,6 +1854,8 @@ class MainWindow(QMainWindow):
             else:
                 wo.update(result)
             self._save_validated(focus_ids={_ep_id} if _ep_id else None)
+            log_change(action=ACTION_EDIT, entity=ENTITY_WALL_OUTLET,
+                       entity_id=wo["id"], label=wo["name"])
             self._populate_tree()
             # B1 — refresh de WallOutletView als die actief is na bewerken wandpunt
             if isinstance(self._current_view, WallOutletView):
@@ -1977,6 +2024,8 @@ class MainWindow(QMainWindow):
             # Eindapparaten uit dialoog synchroniseren
             self._data["endpoints"] = dlg.get_endpoints_result()
             self._save_and_backup()
+            log_change(action=ACTION_CREATE, entity=ENTITY_WALL_OUTLET,
+                       entity_id=result["id"], label=result["name"])
             self._populate_tree()
             if isinstance(self._current_view, WallOutletView):
                 self._current_view.refresh(self._data)
@@ -2013,6 +2062,9 @@ class MainWindow(QMainWindow):
                             self._save_validated(
                                 focus_ids={_ep_id} if _ep_id else None
                             )
+                            log_change(action=ACTION_EDIT, entity=ENTITY_WALL_OUTLET,
+                                       entity_id=outlet_id, label=wo.get("name", outlet_id),
+                                       details={"ep_koppeling": _ep_id or ""})
                             self._populate_tree()
                             if isinstance(self._current_view, WallOutletView):
                                 self._current_view.refresh(self._data)
@@ -2047,6 +2099,8 @@ class MainWindow(QMainWindow):
             result = dlg.get_result()
             ep.update(result)
             self._save_validated(focus_ids={ep_id})
+            log_change(action=ACTION_EDIT, entity=ENTITY_ENDPOINT,
+                       entity_id=ep_id, label=ep.get("name", ep_id))
             if isinstance(self._current_view, WallOutletView):
                 self._current_view.refresh(self._data)
             self.set_status(f"✓  🖥  '{ep.get('name', '')}' bijgewerkt.")
@@ -2143,6 +2197,8 @@ class MainWindow(QMainWindow):
             result = dlg.get_result()
             ep.update(result)
             self._save_validated(focus_ids={ep_id})
+            log_change(action=ACTION_EDIT, entity=ENTITY_ENDPOINT,
+                       entity_id=ep_id, label=ep.get("name", ep_id))
             if isinstance(self._current_view, WallOutletView):
                 self._current_view.refresh(self._data)
             self.set_status(f"✓  🖥  '{ep.get('name', '')}' bijgewerkt.")
@@ -2180,6 +2236,8 @@ class MainWindow(QMainWindow):
             c for c in self._data.get("connections", [])
             if not (c.get("from_id") == ep_id or c.get("to_id") == ep_id)
         ]
+        log_change(action=ACTION_DELETE, entity=ENTITY_ENDPOINT,
+                   entity_id=ep_id, label=ep.get("name", ep_id))
         self._save_and_backup()
         self._populate_tree()
         if isinstance(self._current_view, WallOutletView):
@@ -2213,6 +2271,8 @@ class MainWindow(QMainWindow):
                 c for c in self._data.get("connections", [])
                 if not (c.get("from_id") == data["id"] or c.get("to_id") == data["id"])
             ]
+            log_change(action=ACTION_DELETE, entity=ENTITY_WALL_OUTLET,
+                       entity_id=data["id"], label=wo_name or data["id"])
             self._save_and_backup()
             self._populate_tree()
             if isinstance(self._current_view, WallOutletView):
@@ -3795,6 +3855,8 @@ class MainWindow(QMainWindow):
             if target is not None:
                 target.setdefault("sites", []).append(obj)
                 self._save_and_backup()
+                log_change(action=ACTION_CREATE, entity=ENTITY_SITE,
+                           entity_id=obj["id"], label=obj["name"])
                 self._populate_tree()
                 self.set_status(f"✓  {t('label_site')} '{obj['name']}' aangemaakt.")
 
@@ -3807,6 +3869,8 @@ class MainWindow(QMainWindow):
             obj["sites"] = []
             self._data.setdefault("companies", []).append(obj)
             self._save_and_backup()
+            log_change(action=ACTION_CREATE, entity=ENTITY_COMPANY,
+                       entity_id=obj["id"], label=obj["name"])
             self._populate_tree()
             self.set_status(f"✓  {t('label_company')} '{obj['name']}' {t('msg_company_created')}")
 
@@ -3820,6 +3884,8 @@ class MainWindow(QMainWindow):
         if dlg.exec() and dlg.get_result():
             company.update(dlg.get_result())
             self._save_and_backup()
+            log_change(action=ACTION_EDIT, entity=ENTITY_COMPANY,
+                       entity_id=data["id"], label=company["name"])
             self._populate_tree()
             self.set_status(f"✓  {t('label_company')} '{company['name']}' {t('msg_company_updated')}")
 
@@ -3840,6 +3906,8 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
         delete_company(self._data, data["id"])
+        log_change(action=ACTION_DELETE, entity=ENTITY_COMPANY,
+                   entity_id=data["id"], label=company_name)
         self._save_and_backup()
         self._populate_tree()
         self.set_status(f"✓  {t('label_company')} '{company_name}' {t('msg_company_deleted')}")
@@ -3853,6 +3921,8 @@ class MainWindow(QMainWindow):
             if site:
                 site.setdefault("rooms", []).append(obj)
                 self._save_and_backup()
+                log_change(action=ACTION_CREATE, entity=ENTITY_ROOM,
+                           entity_id=obj["id"], label=obj["name"])
                 self._populate_tree()
                 self.set_status(f"✓  {t('label_room')} '{obj['name']}' aangemaakt.")
 
@@ -3865,6 +3935,8 @@ class MainWindow(QMainWindow):
             if room:
                 room.setdefault("racks", []).append(obj)
                 self._save_and_backup()
+                log_change(action=ACTION_CREATE, entity=ENTITY_RACK,
+                           entity_id=obj["id"], label=obj["name"])
                 self._populate_tree()
                 self.set_status(f"✓  {t('label_rack')} '{obj['name']}' aangemaakt.")
 
@@ -3889,6 +3961,8 @@ class MainWindow(QMainWindow):
                 if vlan_val and obj.get("id"):
                     self._propagate_vlan_after_save(obj["id"], "wall_outlet", vlan_val)
                 self._save_and_backup()
+                log_change(action=ACTION_CREATE, entity=ENTITY_WALL_OUTLET,
+                           entity_id=obj["id"], label=obj["name"])
                 self._populate_tree()
                 self.set_status(f"✓  {t('label_wall_outlet')} '{obj['name']}' aangemaakt.")
 
@@ -3911,6 +3985,8 @@ class MainWindow(QMainWindow):
             if dlg.exec() and dlg.get_result():
                 site.update(dlg.get_result())
                 self._save_and_backup()
+                log_change(action=ACTION_EDIT, entity=ENTITY_SITE,
+                           entity_id=data["id"], label=site["name"])
                 self._populate_tree()
                 self._select_tree_item_by_id(data["id"])
                 self.set_status(f"✓  {t('label_site')} '{site['name']}' bijgewerkt.")
@@ -3923,6 +3999,8 @@ class MainWindow(QMainWindow):
             if dlg.exec() and dlg.get_result():
                 room.update(dlg.get_result())
                 self._save_and_backup()
+                log_change(action=ACTION_EDIT, entity=ENTITY_ROOM,
+                           entity_id=data["id"], label=room["name"])
                 self._populate_tree()
                 self._select_tree_item_by_id(data["id"])
                 self.set_status(f"✓  {t('label_room')} '{room['name']}' bijgewerkt.")
@@ -3953,52 +4031,10 @@ class MainWindow(QMainWindow):
                     e for e in self._data.get("endpoints", []) if e["id"] != new_ep["id"]
                 ]
                 return
+            log_change(action=ACTION_CREATE, entity=ENTITY_ENDPOINT,
+                       entity_id=new_ep["id"], label=new_ep["name"])
             self._populate_tree()
             self.set_status(f"✓  {t('label_endpoint')} '{new_ep['name']}' aangemaakt.")
-        data = self._selected_tree_data()
-        if not data:
-            self.set_status(t("err_no_selection"))
-            return
-        item_type = data.get("type")
-
-        if item_type == _TYPE_COMPANY:
-            self._edit_company(data)
-
-        elif item_type == _TYPE_SITE:
-            site = self._find_site(data["id"])
-            if not site:
-                return
-            dlg = SiteDialog(parent=self, site=site)
-            if dlg.exec() and dlg.get_result():
-                site.update(dlg.get_result())
-                self._save_and_backup()
-                self._populate_tree()
-                self._select_tree_item_by_id(data["id"])
-                self.set_status(f"✓  {t('label_site')} '{site['name']}' bijgewerkt.")
-
-        elif item_type == _TYPE_ROOM:
-            room = self._find_room(data["id"])
-            if not room:
-                return
-            dlg = RoomDialog(parent=self, room=room, site_id=data["site_id"])
-            if dlg.exec() and dlg.get_result():
-                room.update(dlg.get_result())
-                self._save_and_backup()
-                self._populate_tree()
-                self._select_tree_item_by_id(data["id"])
-                self.set_status(f"✓  {t('label_room')} '{room['name']}' bijgewerkt.")
-
-        elif item_type == _TYPE_RACK:
-            from PySide6.QtWidgets import QMenu
-            menu = QMenu(self)
-            menu.addAction(t('edit_rack_self'),
-                           lambda: self._edit_rack_direct(data))
-            menu.addAction(t('edit_device_in_rack'),
-                           self._on_edit_device)
-            menu.exec(self.cursor().pos())
-
-        else:
-            self.set_status(t("err_select_for_edit"))
 
     def _edit_rack_direct(self, data: dict):
         rack = self._find_rack(data["id"])
@@ -4033,6 +4069,10 @@ class MainWindow(QMainWindow):
                     rack.update(result)
                     new_room.setdefault("racks", []).append(rack)
                     self._save_and_backup()
+                    log_change(action=ACTION_EDIT, entity=ENTITY_RACK,
+                               entity_id=rack["id"],
+                               label=rack["name"],
+                               details={"verplaatst_naar": new_room.get("name", new_room_id)})
                     self._populate_tree()
                     self._select_tree_item_by_id(data["id"])
                     self.set_status(
@@ -4044,6 +4084,8 @@ class MainWindow(QMainWindow):
             # Geen verplaatsing — gewoon bijwerken
             rack.update(result)
             self._save_and_backup()
+            log_change(action=ACTION_EDIT, entity=ENTITY_RACK,
+                       entity_id=rack["id"], label=rack["name"])
             self._populate_tree()
             self._select_tree_item_by_id(data["id"])
             if isinstance(self._current_view, RackView):
@@ -4075,21 +4117,33 @@ class MainWindow(QMainWindow):
 
         if item_type == _TYPE_SITE:
             company = get_company_for_site(self._data, data["id"])
+            _site_name = next(
+                (s["name"] for s in (company.get("sites", []) if company else [])
+                 if s["id"] == data["id"]), data["id"]
+            )
             if company:
                 company["sites"] = [
                     s for s in company.get("sites", []) if s["id"] != data["id"]
                 ]
+            log_change(action=ACTION_DELETE, entity=ENTITY_SITE,
+                       entity_id=data["id"], label=_site_name)
             self._save_and_backup()
             self._populate_tree()
             self.set_status(f"✓  {t('label_site')} verwijderd.")
 
         elif item_type == _TYPE_ROOM:
             site = self._find_site(data["site_id"])
+            _room_name = next(
+                (r["name"] for r in (site.get("rooms", []) if site else [])
+                 if r["id"] == data["id"]), data["id"]
+            )
             if site:
                 site["rooms"] = [r for r in site.get("rooms", []) if r["id"] != data["id"]]
-                self._save_and_backup()
-                self._populate_tree()
-                self.set_status(f"✓  {t('label_room')} verwijderd.")
+            log_change(action=ACTION_DELETE, entity=ENTITY_ROOM,
+                       entity_id=data["id"], label=_room_name)
+            self._save_and_backup()
+            self._populate_tree()
+            self.set_status(f"✓  {t('label_room')} verwijderd.")
 
         elif item_type == _TYPE_RACK:
             from PySide6.QtWidgets import QMenu
@@ -4104,6 +4158,10 @@ class MainWindow(QMainWindow):
         elif item_type == _TYPE_OUTLET:
             room = self._find_room(data["room_id"])
             if room:
+                _wo_name = next(
+                    (wo["name"] for wo in room.get("wall_outlets", [])
+                     if wo["id"] == data["id"]), data["id"]
+                )
                 room["wall_outlets"] = [
                     wo for wo in room.get("wall_outlets", []) if wo["id"] != data["id"]
                 ]
@@ -4111,6 +4169,8 @@ class MainWindow(QMainWindow):
                     c for c in self._data.get("connections", [])
                     if not (c.get("from_id") == data["id"] or c.get("to_id") == data["id"])
                 ]
+                log_change(action=ACTION_DELETE, entity=ENTITY_WALL_OUTLET,
+                           entity_id=data["id"], label=_wo_name)
                 self._save_and_backup()
                 self._populate_tree()
                 self.set_status(f"✓  {t('label_wall_outlet')} verwijderd.")
@@ -5196,6 +5256,149 @@ class MainWindow(QMainWindow):
             log_error("Import fout", e)
             self.set_status(f"⚠  {t('msg_import_fail')}")
 
+
+    # ------------------------------------------------------------------
+    # IMP-1 -- Bulk CSV-import eindapparaten
+    # ------------------------------------------------------------------
+
+    def _on_import_endpoints_csv(self):
+        """
+        IMP-1 -- Importeer eindapparaten vanuit een CSV-bestand.
+
+        Stappen:
+          1. Bestandskiezer (CSV)
+          2. import_endpoints_from_csv() -- parsen + duplicaatdetectie
+          3. Waarschuwingen tonen (niet-blokkerend als er ook imports zijn)
+          4. Per endpoint: _gen_id + toevoegen aan self._data["endpoints"]
+          5. Validatie via _save_validated() (geen focus_ids -- bulk)
+          6. Changelog per aangemaakt eindapparaat
+          7. Boom refresh + statusmelding
+        """
+        import os
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        if settings_storage.get_read_only_mode():
+            return
+
+        last = get_last_folder("import_csv_ep") or ""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "CSV eindapparaten importeren",
+            last or "",
+            "CSV bestanden (*.csv);;Alle bestanden (*.*)",
+        )
+        if not filepath:
+            return
+
+        set_last_folder("import_csv_ep", os.path.dirname(filepath))
+
+        try:
+            new_eps, parse_warnings = import_export_service.import_endpoints_from_csv(
+                filepath, self._data
+            )
+        except Exception as exc:
+            log_error("CSV-import eindapparaten fout", exc)
+            self.set_status("\u26a0  CSV-import mislukt.")
+            return
+
+        # Waarschuwingen tonen als er problemen waren
+        if parse_warnings:
+            warn_text = "\n".join(f"  \u2022 {w}" for w in parse_warnings)
+            if not new_eps:
+                # Niets te importeren
+                QMessageBox.warning(
+                    self,
+                    "CSV eindapparaten importeren",
+                    f"Geen eindapparaten gevonden om te importeren.\n\n{warn_text}",
+                )
+                return
+            # Gedeeltelijke import -- tonen maar doorgaan
+            reply = QMessageBox.warning(
+                self,
+                "CSV eindapparaten importeren",
+                f"{len(new_eps)} eindapparaten klaar voor import.\n"
+                f"Volgende rijen worden overgeslagen:\n\n{warn_text}\n\n"
+                "Toch importeren?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        if not new_eps:
+            QMessageBox.information(
+                self,
+                "CSV eindapparaten importeren",
+                "Geen nieuwe eindapparaten gevonden in de CSV.",
+            )
+            return
+
+        # IDs toewijzen en toevoegen
+        added_ids: list[str] = []
+        for ep in new_eps:
+            ep["id"] = self._gen_id("ep")
+            self._data.setdefault("endpoints", []).append(ep)
+            added_ids.append(ep["id"])
+
+        # Validatie + opslaan (geen focus_ids -- bulk, volledige check)
+        if not self._save_validated(focus_ids=None):
+            # Gebruiker annuleerde -- terugrol alle zojuist toegevoegde EPs
+            added_set = set(added_ids)
+            self._data["endpoints"] = [
+                e for e in self._data.get("endpoints", [])
+                if e["id"] not in added_set
+            ]
+            return
+
+        # Changelog per aangemaakt eindapparaat
+        for ep in new_eps:
+            log_change(
+                action=ACTION_CREATE,
+                entity=ENTITY_ENDPOINT,
+                entity_id=ep["id"],
+                label=ep["name"],
+                details={"bron": "CSV bulk import"},
+            )
+
+        self._populate_tree()
+        skipped = len(parse_warnings)
+        self.set_status(
+            f"\u2713  CSV-import: {len(new_eps)} eindapparaten toegevoegd"
+            + (f", {skipped} rij(en) overgeslagen." if skipped else ".")
+        )
+
+    def _on_download_endpoints_csv_template(self):
+        """
+        IMP-1 -- Download een CSV-template voor bulk eindapparaten import.
+        Schrijft endpoints_template.csv met kolomkoppen + 2 voorbeeldrijen.
+        Beschikbaar ook in read-only modus (lezen, geen datawijziging).
+        """
+        import os
+        from PySide6.QtWidgets import QFileDialog
+
+        last = get_last_folder("import_csv_ep") or ""
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "CSV template opslaan",
+            os.path.join(last or "", "endpoints_template.csv"),
+            "CSV bestanden (*.csv);;Alle bestanden (*.*)",
+        )
+        if not filepath:
+            return
+
+        lines = [
+            "name;type;ip;mac_eth;mac_wifi;brand;model;serial;location;notes;url",
+            "PC-VOORBEELD-01;workstation;192.168.1.101;AA:BB:CC:DD:EE:01;;Dell;Optiplex 7010;SN12345;Bureau Jan;;",
+            "PRINTER-01;printer;192.168.1.200;;;HP;LaserJet Pro M404n;SN67890;Verdieping 1;;https://printer.local",
+        ]
+        try:
+            with open(filepath, "w", encoding="utf-8-sig", newline="\r\n") as fh:
+                fh.write("\r\n".join(lines) + "\r\n")
+            set_last_folder("import_csv_ep", os.path.dirname(filepath))
+            self.set_status(f"\u2713  CSV-template opgeslagen: {os.path.basename(filepath)}")
+        except Exception as exc:
+            log_error("CSV-template opslaan mislukt", exc)
+            self.set_status("\u26a0  CSV-template opslaan mislukt.")
+
     # ------------------------------------------------------------------
     # Zoeken
     # ------------------------------------------------------------------
@@ -5246,21 +5449,40 @@ class MainWindow(QMainWindow):
             # ARW-1.4.0 — device bewerken + uitsluiten via MAC Review
             self._review_win.device_changed.connect(self._on_review_device_changed)
             self._review_win.exclusions_changed.connect(self._on_review_exclusions_changed)
+            # ARW-1.6.0 — verwijderen eindapparaat / device
+            self._review_win.endpoint_deleted.connect(self._on_review_endpoint_deleted)
+            self._review_win.device_deleted.connect(self._on_review_device_deleted)
         else:
             self._review_win.update_data(self._data)
         self._review_win.show()
         self._review_win.raise_()
         self._review_win.activateWindow()
 
-    def _on_review_endpoint_changed(self):
-        """MW-1 -- Na bewerken eindapparaat via MAC Review tab: opslaan + boom refresh."""
-        self._save_validated()
+    def _on_review_endpoint_changed(self, ep_id: str = ""):
+        """ARW-1.5.0 — Na bewerken eindapparaat via MAC Review: opslaan met focus_ids."""
+        self._save_validated(focus_ids={ep_id} if ep_id else None)
         self._populate_tree()
 
-    def _on_review_device_changed(self):
-        """ARW-1.4.0 -- Na bewerken device via MAC Review tab: opslaan + boom refresh."""
-        self._save_validated()
+    def _on_review_device_changed(self, dev_id: str = ""):
+        """ARW-1.5.0 — Na bewerken device via MAC Review: opslaan met focus_ids."""
+        self._save_validated(focus_ids={dev_id} if dev_id else None)
         self._populate_tree()
+
+    def _on_review_endpoint_deleted(self, ep_id: str = ""):
+        """ARW-1.6.0 — Na verwijderen eindapparaat via reviewvenster: opslaan + boom refresh."""
+        self._save_and_backup()
+        self._populate_tree()
+        if isinstance(self._current_view, WallOutletView):
+            self._current_view.refresh(self._data)
+        self.set_status(f"✓  Eindapparaat verwijderd.")
+
+    def _on_review_device_deleted(self, dev_id: str = ""):
+        """ARW-1.6.0 — Na verwijderen device via reviewvenster: opslaan + boom refresh."""
+        self._save_and_backup()
+        self._populate_tree()
+        if isinstance(self._current_view, RackView):
+            self._current_view.refresh(self._data)
+        self.set_status(f"✓  Device verwijderd.")
 
     def _on_review_exclusions_changed(self):
         """ARW-1.4.0 -- Na uitsluiten/opheffen via MAC Review: opslaan (geen validatie nodig)."""
@@ -5577,6 +5799,17 @@ class MainWindow(QMainWindow):
             except OSError:
                 pass
             log_info("network_data opgeslagen")
+        except settings_storage.LockError as e:
+            # LCK-1 — Bestand vergrendeld door andere gebruiker/machine
+            from PySide6.QtWidgets import QMessageBox
+            log_warning(f"Opslaan geblokkeerd door lock: {e}")
+            QMessageBox.warning(
+                self,
+                "Bestand vergrendeld",
+                f"Opslaan is niet mogelijk:\n\n{e}\n\n"
+                "Uw wijzigingen zijn NIET opgeslagen.",
+            )
+            return
         except Exception as e:
             log_error("Opslaan mislukt", e)
             self.set_status(f"⚠  {t('err_save_failed')}")

@@ -2,9 +2,13 @@
 # Networkmap_Creator
 # File:    app/helpers/settings_storage.py
 # Role:    Centrale JSON data toegang — laden, opslaan, validatie
-# Version: 1.19.0
+# Version: 1.20.0
 # Author:  Barremans
-# Changes: 1.19.0 - K-CABLE: _DEFAULT_CABLE_TYPES, load/save/get_cable_type_label.
+# Changes: 1.20.0 — LCK-1: save_network_data() gebruikt lock_service voor
+#                   file locking. acquire_lock() vóór schrijven,
+#                   release_lock() in finally-blok. Bij bezette lock:
+#                   LockError opgooien met leesbare foutmelding.
+#          1.19.0 - K-CABLE: _DEFAULT_CABLE_TYPES, load/save/get_cable_type_label.
 #          1.18.0 — K3: get_changelog_path() toegevoegd.
 #          1.17.0 — GUID-normalisatie: tenant_id/client_id worden lowercase
 #                   bewaard én gelezen. MSAL valideert de aud-claim
@@ -652,10 +656,33 @@ def load_network_data() -> dict:
     return data
 
 
+class LockError(RuntimeError):
+    """
+    LCK-1 — Wordt gegooid als save_network_data() de schrijflock niet kan
+    verkrijgen omdat een andere gebruiker/machine het bestand vergrendeld heeft.
+    De message bevat een leesbare NL-foutmelding voor de UI.
+    """
+
+
 def save_network_data(data: dict) -> bool:
-    """F3 — Slaat network_data op naar het actieve pad (lokaal of netwerk)."""
+    """
+    F3    — Slaat network_data op naar het actieve pad (lokaal of netwerk).
+    LCK-1 — Beschermt het schrijven via een .lock-bestand zodat twee
+              gelijktijdige gebruikers elkaars data niet overschrijven.
+
+    Gooit LockError als de lock niet verkregen kan worden.
+    Geeft True terug bij succes, False bij een schrijffout.
+    """
+    from app.services import lock_service
+
     path = get_network_data_path()
-    return _save_json(path, data)
+    ok, err = lock_service.acquire_lock(path)
+    if not ok:
+        raise LockError(err)
+    try:
+        return _save_json(path, data)
+    finally:
+        lock_service.release_lock(path)
 
 
 # ---------------------------------------------------------------------------

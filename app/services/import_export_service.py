@@ -2,8 +2,20 @@
 # Networkmap_Creator
 # File:    app/services/import_export_service.py
 # Role:    JSON import en export — GEEN Qt imports
-# Version: 2.3.0
+# Version: 2.4.1
 # Author:  Barremans
+# Changes: 2.4.1 — IMP-1 fix: existing_names.add() verwijderd uit CSV-importlus.
+#                  Zonder fix werden CSV-interne duplicaten gevangen door de
+#                  "bestaat al" branch i.p.v. de "Dubbele naam in CSV" branch.
+#                  Beide waarschuwingen zijn nu onderscheidbaar.
+# Changes: 2.4.0 — IMP-1: import_endpoints_from_csv() toegevoegd.
+#                  Bulk CSV-import van eindapparaten (name, type, ip,
+#                  mac_eth, mac_wifi, brand, model, serial, location,
+#                  notes, url). Auto-detect scheidingsteken (; of ,),
+#                  encoding UTF-8 met BOM-fallback naar latin-1.
+#                  Duplicaatdetectie op naam (case-insensitive) t.o.v.
+#                  bestaande endpoints. Retourneert (new_eps, warnings)
+#                  zonder Qt-imports. IDs worden door de aanroeper gezet.
 # Changes: 2.3.0 — K1: write_export_info() toegevoegd — export_info.txt
 #                  wordt aangemaakt bij elke succesvolle map-export
 #                  (export_to_dir + export_company_to_dir). Aanroeper
@@ -630,6 +642,162 @@ def import_merge(
 
     return merged, "", {"added": added, "skipped": skipped, "migrated": migrated_v1}
 
+
+
+
+# ------------------------------------------------------------------
+# IMP-1 -- Bulk CSV-import eindapparaten
+# ------------------------------------------------------------------
+
+# Toegestane kolomnamen in CSV (hoofdletterongevoelig)
+_CSV_COLUMNS_REQUIRED = {"name"}
+_CSV_COLUMNS_OPTIONAL = {
+    "type", "ip", "mac_eth", "mac_wifi",
+    "brand", "model", "serial",
+    "location", "notes", "url",
+}
+_CSV_ALL_COLUMNS = _CSV_COLUMNS_REQUIRED | _CSV_COLUMNS_OPTIONAL
+
+
+def import_endpoints_from_csv(
+    filepath: str,
+    current_data: dict,
+) -> tuple[list[dict], list[str]]:
+    """
+    IMP-1 -- Importeer eindapparaten vanuit een CSV-bestand.
+
+    CSV-formaat:
+      - Eerste rij      : kolomkoppen (hoofdletterongevoelig)
+      - Verplichte kolom: name
+      - Optionele kolommen: type, ip, mac_eth, mac_wifi, brand, model,
+                            serial, location, notes, url
+      - Scheidingsteken : auto-detect (';' heeft voorrang boven ',')
+      - Encoding        : UTF-8 (met BOM) -> fallback latin-1
+
+    Duplicaatdetectie:
+      - Rijen waarvan de naam (case-insensitive getrimd) overeenkomt
+        met een bestaand eindapparaat worden overgeslagen met een
+        waarschuwing. Dubbele namen binnen de CSV zelf worden ook
+        gedetecteerd.
+
+    Retourneert:
+        (new_eps, warnings)
+        new_eps  : lijst van endpoint-dicts ZONDER 'id' (aanroeper zet ID)
+        warnings : lijst van waarschuwingsstrings (lege rijen, duplicaten,
+                   onbekende kolommen, ontbrekende naam, enz.)
+
+    Geen Qt-imports. Geen reparatie van bestaande data.
+    """
+    import csv
+    import io
+
+    warnings: list[str] = []
+    new_eps:  list[dict] = []
+
+    # Bestaande endpointnamen (case-insensitive)
+    existing_names: set[str] = {
+        ep.get("name", "").strip().lower()
+        for ep in current_data.get("endpoints", [])
+        if ep.get("name", "").strip()
+    }
+
+    # Bestand inlezen met encoding-fallback
+    raw_text: str = ""
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            with open(filepath, encoding=enc, newline="") as fh:
+                raw_text = fh.read()
+            break
+        except (UnicodeDecodeError, OSError):
+            continue
+    if not raw_text:
+        return [], [f"Bestand kon niet gelezen worden: {filepath}"]
+
+    # Scheidingsteken auto-detect: tel ';' vs ',' in eerste rij
+    first_line = raw_text.split("\n")[0] if "\n" in raw_text else raw_text
+    delimiter  = ";" if first_line.count(";") >= first_line.count(",") else ","
+
+    reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
+
+    if reader.fieldnames is None:
+        return [], ["CSV is leeg of heeft geen kolomkoppen."]
+
+    fieldnames_norm: dict[str, str] = {
+        fn.strip().lower(): fn for fn in reader.fieldnames if fn
+    }
+
+    if "name" not in fieldnames_norm:
+        cols = ", ".join(fieldnames_norm.keys())
+        return [], [
+            f"Verplichte kolom 'name' ontbreekt. "
+            f"Gevonden kolommen: {cols}"
+        ]
+
+    unknown_cols = set(fieldnames_norm.keys()) - _CSV_ALL_COLUMNS
+    if unknown_cols:
+        warnings.append(
+            "Onbekende kolommen worden genegeerd: "
+            + ", ".join(sorted(unknown_cols))
+        )
+
+    seen_names_in_csv: set[str] = set()
+
+    for row_nr, row in enumerate(reader, start=2):
+        row_norm: dict[str, str] = {
+            k.strip().lower(): (v or "").strip()
+            for k, v in row.items()
+            if k is not None
+        }
+
+        name = row_norm.get("name", "").strip()
+
+        # Volledig lege rij
+        if not name and not any(row_norm.values()):
+            continue
+
+        if not name:
+            warnings.append(f"Rij {row_nr}: 'name' is leeg -- rij overgeslagen.")
+            continue
+
+        name_lower = name.lower()
+
+        # Duplicaat t.o.v. bestaande endpoints
+        if name_lower in existing_names:
+            warnings.append(
+                f"Rij {row_nr}: Eindapparaat '{name}' bestaat al -- rij overgeslagen."
+            )
+            continue
+
+        # Duplicaat binnen de CSV zelf
+        if name_lower in seen_names_in_csv:
+            warnings.append(
+                f"Rij {row_nr}: Dubbele naam '{name}' in CSV -- rij overgeslagen."
+            )
+            continue
+
+        seen_names_in_csv.add(name_lower)
+
+        mac_eth  = row_norm.get("mac_eth",  "")
+        mac_wifi = row_norm.get("mac_wifi", "")
+
+        ep: dict = {
+            # 'id' wordt NIET gezet -- aanroeper (_on_import_endpoints_csv) zet _gen_id
+            "name":     name,
+            "type":     row_norm.get("type",     ""),
+            "ip":       row_norm.get("ip",       ""),
+            "mac_eth":  mac_eth,
+            "mac_wifi": mac_wifi,
+            "mac":      mac_eth or mac_wifi,   # compat-veld
+            "brand":    row_norm.get("brand",    ""),
+            "model":    row_norm.get("model",    ""),
+            "serial":   row_norm.get("serial",   ""),
+            "location": row_norm.get("location", ""),
+            "url":      row_norm.get("url",      ""),
+            "notes":    row_norm.get("notes",    ""),
+        }
+        new_eps.append(ep)
+
+    return new_eps, warnings
 
 # ------------------------------------------------------------------
 # Helpers
